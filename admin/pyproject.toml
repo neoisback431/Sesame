@@ -1,11 +1,33 @@
 [project]
 name = "sesame-admin"
 version = "0.1.0"
-description = "Interface web d'administration Sesame : applis, descripteurs, habilitations, comptes."
+description = "Interface web d'administration Sesame : applis, habilitations, registre des comptes, identifiants applicatifs."
 license = "Apache-2.0"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "itsdangerous>=2.2",
+    "authlib>=1.3",
+    "httpx>=0.27",
+    "asyncpg>=0.29",
+    "pyyaml>=6",
+    "jsonschema>=4.21",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sesame_admin"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

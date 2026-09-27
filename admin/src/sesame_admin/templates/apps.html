@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Applications{% endblock %}
+{% block content %}
+<h1>Applications</h1>
+<p class="muted">Les descripteurs sont des fichiers versionnés (dossier <code>descriptors/</code>), modifiés par merge request.</p>
+<table>
+  <thead><tr><th>Application</th><th>Hôte public</th><th>Habilitations</th><th>Comptes</th></tr></thead>
+  <tbody>
+  {% for app, counts in rows %}
+    <tr>
+      <td><a href="/apps/{{ app.id }}">{{ app.name }}</a><br><span class="muted">{{ app.id }}</span></td>
+      <td>{{ app.public_host }}</td>
+      <td>{% for g in app.groups %}<code>{{ g }}</code> {% endfor %}{% for u in app.users %}<code>{{ u }}</code> {% endfor %}</td>
+      <td>{{ counts.get('active', 0) }} actif(s){% if counts.get('failed') %}, <strong>{{ counts['failed'] }} en échec</strong>{% endif %}{% if counts.get('disabled') %}, {{ counts['disabled'] }} désactivé(s){% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4">Aucun descripteur.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

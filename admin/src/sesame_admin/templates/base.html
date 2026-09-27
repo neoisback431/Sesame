@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Administration{% endblock %} · Sesame</title>
+  <style>
+    body{font-family:system-ui,sans-serif;margin:0;background:#f6f7f9;color:#1d2330}
+    header{background:#1d2330;color:#fff;padding:12px 24px;display:flex;justify-content:space-between;align-items:center}
+    header a{color:#fff;text-decoration:none}
+    main{max-width:1000px;margin:32px auto;padding:0 16px}
+    table{border-collapse:collapse;width:100%;background:#fff}
+    th,td{border-bottom:1px solid #e3e6ec;padding:8px 10px;text-align:left;vertical-align:top}
+    th{background:#eef0f4;font-weight:600}
+    .card{background:#fff;border:1px solid #d9dde5;border-radius:8px;padding:16px;margin:16px 0}
+    .muted{color:#5b6475;font-size:.9em}
+    .flash{padding:10px 14px;border-radius:6px;margin-bottom:16px}
+    .flash.ok{background:#e5f5ea;border:1px solid #9fd4ae}.flash.error{background:#fdecec;border:1px solid #efa6a6}
+    .status{padding:2px 8px;border-radius:10px;font-size:.85em}
+    .status.active{background:#e5f5ea}.status.failed{background:#fdecec}.status.disabled{background:#eceef2}
+    label{display:block;margin:8px 0 4px}input[type=text],input[type=password]{width:100%;max-width:360px;padding:6px}
+    form.inline{display:inline}button{padding:4px 12px}pre{background:#f0f2f5;padding:12px;overflow:auto}
+  </style>
+</head>
+<body>
+<header>
+  <a href="/"><strong>Sesame</strong> · Administration</a>
+  {% if admin %}
+  <form class="inline" method="post" action="/logout">
+    <span class="muted" style="color:#c9cfdb">{{ admin.display_name or admin.user_key }}</span>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit">Se déconnecter</button>
+  </form>
+  {% endif %}
+</header>
+<main>
+  {% if flash %}<div class="flash {{ flash.kind }}" role="status">{{ flash.text }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

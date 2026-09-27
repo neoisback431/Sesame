@@ -14,6 +14,10 @@ pub enum AuditAction {
     AppSessionExpired,
     AppLogout,
     AccountStatusChanged,
+    /// Émis par l'UI d'administration.
+    AdminLogin,
+    CredentialWritten,
+    CredentialDeleted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -34,6 +38,8 @@ pub struct AuditEvent {
     /// `issuer` + `subject` de l'utilisateur, si connu.
     pub actor: Option<String>,
     pub app_id: Option<String>,
+    /// Compte visé quand il diffère de l'acteur (actions d'administration).
+    pub target_user: Option<String>,
     /// Identifiant de corrélation (trace / requête).
     pub correlation_id: Option<String>,
     pub reason: Option<String>,
@@ -47,6 +53,7 @@ impl AuditEvent {
             outcome,
             actor: None,
             app_id: None,
+            target_user: None,
             correlation_id: None,
             reason: None,
         }

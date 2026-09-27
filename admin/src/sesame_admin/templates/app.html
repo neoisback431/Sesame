@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ app.name }}{% endblock %}
+{% block content %}
+<p><a href="/">← Applications</a></p>
+<h1>{{ app.name }}</h1>
+<p class="muted">{{ app.description or "" }} — <code>{{ app.id }}</code>, révision {{ app.revision }}, <code>{{ app.public_host }}</code></p>
+
+<h2>Comptes</h2>
+<table>
+  <thead><tr><th>Utilisateur</th><th>État</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
+  <tbody>
+  {% for a in accounts %}
+    <tr>
+      <td><code>{{ a.user_key }}</code></td>
+      <td><span class="status {{ a.status }}">{{ {"active": "actif", "failed": "en échec", "disabled": "désactivé"}[a.status] }}</span>
+        {% if a.status_reason %}<br><span class="muted">{{ a.status_reason }}</span>{% endif %}</td>
+      <td>{{ a.last_login_at.strftime("%Y-%m-%d %H:%M") if a.last_login_at else "—" }}</td>
+      <td>
+        {% if a.status == "active" %}
+        <form class="inline" method="post" action="/apps/{{ app.id }}/accounts/{{ a.user_key }}/status">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="status" value="disabled">
+          <button type="submit">Désactiver</button></form>
+        {% else %}
+        <form class="inline" method="post" action="/apps/{{ app.id }}/accounts/{{ a.user_key }}/status">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="status" value="active">
+          <button type="submit">Réactiver</button></form>
+        {% endif %}
+        <form class="inline" method="post" action="/apps/{{ app.id }}/accounts/{{ a.user_key }}/delete"
+              onsubmit="return confirm('Supprimer ce compte du coffre et du registre ?')">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Supprimer</button></form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4">Aucun compte.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<div class="card">
+  <h2>Enregistrer un compte</h2>
+  <p class="muted">Les identifiants sont écrits dans le coffre et ne peuvent pas être relus, ni ici ni ailleurs.
+    Réenregistrer un compte existant remplace ses identifiants et le réactive.</p>
+  <form method="post" action="/apps/{{ app.id }}/accounts" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="user_key">Utilisateur Sesame (clé : claim configuré, ex. <code>sub</code>)</label>
+    <input type="text" id="user_key" name="user_key" required>
+    {% for key in app.credential_keys %}
+    <label for="cred_{{ key }}">{{ key }}</label>
+    <input type="password" id="cred_{{ key }}" name="cred_{{ key }}" required autocomplete="new-password">
+    {% endfor %}
+    <p><button type="submit">Enregistrer</button></p>
+  </form>
+</div>
+
+<details class="card">
+  <summary>Descripteur (lecture seule)</summary>
+  <pre>{{ app.source }}</pre>
+</details>
+{% endblock %}
