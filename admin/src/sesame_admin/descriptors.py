@@ -61,8 +61,6 @@ class App:
         """Aucune restriction d'habilitation : le compte actif fait foi."""
         return not self.groups and not self.users
 
-    def allows(self, user_key: str, groups: tuple[str, ...]) -> bool:
-        return self.access_open or user_key in self.users or any(g in self.groups for g in groups)
 
 
 @dataclass(frozen=True)
