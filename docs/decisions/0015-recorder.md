@@ -1,6 +1,6 @@
 # 0015. Recorder : analyse d'une page de login sans identifiant
 
-**Statut** : acceptée (2026-09-27). Complète [0012](0012-embarquement.md).
+**Statut** : acceptée (2026-09-27). Complète [0012](0012-embarquement.md). Remplacée en partie par [0019](0019-recorder-compte-de-test.md) : un compte de test facultatif permet d'observer une vraie connexion.
 
 ## Contexte
 

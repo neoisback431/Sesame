@@ -1,7 +1,6 @@
-# 0019 — Recorder avec compte de test
+# 0019. Recorder avec compte de test
 
-Date : 2026-09-28
-Statut : accepté (remplace en partie l'ADR 0015, qui écartait tout identifiant)
+**Statut** : acceptée (2026-09-28). Remplace en partie [0015](0015-recorder.md), qui écartait tout identifiant ; complète [0012](0012-embarquement.md) (pages de login construites en JavaScript).
 
 ## Contexte
 
@@ -54,5 +53,7 @@ les messages d'erreur Playwright ne sont pas relayés (seul le type d'exception)
   en JavaScript (vérifié par `sesame-onboard verify`, mêmes règles que le proxy).
 - Une vraie connexion est faite sur l'appli avec le compte de test (session ouverte côté
   appli, dernière connexion mise à jour) : utiliser un compte dédié.
-- Hors périmètre inchangé : login multi-étapes, captcha, MFA, session hors cookies
-  (jeton en stockage JavaScript : signalé bloquant).
+- Hors périmètre inchangé : login multi-étapes, captcha, MFA.
+- Session hors cookies (jeton renvoyé par le login et gardé en stockage JavaScript) :
+  bloquante en mode proxy ; le recorder propose le mode handoff si on le lui demande
+  (case « Mode handoff », `--handoff`), voir [0020](0020-mode-remise-handoff.md).
