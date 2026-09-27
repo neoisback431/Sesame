@@ -2,9 +2,9 @@
 {% block title %}Applications{% endblock %}
 {% block content %}
 <h1>Applications</h1>
-<p class="muted">Les descripteurs sont des fichiers versionnés (dossier <code>descriptors/</code>), modifiés par merge request.</p>
+<p class="muted">Pour enregistrer, désactiver ou supprimer le compte d'un utilisateur, cliquez sur « Gérer les comptes ».</p>
 <table>
-  <thead><tr><th>Application</th><th>Hôte public</th><th>Habilitations</th><th>Comptes</th></tr></thead>
+  <thead><tr><th>Application</th><th>Hôte public</th><th>Habilitations</th><th>Comptes</th><th></th></tr></thead>
   <tbody>
   {% for app, counts in rows %}
     <tr>
@@ -12,10 +12,24 @@
       <td>{{ app.public_host }}</td>
       <td>{% for g in app.groups %}<code>{{ g }}</code> {% endfor %}{% for u in app.users %}<code>{{ u }}</code> {% endfor %}</td>
       <td>{{ counts.get('active', 0) }} actif(s){% if counts.get('failed') %}, <strong>{{ counts['failed'] }} en échec</strong>{% endif %}{% if counts.get('disabled') %}, {{ counts['disabled'] }} désactivé(s){% endif %}</td>
+      <td><a class="button" href="/apps/{{ app.id }}">Gérer les comptes</a></td>
     </tr>
   {% else %}
-    <tr><td colspan="4">Aucun descripteur.</td></tr>
+    <tr><td colspan="5">Aucun descripteur.</td></tr>
   {% endfor %}
   </tbody>
 </table>
+
+<details class="card">
+  <summary><strong>Ajouter une application</strong></summary>
+  <p>Les applications sont décrites par des fichiers versionnés dans Git (dossier <code>descriptors/</code>),
+    relus par merge request, et non créées depuis cette interface.</p>
+  <ol>
+    <li>Copier <code>descriptors/TEMPLATE.yaml.example</code> en <code>descriptors/&lt;id&gt;.yaml</code> et le compléter.</li>
+    <li>Le valider avec un compte de test : <code>sesame-onboard verify descriptors/&lt;id&gt;.yaml</code>.</li>
+    <li>Reporter l'empreinte : <code>sesame-onboard fingerprint descriptors/&lt;id&gt;.yaml</code>.</li>
+    <li>Fusionner la merge request, puis redémarrer le portail, le proxy et cette interface.</li>
+  </ol>
+  <p>L'application apparaît alors ici ; ses comptes se gèrent via « Gérer les comptes ».</p>
+</details>
 {% endblock %}

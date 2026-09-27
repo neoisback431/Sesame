@@ -85,7 +85,9 @@ def test_login_redirects_to_next_and_audits(ctx):
     r = client.get("/auth/callback")
     assert r.headers["location"] == "/apps/fake-app"
     assert [(e.action, e.outcome) for e in audit.events] == [("admin_login", "success")]
-    assert "Appli factice" in client.get("/").text
+    home = client.get("/").text
+    assert "Appli factice" in home and 'href="/apps/fake-app"' in home
+    assert "Gérer les comptes" in home and "Ajouter une application" in home
 
 
 def test_open_redirect_is_refused(ctx):
