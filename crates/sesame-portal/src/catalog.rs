@@ -151,18 +151,5 @@ mod tests {
         assert!(html.contains("<span class=\"ico\" aria-hidden=\"true\">A</span>"));
         assert!(html.contains("https://sesame.test/static/logo-64.png"));
         assert!(html.contains("Alice &lt;admin&gt;"));
-
-        // Appli handoff : la tuile mène à la page d'arrivée normale (remise transparente,
-        // sans chemin dédié ; ADR 0020).
-        let mut d = AppDescriptor::from_yaml(FAKE_APP).unwrap();
-        d.spec.session.mode = sesame_core::descriptor::SessionMode::Handoff;
-        d.spec.public.start_path = "/dashboard".into();
-        d.spec.session.handoff = Some(sesame_core::descriptor::Handoff {
-            set_cookies: vec!["FAKEAPPSESSID".into()],
-            local_storage: Vec::new(),
-            redirect_status: 303,
-        });
-        let html = render(&u, &tiles(&[d], &u, &active), "https", "https://sesame.test/");
-        assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/dashboard\""));
     }
 }

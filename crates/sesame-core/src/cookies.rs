@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Cookie du portail : lecture dans l'en-tête `Cookie`, construction du `Set-Cookie`.
+//! Cookies propres à Sesame : lecture dans l'en-tête `Cookie`, retrait avant relais,
+//! construction du `Set-Cookie` du portail.
 
-/// Recompose un en-tête `Cookie` sans le cookie `name` (retire le cookie du portail avant
-/// un relais transparent). Renvoie `None` s'il ne reste aucun cookie.
-pub fn without(header: &str, name: &str) -> Option<String> {
+/// Recompose un en-tête `Cookie` sans les cookies `names` (cookies propres à Sesame, retirés
+/// avant un relais où le navigateur porte la session). `None` s'il ne reste aucun cookie.
+pub fn without(header: &str, names: &[&str]) -> Option<String> {
     let kept: Vec<&str> = header
         .split(';')
         .map(str::trim)
-        .filter(|c| !c.is_empty() && c.split('=').next().map(str::trim) != Some(name))
+        .filter(|c| {
+            let name = c.split('=').next().map(str::trim).unwrap_or("");
+            !c.is_empty() && !names.contains(&name)
+        })
         .collect();
     (!kept.is_empty()).then(|| kept.join("; "))
 }
@@ -66,6 +70,14 @@ mod tests {
         assert_eq!(find(headers, "sesame_session"), Some("tok"));
         assert_eq!(find(headers, "b"), Some("2"));
         assert_eq!(find(headers, "session"), None);
+    }
+
+    #[test]
+    fn strips_sesame_cookies_before_relay() {
+        let header = "sesame_session=tok; app=1; __sesame_handoff=1; lang=fr";
+        let names = ["sesame_session", "__sesame_handoff"];
+        assert_eq!(without(header, &names).as_deref(), Some("app=1; lang=fr"));
+        assert_eq!(without("sesame_session=tok", &names), None);
     }
 
     #[test]

@@ -8,7 +8,45 @@
 //! Exception assumée aux principes 1 et 3 : l'élément remis est visible du navigateur.
 //! Le mot de passe applicatif, lui, ne quitte jamais le serveur.
 
+use axum::http::{header, HeaderMap};
 use sesame_core::descriptor::Handoff;
+use sesame_core::secret::ExposeSecret;
+
+use crate::jar::Jar;
+
+/// Marqueur posé au navigateur par la remise : tant qu'il est présent, les requêtes sont
+/// relayées sans nouveau rejeu. Propre à Sesame, il n'est jamais relayé à l'appli.
+pub const MARKER: &str = "__sesame_handoff";
+
+/// Le navigateur présente-t-il le marqueur (remise déjà faite) ?
+pub fn done(headers: &HeaderMap) -> bool {
+    let values = headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok());
+    sesame_core::cookies::find(values, MARKER).is_some()
+}
+
+/// `Set-Cookie` de la remise : cookies capturés déclarés dans `set_cookies` (visibles du
+/// navigateur : c'est l'exception de l'ADR 0020), puis le marqueur. Durée : `ttl_secs`.
+pub fn set_cookie_headers(handoff: &Handoff, jar: &Jar, ttl_secs: u64) -> Vec<String> {
+    let mut out: Vec<String> = handoff
+        .set_cookies
+        .iter()
+        .filter_map(|name| {
+            jar.get(name).map(|value| {
+                format!(
+                    "{name}={}; Path=/; Secure; SameSite=Lax; Max-Age={ttl_secs}",
+                    value.expose_secret()
+                )
+            })
+        })
+        .collect();
+    out.push(format!(
+        "{MARKER}=1; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={ttl_secs}"
+    ));
+    out
+}
 
 /// Valeurs à écrire dans le stockage local, extraites du corps JSON de la réponse au login.
 /// Renvoie une erreur (code court) si le corps manque ou si une clé est introuvable.
@@ -48,9 +86,10 @@ fn json_for_script(items: &[(String, String)]) -> String {
 }
 
 /// Page de remise : écrit les valeurs dans `localStorage` (bloc JSON lu par `textContent`,
-/// jamais interprété comme du code) puis remplace l'URL par `start_path`. Sert quand des
-/// valeurs de stockage local sont à poser ; les cookies éventuels voyagent en `Set-Cookie`.
-pub fn page(items: &[(String, String)], start_path: &str, portal_url: &str) -> String {
+/// jamais interprété comme du code) puis remplace l'URL par `return_path`, l'URL demandée.
+/// Sert quand des valeurs de stockage local sont à poser ; les cookies éventuels voyagent en
+/// `Set-Cookie` sur la même réponse.
+pub fn page(items: &[(String, String)], return_path: &str, portal_url: &str) -> String {
     let data = json_for_script(items);
     let body = format!(
         "<h1>Connexion en cours…</h1><p class=\"muted\">Redirection automatique.</p>\
@@ -59,7 +98,7 @@ pub fn page(items: &[(String, String)], start_path: &str, portal_url: &str) -> S
          try{{var d=JSON.parse(document.getElementById('sesame-handoff').textContent);\
          for(var k in d){{localStorage.setItem(k,d[k]);}}}}catch(e){{}}\
          location.replace({start});}})();</script>",
-        start = serde_json::Value::String(start_path.to_owned()),
+        start = serde_json::Value::String(return_path.to_owned()),
     );
     sesame_core::html::page("Connexion", &body, portal_url)
 }
@@ -106,6 +145,33 @@ mod tests {
             local_storage_values(&h, Some("x")),
             Err("handoff_login_body_not_json")
         );
+    }
+
+    #[test]
+    fn set_cookie_headers_hand_over_declared_cookies_then_the_marker() {
+        let mut h = handoff(&[]);
+        h.set_cookies = vec!["SID".into(), "absent".into()];
+        let jar = Jar::from_cookies(vec![
+            sesame_core::secret::AppCookie::new("SID", "v-1"),
+            sesame_core::secret::AppCookie::new("OTHER", "x"),
+        ]);
+        let headers = set_cookie_headers(&h, &jar, 60);
+        assert_eq!(
+            headers.len(),
+            2,
+            "cookie absent ignoré, OTHER non déclaré : {headers:?}"
+        );
+        assert_eq!(headers[0], "SID=v-1; Path=/; Secure; SameSite=Lax; Max-Age=60");
+        assert!(headers[1].starts_with("__sesame_handoff=1;") && headers[1].contains("HttpOnly"));
+    }
+
+    #[test]
+    fn marker_is_detected_among_cookies() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, "a=1; __sesame_handoff=1".parse().unwrap());
+        assert!(done(&headers));
+        headers.insert(header::COOKIE, "a=1".parse().unwrap());
+        assert!(!done(&headers));
     }
 
     #[test]

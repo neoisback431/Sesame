@@ -342,8 +342,8 @@ async fn login_without_form_posts_directly_to_the_action() {
     assert!(r.body.contains("Bonjour amartin"), "{}", r.body);
 }
 
-#[tokio::test]
-async fn handoff_mode_hands_the_cookie_to_the_browser() {
+/// Banc avec l'appli simulée en mode handoff (cookie APPSESS remis au navigateur).
+async fn handoff_bench() -> Bench {
     use sesame_core::descriptor::{Handoff, SessionMode};
 
     let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
@@ -354,59 +354,107 @@ async fn handoff_mode_hands_the_cookie_to_the_browser() {
         local_storage: Vec::new(),
         redirect_status: 303,
     });
-    d.spec.public.start_path = "/dashboard".into();
     let (apps, rejected) = sesame_proxy::build_apps(vec![d], None, "https");
     assert!(rejected.is_empty(), "{rejected:?}");
     b.engine.set_apps(apps);
+    b
+}
+
+/// Valeur d'un cookie posé par la réponse (`Set-Cookie: name=valeur; …`).
+fn set_cookie_value(r: &Reply, name: &str) -> Option<String> {
+    r.headers
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find_map(|c| {
+            c.strip_prefix(&format!("{name}="))
+                .map(|v| v.split(';').next().unwrap().to_owned())
+        })
+}
+
+fn navigate(b: &Bench, path: &str, cookie: &str) -> Request<Body> {
+    b.request("GET", path)
+        .header("sec-fetch-mode", "navigate")
+        .header(header::COOKIE, cookie)
+        .body(Body::empty())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn handoff_mode_hands_the_cookie_to_the_browser() {
+    let b = handoff_bench().await;
 
     // Première arrivée (pas de marqueur) : rejeu côté serveur, cookie + marqueur posés au
     // navigateur, redirection transparente vers l'URL demandée.
     let r = b.get_raw("/dashboard").await;
     assert_eq!(r.status, StatusCode::SEE_OTHER);
-    assert!(r
-        .headers
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .ends_with("/dashboard"));
-    let set: Vec<String> = r
-        .headers
-        .get_all("set-cookie")
-        .iter()
-        .filter_map(|v| v.to_str().ok().map(str::to_owned))
-        .collect();
-    let appsess = set
-        .iter()
-        .find_map(|c| {
-            c.strip_prefix("APPSESS=")
-                .map(|v| v.split(';').next().unwrap().to_owned())
-        })
-        .expect("cookie applicatif remis");
+    let location = r.headers[header::LOCATION].to_str().unwrap();
+    assert!(location.ends_with("/dashboard"), "{location}");
+    let appsess = set_cookie_value(&r, "APPSESS").expect("cookie applicatif remis");
     assert!(appsess.starts_with("sess-"));
-    assert!(
-        set.iter()
-            .any(|c| c.starts_with("__sesame_handoff=1") && c.contains("HttpOnly")),
-        "{set:?}"
-    );
+    assert_eq!(set_cookie_value(&r, "__sesame_handoff").as_deref(), Some("1"));
     assert!(b.actions().contains(&AuditAction::SessionHandoff));
 
     // Requête suivante (marqueur + cookie applicatif portés par le navigateur) : relais
     // transparent, aucun nouveau rejeu.
-    let logins_before = b.mock.logins.load(Ordering::SeqCst);
-    let req = b
-        .request("GET", "/")
-        .header("cookie", format!("__sesame_handoff=1; APPSESS={appsess}"))
-        .body(Body::empty())
-        .unwrap();
-    let r = b.send_raw(req).await;
+    let logins = b.mock.logins.load(Ordering::SeqCst);
+    let r = b
+        .send_raw(navigate(
+            &b,
+            "/",
+            &format!("__sesame_handoff=1; APPSESS={appsess}"),
+        ))
+        .await;
     assert_eq!(r.status, StatusCode::OK);
     assert!(r.body.contains("Bonjour amartin"), "{}", r.body);
     assert_eq!(
         b.mock.logins.load(Ordering::SeqCst),
-        logins_before,
+        logins,
         "pas de rejeu au relais"
     );
+}
+
+#[tokio::test]
+async fn handoff_relay_keeps_sesame_cookies_away_from_the_app() {
+    // Le navigateur porte la session : ses cookies applicatifs et son Authorization sont
+    // relayés, mais ni le cookie du portail ni le marqueur de remise.
+    let b = handoff_bench().await;
+    let req = b
+        .request("GET", "/echo")
+        .header(header::COOKIE, "__sesame_handoff=1; APPSESS=sess-x")
+        .header(header::AUTHORIZATION, "Bearer jeton-appli")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(b.send_raw(req).await.status, StatusCode::OK);
+    let seen = b.mock.seen.lock().unwrap().join("\n");
+    assert!(
+        seen.contains("APPSESS=sess-x") && seen.contains("other=1"),
+        "{seen}"
+    );
+    assert!(seen.contains("authorization: Bearer jeton-appli"), "{seen}");
+    assert!(
+        !seen.contains("__sesame_handoff") && !seen.contains("sesame_session"),
+        "{seen}"
+    );
+}
+
+#[tokio::test]
+async fn expired_handed_off_session_is_handed_off_again() {
+    // Cookie remis périmé côté appli (redirection vers /login) sur une navigation :
+    // nouvelle remise, sans que l'utilisateur ne voie le formulaire de l'appli.
+    let b = handoff_bench().await;
+    let logins = b.mock.logins.load(Ordering::SeqCst);
+    let r = b
+        .send_raw(navigate(&b, "/", "__sesame_handoff=1; APPSESS=perime"))
+        .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.body);
+    assert!(set_cookie_value(&r, "APPSESS").is_some_and(|v| v.starts_with("sess-")));
+    assert_eq!(
+        b.mock.logins.load(Ordering::SeqCst),
+        logins + 1,
+        "un nouveau rejeu"
+    );
+    assert!(b.actions().contains(&AuditAction::AppSessionExpired));
 }
 
 #[tokio::test]

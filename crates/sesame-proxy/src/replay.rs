@@ -12,7 +12,9 @@ use std::time::SystemTime;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
 use reqwest::{Method, StatusCode};
 use sesame_core::audit::{AuditAction, AuditEvent, AuditOutcome};
-use sesame_core::descriptor::{AppDescriptor, CsrfSource, Encoding, FormField, Method as LoginMethod};
+use sesame_core::descriptor::{
+    AppDescriptor, CsrfSource, Encoding, FormField, Method as LoginMethod, SessionMode,
+};
 use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{
     AccountRegistry, AccountStatus, AuditSink, DiagnosticStore, PortError, ReplayDiagnostic, SecretStore,
@@ -533,7 +535,7 @@ impl Replayer {
         }
         // Mode handoff avec local_storage : conserver le corps du login pour en extraire
         // les valeurs à remettre au navigateur (le corps peut contenir des jetons).
-        let keep_body = matches!(spec.session.mode, sesame_core::descriptor::SessionMode::Handoff)
+        let keep_body = matches!(spec.session.mode, SessionMode::Handoff)
             && spec
                 .session
                 .handoff
