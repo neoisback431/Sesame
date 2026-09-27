@@ -75,9 +75,10 @@ pub fn render(user: &UserIdentity, tiles: &[Tile<'_>], scheme: &str, portal_url:
                 ));
             } else {
                 body.push_str(&format!(
-                    "<li class=\"tile\"><a href=\"{scheme}://{}/\"><span class=\"ico\" aria-hidden=\"true\">{}</span>\
+                    "<li class=\"tile\"><a href=\"{scheme}://{}{}\"><span class=\"ico\" aria-hidden=\"true\">{}</span>\
 <span><strong>{}</strong><br>{desc}</span></a></li>",
                     escape(&d.spec.public.host),
+                    escape(&d.spec.public.start_path),
                     escape(&initial(&d.metadata.name)),
                     escape(&d.metadata.name)
                 ));
@@ -140,6 +141,13 @@ mod tests {
         let active = [account(AccountStatus::Active)];
         let html = render(&u, &tiles(&ds, &u, &active), "https", "https://sesame.test/");
         assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/\""));
+
+        // Page d'arrivée : la tuile y mène directement (échappée).
+        let mut d = AppDescriptor::from_yaml(FAKE_APP).unwrap();
+        d.spec.public.start_path = "/chat?a=1&b=\"x".into();
+        let ds = vec![d];
+        let html = render(&u, &tiles(&ds, &u, &active), "https", "https://sesame.test/");
+        assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/chat?a=1&amp;b=&quot;x\""));
         assert!(html.contains("<span class=\"ico\" aria-hidden=\"true\">A</span>"));
         assert!(html.contains("https://sesame.test/static/logo-64.png"));
         assert!(html.contains("Alice &lt;admin&gt;"));

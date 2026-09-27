@@ -15,6 +15,7 @@ spec:
     timeout: 10s
   public:
     host: fake-app.sesame.localhost:8443
+    start_path: /                         # page ouverte par la tuile du portail
   access:
     groups:
       - fake-app-users

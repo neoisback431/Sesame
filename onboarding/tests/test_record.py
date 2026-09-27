@@ -267,6 +267,7 @@ def test_test_account_completes_the_descriptor(fake, client, browser):
     assert rec.login.logged_in and rec.login.status == 302
     assert rec.login.session_cookies == ["FAKEAPPSESSID"]
     draft = record.to_descriptor(rec)
+    assert "start_path" not in draft.document["spec"]["public"], "racine atteinte : rien à préciser"
     doc = draft.document
     assert descriptors.validate(doc) == []
     assert doc["spec"]["session"]["cookies"] == ["FAKEAPPSESSID"]
@@ -451,7 +452,7 @@ def api_token_app() -> Flask:
             "document.getElementById('f').addEventListener('submit', e => { e.preventDefault();"
             "fetch('/api/login', {method: 'POST', headers: {'Content-Type': 'application/json',"
             "'x-csrf-token': tok}, body: JSON.stringify({username: e.target.username.value,"
-            "password: e.target.password.value})}).then(r => { if (r.ok) location.href = '/'; });"
+            "password: e.target.password.value})}).then(r => { if (r.ok) location.href = '/chat'; });"
             "});</script></body></html>"
         )
         resp.set_cookie("chat.sid", sid)
@@ -482,12 +483,14 @@ def api_token_app() -> Flask:
         logged.add(sid + "-auth")
         return resp
 
-    @app.get("/")
-    def home():
+    @app.get("/chat")
+    def chat():
         return (
             "chat" if request.cookies.get("chat.sid") in logged else Response("", 302, {"Location": "/login"})
         )
 
+    # Comme familly-chat : la racine affiche le login même une fois connecté.
+    app.add_url_rule("/", "root", page)
     return app
 
 
@@ -510,6 +513,7 @@ def test_test_account_handles_a_token_obtained_from_an_api(client, browser):
         ]
         assert not any(w.startswith("csrf_") for w in rec.warnings), rec.warnings
         assert doc["spec"]["session"]["cookies"] == ["chat.sid"]
+        assert doc["spec"]["public"]["start_path"] == "/chat", "tuile vers la page atteinte après connexion"
         assert verify.verify(doc, {"username": "alice", "password": "Pw-chat"}, client).ok
         assert verify.verify(doc, {"username": "alice", "password": "nope"}, client).reason != "ok"
     finally:
