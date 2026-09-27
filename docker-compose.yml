@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: Apache-2.0
+# Environnement de DEV / DÉMO. Tous les secrets ci-dessous sont des valeurs
+# de dev publiques : ne jamais les réutiliser ailleurs.
+#
+# Prérequis : make dev-certs   (certificat TLS auto-signé pour *.sesame.localhost)
+# Entrée    : https://fake-app.sesame.localhost:8443
+
+name: sesame
+
+x-dev-ca: &dev-ca
+  # CA de dev, pour que les services fassent confiance au frontal Nginx.
+  - ./deploy/nginx/certs/ca.crt:/etc/sesame/ca.crt:ro
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["8443:8443"]
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/certs:/etc/nginx/certs:ro
+    networks:
+      default:
+        # Les services joignent le portail et l'IdP par les mêmes URLs que le
+        # navigateur : l'issuer OIDC est identique des deux côtés.
+        aliases: [sesame.localhost, idp.sesame.localhost, fake-app.sesame.localhost]
+    depends_on: [portal, proxy, keycloak]
+
+  portal:
+    build:
+      context: .
+      dockerfile: deploy/docker/rust.Dockerfile
+      args: { BIN: sesame-portal }
+    environment:
+      SESAME_PORTAL_LISTEN: 0.0.0.0:8080
+      SESAME_PUBLIC_URL: https://sesame.localhost:8443
+      SESAME_COOKIE_DOMAIN: sesame.localhost
+      SESAME_OIDC_ISSUER: https://idp.sesame.localhost:8443/realms/sesame
+      SESAME_OIDC_CLIENT_ID: sesame-portal
+      SESAME_OIDC_CLIENT_SECRET: dev-portal-client-secret
+      # En dev, clé coffre lisible ; en production préférer sub (ou oid pour Entra ID).
+      SESAME_OIDC_USER_KEY_CLAIM: preferred_username
+      SESAME_OIDC_GROUPS_CLAIM: groups
+      SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
+      SSL_CERT_FILE: /etc/sesame/ca.crt
+      RUST_LOG: info
+    volumes: *dev-ca
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  proxy:
+    build:
+      context: .
+      dockerfile: deploy/docker/rust.Dockerfile
+      args: { BIN: sesame-proxy }
+    environment:
+      SESAME_PROXY_LISTEN: 0.0.0.0:8081
+      SESAME_DESCRIPTORS_DIR: /etc/sesame/descriptors
+      SESAME_PORTAL_URL: https://sesame.localhost:8443
+      SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
+      SESAME_SECRET_STORE: openbao
+      SESAME_OPENBAO_ADDR: http://openbao:8200
+      SESAME_OPENBAO_MOUNT: secret
+      SESAME_OPENBAO_PATH_PREFIX: sesame/apps
+      SESAME_OPENBAO_ROLE_ID: dev-proxy-role-id
+      SESAME_OPENBAO_SECRET_ID: dev-proxy-secret-id
+      SSL_CERT_FILE: /etc/sesame/ca.crt
+      RUST_LOG: info
+    volumes:
+      - ./descriptors:/etc/sesame/descriptors:ro
+      - ./deploy/nginx/certs/ca.crt:/etc/sesame/ca.crt:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+      openbao-seed: { condition: service_completed_successfully }
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: sesame
+      POSTGRES_USER: sesame
+      POSTGRES_PASSWORD: dev-db-password
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sesame -d sesame"]
+      interval: 2s
+      retries: 30
+
+  openbao:
+    image: openbao/openbao:2.4.1
+    command: server -dev -dev-listen-address=0.0.0.0:8200
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: dev-root-token
+    cap_add: [IPC_LOCK]
+    ports: ["127.0.0.1:8200:8200"]
+
+  openbao-seed:
+    image: openbao/openbao:2.4.1
+    entrypoint: ["/seed/seed.sh"]
+    environment:
+      BAO_ADDR: http://openbao:8200
+      BAO_TOKEN: dev-root-token
+      PROXY_ROLE_ID: dev-proxy-role-id
+      PROXY_SECRET_ID: dev-proxy-secret-id
+    volumes: [./dev/openbao:/seed:ro]
+    depends_on: [openbao]
+    restart: "no"
+
+  keycloak:
+    image: keycloak/keycloak:26.0
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: kcadmin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: kcadmin
+      KC_HOSTNAME: https://idp.sesame.localhost:8443
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
+    volumes:
+      - ./dev/keycloak/sesame-realm.json:/opt/keycloak/data/import/sesame-realm.json:ro
+
+  fake-app:
+    build: ./dev/fake-app
+    environment:
+      FAKE_APP_USERS: amartin:dev-amartin-app-password
+      FAKE_APP_SESSION_TTL: "300"
+      FAKE_APP_INTERNAL_URL: http://fake-app:8000
+    # Pas de port publié : l'appli n'est joignable que via le proxy.
+
+volumes:
+  postgres-data:

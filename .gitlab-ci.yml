@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+# CI minimale : la logique vit dans le Makefile pour rester portable
+# (le dépôt public est sur GitHub).
+
+stages: [lint, test, build]
+
+variables:
+  CARGO_HOME: $CI_PROJECT_DIR/.cargo
+
+.rust:
+  image: rust:1-slim-bookworm
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq make >/dev/null
+    - rustup component add rustfmt clippy
+  cache:
+    key: cargo-$CI_COMMIT_REF_SLUG
+    paths: [.cargo/registry, target]
+
+.python:
+  image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq make >/dev/null
+
+lint:rust:
+  extends: .rust
+  stage: lint
+  script: [make lint-rust]
+
+lint:licenses:
+  extends: .rust
+  stage: lint
+  script:
+    - cargo install --locked cargo-deny
+    - make deny
+
+lint:python:
+  extends: .python
+  stage: lint
+  script: [make lint-python validate-descriptors]
+
+test:rust:
+  extends: .rust
+  stage: test
+  script: [make test-rust]
+
+test:python:
+  extends: .python
+  stage: test
+  script: [make test-python]
+
+build:images:
+  stage: build
+  image: docker:27
+  services: [docker:27-dind]
+  script:
+    - docker compose build

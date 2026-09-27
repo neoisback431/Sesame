@@ -1,0 +1,79 @@
+{
+  "realm": "sesame",
+  "displayName": "Sesame (dev)",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "groups": [
+    { "name": "fake-app-users" },
+    { "name": "sesame-admins" }
+  ],
+  "clients": [
+    {
+      "clientId": "sesame-portal",
+      "name": "Portail Sesame",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-portal-client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["https://sesame.localhost:8443/auth/callback"],
+      "webOrigins": ["https://sesame.localhost:8443"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://sesame.localhost:8443/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "email": "alice@example.org",
+      "firstName": "Alice",
+      "lastName": "Martin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "alice", "temporary": false }],
+      "groups": ["fake-app-users"]
+    },
+    {
+      "username": "bob",
+      "email": "bob@example.org",
+      "firstName": "Bob",
+      "lastName": "Durand",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "bob", "temporary": false }],
+      "groups": []
+    },
+    {
+      "username": "admin",
+      "email": "admin@example.org",
+      "firstName": "Admin",
+      "lastName": "Sesame",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "admin", "temporary": false }],
+      "groups": ["sesame-admins"]
+    }
+  ]
+}
