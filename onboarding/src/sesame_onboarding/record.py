@@ -41,6 +41,7 @@ from .fingerprint import parse_form
 from .http import Jar, get_page, origin, same_origin
 
 CSRF_NAME = re.compile(r"csrf|xsrf|authenticity|verification|nonce|(^|_)token$|^_token$", re.I)
+_CSRF_COOKIE = re.compile(r"csrf|xsrf", re.I)
 SESSION_NAME = re.compile(r"sess|^sid$|jsessionid|phpsessid|aspnet|connect\.sid|_session|auth", re.I)
 USERNAME_NAME = re.compile(r"user|login|mail|ident|account|compte|name", re.I)
 ERROR_SELECTORS = (
@@ -62,14 +63,17 @@ _ANALYZE_JS = """() => {
     name: f.getAttribute('name'),
     action: f.getAttribute('action'),
     method: (f.getAttribute('method') || 'GET').toUpperCase(),
-    fields: [...f.elements].filter(e => e.name).map(e => ({
+    // Champs sans attribut name (fréquent avec React) : clé positionnelle « #n », n étant
+    // le rang parmi les input/select/textarea du formulaire.
+    fields: [...f.querySelectorAll('input, select, textarea')].map((e, pos) => ({
       tag: e.tagName.toLowerCase(),
       type: (e.getAttribute('type') || (e.tagName === 'INPUT' ? 'text' : e.tagName.toLowerCase()))
         .toLowerCase(),
-      name: e.name,
+      name: e.getAttribute('name') || ('#' + pos),
+      named: !!e.getAttribute('name'),
       autocomplete: e.getAttribute('autocomplete'),
       visible: visible(e),
-    })),
+    })).filter(x => x.named || x.tag === 'input'),
   }));
   return {
     title: document.title,
@@ -122,8 +126,9 @@ class LoginObservation:
     @property
     def session_cookies(self) -> list[str]:
         seen = list(dict.fromkeys(self.cookies_set + self.new_cookies))
-        named = [c for c in seen if SESSION_NAME.search(c) and not CSRF_NAME.search(c)]
-        return named or [c for c in seen if not CSRF_NAME.search(c)]
+        # Seuls les noms explicitement CSRF sont écartés (un cookie « token » peut être la session).
+        plain = [c for c in seen if not _CSRF_COOKIE.search(c)]
+        return [c for c in plain if SESSION_NAME.search(c)] or plain
 
 
 @dataclass
@@ -150,6 +155,10 @@ class Recording:
     protected_location: str | None = None
     failure: FailureObservation | None = None
     login: LoginObservation | None = None
+    form_index: int = 0
+    use_form: bool = True  # False : formulaire absent du HTML servi (construit en JavaScript)
+    sent_username_key: str | None = None
+    sent_password_key: str | None = None
     warnings: list[str] = field(default_factory=list)
     blocking: list[str] = field(default_factory=list)
 
@@ -186,6 +195,17 @@ def _selector(form: dict[str, Any], forms: list[dict[str, Any]]) -> str:
     if form["action"] and sum(f["action"] == form["action"] for f in forms) == 1:
         return f"form[action={_css_string(form['action'])}]"
     return "form"
+
+
+def _field(form: Any, key: str) -> Any:
+    """Champ du formulaire (locator Playwright) : par nom, ou par rang pour une clé « #n »."""
+    if key.startswith("#") and key[1:].isdigit():
+        return form.locator("input, select, textarea").nth(int(key[1:]))
+    return form.locator(f"[name={_css_string(key)}]").first
+
+
+def _unnamed(key: str | None) -> bool:
+    return bool(key) and key.startswith("#")
 
 
 def _pick_login_form(forms: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -273,7 +293,13 @@ def check_raw_html(rec: Recording, client: httpx.Client) -> None:
         return
     form = parse_form(resp.text, rec.form_selector or "form") if resp.status_code == 200 else None
     if form is None or rec.password_field not in form.names:
-        rec.blocking.append("login_form_not_found_in_raw_html")
+        sub = rec.submission
+        if sub is not None and same_origin(sub.url, rec.base_url) and resp.status_code == 200:
+            # Formulaire construit en JavaScript : rejeu sans formulaire, vers la cible observée.
+            rec.use_form = False
+            rec.warnings.append("login_form_built_by_javascript: rejeu sans formulaire (use_form: false)")
+        else:
+            rec.blocking.append("login_form_not_found_in_raw_html")
         return
     rec.raw_form_found = True
     rec.fingerprint = form.fingerprint()
@@ -312,7 +338,13 @@ def _analyze_submission(rec: Recording, sub: Submission, secrets_in_page: dict[s
             continue
         kind, name = source.split(":", 1)
         rec.csrf.append({"source": kind, "name": name, "send_as": {"header": header}})
-    known = {rec.username_field, rec.password_field, *rec.hidden_fields}
+    known = {
+        rec.username_field,
+        rec.password_field,
+        rec.sent_username_key,
+        rec.sent_password_key,
+        *rec.hidden_fields,
+    }
     extra = [n for n in sub.field_names if n not in known]
     csrf_fields = [n for n in extra if CSRF_NAME.search(n)]
     for name in csrf_fields:
@@ -409,11 +441,13 @@ def record(
         rec.username_field = _pick_username(form, rec.password_field)
         if rec.username_field is None:
             rec.blocking.append("username_field_not_found")
-        rec.hidden_fields = [f["name"] for f in form["fields"] if f["type"] == "hidden"]
+        rec.form_index = form["index"]
+        rec.hidden_fields = [f["name"] for f in form["fields"] if f["type"] == "hidden" and f["named"]]
         rec.other_fields = [
             f["name"]
             for f in form["fields"]
-            if f["name"] not in (rec.username_field, rec.password_field, *rec.hidden_fields)
+            if f["named"]
+            and f["name"] not in (rec.username_field, rec.password_field, *rec.hidden_fields)
             and f["type"] not in ("submit", "button", "reset", "image")
         ]
         rec.method = form["method"] if form["method"] in ("GET", "POST") else "POST"
@@ -435,18 +469,19 @@ def record(
 
         before = {" ".join(t.split()) for t in page.locator(ERROR_SELECTORS).all_inner_texts()}
         user, password = dummy_credentials()
+        value = user
         if rec.username_field:
             kind = next(f["type"] for f in form["fields"] if f["name"] == rec.username_field)
             # Format attendu par le champ, sinon la validation du navigateur bloque la soumission.
             value = f"{user}@example.invalid" if kind == "email" else user
-            dom_form.locator(f"[name={_css_string(rec.username_field)}]").first.fill(value)
-        dom_form.locator(f"[name={_css_string(rec.password_field)}]").first.fill(password)
+            _field(dom_form, rec.username_field).fill(value)
+        _field(dom_form, rec.password_field).fill(password)
         state["armed"] = True
         button = dom_form.locator("button[type=submit], input[type=submit], button:not([type])")
         if button.count():
             button.first.click(no_wait_after=True)
         else:
-            dom_form.locator(f"[name={_css_string(rec.password_field)}]").first.press("Enter")
+            _field(dom_form, rec.password_field).press("Enter")
         deadline = time.monotonic() + timeout
         while state["request"] is None and time.monotonic() < deadline:
             page.wait_for_timeout(100)
@@ -458,6 +493,9 @@ def record(
             headers = request.headers
             csrf_headers = [h for h in headers if CSRF_NAME.search(h)]
             sent = {"headers": headers, "fields": _submitted_values(request, encoding)}
+            # Noms réellement envoyés pour l'identifiant et le mot de passe (valeurs factices).
+            rec.sent_username_key = next((k for k, v in sent["fields"].items() if v == value), None)
+            rec.sent_password_key = next((k for k, v in sent["fields"].items() if v == password), None)
             sub = Submission(
                 request.method, request.url, request.resource_type, encoding, names, csrf_headers
             )
@@ -580,20 +618,20 @@ def observe_login(
         for meta in page.locator("meta[name][content]").all():
             name = meta.get_attribute("name") or ""
             tokens.setdefault(f"meta:{name}", meta.get_attribute("content") or "")
-        form = page.locator(rec.form_selector or "form").first
+        form = page.locator("form").nth(rec.form_index)
         for hidden in form.locator("input[type=hidden][name]").all():
             tokens.setdefault(
                 f"hidden_input:{hidden.get_attribute('name')}", hidden.get_attribute("value") or ""
             )
 
         if rec.username_field:
-            form.locator(f"[name={_css_string(rec.username_field)}]").first.fill(user)
-        form.locator(f"[name={_css_string(rec.password_field or 'password')}]").first.fill(password)
+            _field(form, rec.username_field).fill(user)
+        _field(form, rec.password_field or "password").fill(password)
         button = form.locator("button[type=submit], input[type=submit], button:not([type])")
         if button.count():
             button.first.click(no_wait_after=True)
         else:
-            form.locator(f"[name={_css_string(rec.password_field or 'password')}]").first.press("Enter")
+            _field(form, rec.password_field or "password").press("Enter")
         deadline = time.monotonic() + timeout
         while state["request"] is None and not state["foreign"] and time.monotonic() < deadline:
             page.wait_for_timeout(100)
@@ -875,16 +913,37 @@ def to_descriptor(
             + ")"
         )
 
-    login: dict[str, Any] = {"form_url": rec.form_url, "form_selector": rec.form_selector or "form"}
-    if rec.action:
-        login["action"] = rec.action
+    login: dict[str, Any] = {"form_url": rec.form_url}
+    if rec.use_form:
+        login["form_selector"] = rec.form_selector or "form"
+    else:
+        login["use_form"] = False
+    action = rec.action
+    if not rec.use_form and not action and rec.submission:
+        sub_url = rec.submission.url
+        action = _path(sub_url) if rec.submission.method != "GET" else urlsplit(sub_url).path
+    if action:
+        login["action"] = action
     login["method"] = rec.method
     login["encoding"] = rec.encoding
-    login["include_hidden_inputs"] = observed.sent_hidden if observed else True
+    if rec.use_form:
+        login["include_hidden_inputs"] = observed.sent_hidden if observed else True
     fields: dict[str, Any] = {}
-    # Noms réellement envoyés (une connexion en JavaScript peut renommer les champs).
-    user_key = (observed.username_key if observed else None) or rec.username_field
-    password_key = (observed.password_key if observed else None) or rec.password_field or "password"
+    # Noms réellement envoyés (une connexion en JavaScript peut renommer les champs, ou
+    # utiliser des champs sans attribut name, notés « #n »).
+    user_key = (
+        (observed.username_key if observed else None)
+        or rec.sent_username_key
+        or (None if _unnamed(rec.username_field) else rec.username_field)
+    )
+    password_key = (
+        (observed.password_key if observed else None)
+        or rec.sent_password_key
+        or (None if _unnamed(rec.password_field) else rec.password_field)
+    )
+    if password_key is None:
+        password_key = "password"  # noqa: S105 (nom de champ, pas une valeur)
+        todo.append("spec.login.fields : nom du champ mot de passe envoyé non observé (« password » supposé)")
     if user_key:
         fields[user_key] = {"from_secret": "username"}
     fields[password_key] = {"from_secret": "password"}

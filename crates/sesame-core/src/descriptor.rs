@@ -230,6 +230,10 @@ pub struct Login {
     pub form_url: String,
     #[serde(default = "default_form_selector")]
     pub form_selector: String,
+    /// `false` : formulaire construit en JavaScript, absent du HTML servi ; la requête est
+    /// envoyée directement vers `action` (requise), sans champs cachés.
+    #[serde(default = "yes")]
+    pub use_form: bool,
     #[serde(default)]
     pub action: Option<String>,
     #[serde(default)]
@@ -376,6 +380,9 @@ impl AppDescriptor {
         if !id_ok.is_match(&self.metadata.id) {
             return invalid("metadata.id invalide".into());
         }
+        if !spec_login_ok(&self.spec.login) {
+            return invalid("login.action requise quand login.use_form vaut false".into());
+        }
         let start = &self.spec.public.start_path;
         if !start.starts_with('/') || start.chars().any(|c| c.is_whitespace() || c.is_control()) {
             return invalid("public.start_path : chemin commençant par / attendu".into());
@@ -507,6 +514,10 @@ fn de_duration<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
     parse_duration(&text).map_err(serde::de::Error::custom)
 }
 
+fn spec_login_ok(login: &Login) -> bool {
+    login.use_form || login.action.is_some()
+}
+
 fn yes() -> bool {
     true
 }
@@ -597,6 +608,15 @@ mod tests {
             "/chat?room=1"
         );
         assert!(with("chat").is_err() && with("/a b").is_err());
+    }
+
+    #[test]
+    fn login_without_form_requires_an_action() {
+        let without = FAKE_APP.replace("form_selector: \"form#login-form\"", "use_form: false");
+        assert!(AppDescriptor::from_yaml(&without).is_err(), "action requise");
+        let with_action = without.replace("use_form: false", "use_form: false\n    action: /api/login");
+        let d = AppDescriptor::from_yaml(&with_action).expect("valide");
+        assert!(!d.spec.login.use_form);
     }
 
     #[test]

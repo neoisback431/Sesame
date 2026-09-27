@@ -41,6 +41,9 @@ def check(descriptor: dict[str, Any], client: httpx.Client) -> HealthResult:
         return HealthResult(app_id, "unreachable", expected, detail=type(e).__name__)
     if resp.status_code != 200:
         return HealthResult(app_id, "unreachable", expected, detail=f"HTTP {resp.status_code}")
+    if not spec["login"].get("use_form", True):
+        # Formulaire construit en JavaScript : rien à comparer dans le HTML servi.
+        return HealthResult(app_id, "no_fingerprint", expected)
     form = parse_form(resp.text, spec["login"].get("form_selector", "form"))
     if form is None:
         return HealthResult(app_id, "form_missing", expected)

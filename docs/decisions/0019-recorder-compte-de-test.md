@@ -34,7 +34,14 @@ mot de passe** (même origine uniquement ; toute autre écriture est bloquée). 
 - réponse : statut, redirection, cookies posés ; cookie(s) de session ; connexion réussie
   si plus aucun champ mot de passe n'est visible.
 
-Le descripteur proposé porte alors `login.success` et `session.cookies` observés.
+Le descripteur proposé porte alors `login.success` et `session.cookies` observés, et
+`public.start_path` (page atteinte après connexion) quand ce n'est pas la racine.
+
+Pages de login construites en JavaScript (formulaire absent du HTML servi, champs parfois
+sans attribut `name`) : le recorder repère les champs par leur rang, lit les noms réellement
+envoyés dans la requête observée (y compris avec la soumission factice) et propose
+`login.use_form: false` : le proxy lit la page de login pour ses cookies et jetons, puis
+envoie directement la requête vers `login.action` (obligatoire), sans formulaire.
 
 Garde-fous : identifiants transmis au service recorder interne (jeton partagé), utilisés
 en mémoire le temps de la connexion, jamais conservés, journalisés, audités ni renvoyés ;
