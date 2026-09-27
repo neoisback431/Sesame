@@ -31,7 +31,8 @@ BLOCKING_HELP = {
     "login_form_not_found_in_raw_html": "le formulaire n'existe qu'après exécution du JavaScript et aucune "
     "soumission n'a été observée : cible du rejeu inconnue",
     "session_token_in_response": "l'appli renvoie un jeton (JWT…) dans la réponse au login et son JavaScript "
-    "l'envoie en en-tête Authorization : session par jeton, non gérée aujourd'hui (voir « À faire »)",
+    "l'envoie en en-tête Authorization : le proxy ne peut pas la rejouer ; relancez l'analyse en cochant "
+    "« Mode handoff » (ADR 0020)",
     "no_session_cookie_after_login": "aucun cookie posé par la connexion : session hors cookies, non gérée",
 }
 

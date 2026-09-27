@@ -23,7 +23,7 @@ from typing import Any
 
 import httpx
 
-from . import descriptors, record
+from . import descriptors, proposal, record
 
 log = logging.getLogger("sesame_recorder")
 
@@ -80,14 +80,14 @@ def analyze(cfg: Config, playwright: Any, browser: Any, body: dict[str, Any]) ->
         )
     credentials = username = password = None  # noqa: F841 (références effacées)
     result: dict[str, Any] = {
-        "summary": record.summary(rec),
+        "summary": proposal.summary(rec),
         "warnings": list(rec.warnings),
         "blocking": list(rec.blocking),
     }
     if rec.password_field is None:
         result["error"] = "formulaire de login introuvable"
         return result
-    draft = record.to_descriptor(
+    draft = proposal.to_descriptor(
         rec,
         app_id=body.get("id") or None,
         name=body.get("name") or None,
@@ -97,8 +97,9 @@ def analyze(cfg: Config, playwright: Any, browser: Any, body: dict[str, Any]) ->
         session_cookie=body.get("session_cookie") or None,
         handoff=bool(body.get("handoff")),
     )
+    result["blocking"] += draft.blocking
     result["todo"] = list(draft.todo)
-    result["yaml"] = record.render(draft, rec)
+    result["yaml"] = proposal.render(draft, rec)
     result["errors"] = descriptors.validate(draft.document, cfg.schema)
     result["valid"] = not result["errors"]
     return result

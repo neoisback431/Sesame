@@ -10,7 +10,7 @@ import re
 
 import pytest
 from flask import Flask, Response
-from sesame_onboarding import descriptors, record
+from sesame_onboarding import descriptors, proposal, record
 
 from .conftest import ROOT, create_app, js_only_app, serve
 
@@ -90,7 +90,7 @@ def test_fake_app_without_any_login_attempt(fake, client, browser):
     assert (rec.protected_status, rec.protected_location) == (302, "/login")
     assert rec.failure is None
 
-    draft = record.to_descriptor(rec, app_id="fake-app", groups=["fake-app-users"])
+    draft = proposal.to_descriptor(rec, app_id="fake-app", groups=["fake-app-users"])
     assert descriptors.validate(draft.document) == []
     reference = descriptors.load(ROOT / "descriptors" / "fake-app.yaml")
     login = draft.document["spec"]["login"]
@@ -105,7 +105,7 @@ def test_fake_app_without_any_login_attempt(fake, client, browser):
 
     # Sans groupe : pas de spec.access (le compte suffit, ADR 0017) ; hôte public sous le
     # domaine configuré des applis (un exemple non résolu ferait échouer le navigateur).
-    open_draft = record.to_descriptor(rec, app_id="crm", apps_domain="sesame.localhost:8443")
+    open_draft = proposal.to_descriptor(rec, app_id="crm", apps_domain="sesame.localhost:8443")
     assert descriptors.validate(open_draft.document) == []
     assert "access" not in open_draft.document["spec"]
     assert open_draft.document["spec"]["public"]["host"] == "crm.sesame.localhost:8443"
@@ -116,7 +116,7 @@ def test_failure_probe_observes_the_rejection(fake, client, browser):
     rec = run(f"{fake.base}/login", client, browser, probe_failure=True)
     assert fake.posts() == ["/login"], "une seule tentative, avec l'identifiant factice"
     assert rec.failure.status == 401 and rec.failure.message == "Identifiants invalides"
-    failure = record.to_descriptor(rec).document["spec"]["login"]["failure"]
+    failure = proposal.to_descriptor(rec).document["spec"]["login"]["failure"]
     assert failure == {"any_of": [{"status": [401], "body_contains": "Identifiants invalides"}]}
 
 
@@ -125,7 +125,7 @@ def test_generated_descriptor_logs_in_with_verify(fake, client, browser):
     from sesame_onboarding import verify
 
     rec = run(f"{fake.base}/login", client, browser, probe_failure=True)
-    draft = record.to_descriptor(rec, session_cookie="FAKEAPPSESSID")
+    draft = proposal.to_descriptor(rec, session_cookie="FAKEAPPSESSID")
     result = verify.verify(draft.document, {"username": "amartin", "password": "Pw-real"}, client)
     assert result.ok, result
     wrong = verify.verify(draft.document, {"username": "amartin", "password": "nope"}, client)
@@ -171,18 +171,18 @@ def test_javascript_login_is_analyzed_without_leaking_values(client, browser):
     assert rec.encoding == "json" and rec.action == "/api/session"
     assert rec.csrf == [{"source": "meta", "name": "csrf-token", "send_as": {"header": "x-csrf-token"}}]
     assert "login_submitted_by_javascript" in rec.warnings
-    assert "fields_added_on_submit: tz" in rec.warnings
-    draft = record.to_descriptor(rec, app_id="rh")
+    assert rec.constants == {"tz": "Europe/Paris"}, "constante reprise dans le descripteur"
+    draft = proposal.to_descriptor(rec, app_id="rh")
     assert descriptors.validate(draft.document) == []
     assert draft.document["metadata"]["name"] == "Portail RH"
 
     # Un identifiant fourni en camelCase est normalisé (schéma : minuscules-tirets).
-    normalized = record.to_descriptor(rec, app_id="monAppli")
+    normalized = proposal.to_descriptor(rec, app_id="monAppli")
     assert normalized.document["metadata"]["id"] == "monappli"
     assert descriptors.validate(normalized.document) == []
     assert any("normalisé" in item for item in normalized.todo)
     assert {"status": [401]} in draft.document["spec"]["expiry"]["any_of"]
-    text = record.render(draft, rec) + "\n".join(record.summary(rec)) + repr(rec)
+    text = proposal.render(draft, rec) + "\n".join(proposal.summary(rec)) + repr(rec)
     assert "meta-tok-5531" not in text and DUMMY_PASSWORD not in text and DUMMY_USER not in text
 
 
@@ -254,7 +254,7 @@ def test_failure_message_echoing_the_dummy_login_is_ignored(client, browser):
         target.srv.shutdown()
     assert target.posts() == ["/login"]
     assert rec.failure.status == 403 and rec.failure.message is None
-    assert record.to_descriptor(rec).document["spec"]["login"]["failure"] == {"any_of": [{"status": [403]}]}
+    assert proposal.to_descriptor(rec).document["spec"]["login"]["failure"] == {"any_of": [{"status": [403]}]}
 
 
 # --- Connexion réelle avec un compte de test (ADR 0019) --------------------------------
@@ -268,7 +268,7 @@ def test_test_account_completes_the_descriptor(fake, client, browser):
     assert fake.posts() == ["/login"], "une seule connexion réelle"
     assert rec.login.logged_in and rec.login.status == 302
     assert rec.login.session_cookies == ["FAKEAPPSESSID"]
-    draft = record.to_descriptor(rec)
+    draft = proposal.to_descriptor(rec)
     assert "start_path" not in draft.document["spec"]["public"], "racine atteinte : rien à préciser"
     doc = draft.document
     assert descriptors.validate(doc) == []
@@ -276,7 +276,7 @@ def test_test_account_completes_the_descriptor(fake, client, browser):
     assert doc["spec"]["login"]["success"]["any_of"][0]["cookie_set"] == "FAKEAPPSESSID"
     assert not any("spec.login.success" in t or "spec.session.cookies" in t for t in draft.todo)
     assert verify.verify(doc, {"username": "amartin", "password": "Pw-real"}, client).ok
-    text = record.render(draft, rec) + "\n".join(record.summary(rec)) + repr(rec)
+    text = proposal.render(draft, rec) + "\n".join(proposal.summary(rec)) + repr(rec)
     assert "Pw-real" not in text and "amartin" not in text
 
 
@@ -343,7 +343,7 @@ def test_test_account_handles_javascript_login_with_cookie_token(client, browser
     spa = Recorder(xsrf_spa_app())
     try:
         rec = run(f"{spa.base}/login", client, browser, credentials=("amartin@example.org", "Pw-SPA-real"))
-        draft = record.to_descriptor(rec, app_id="famille")
+        draft = proposal.to_descriptor(rec, app_id="famille")
         doc = draft.document
         login = doc["spec"]["login"]
         assert descriptors.validate(doc) == [], descriptors.validate(doc)
@@ -365,7 +365,7 @@ def test_test_account_handles_javascript_login_with_cookie_token(client, browser
         assert not wrong.ok
     finally:
         spa.srv.shutdown()
-    text = record.render(draft, rec) + "\n".join(record.summary(rec)) + repr(rec)
+    text = proposal.render(draft, rec) + "\n".join(proposal.summary(rec)) + repr(rec)
     assert "Pw-SPA-real" not in text and "amartin@example.org" not in text and "xsrf-0-7c1e9a" not in text
 
 
@@ -417,21 +417,21 @@ def test_test_account_finds_a_token_in_an_inline_script(client, browser):
     app = Recorder(inline_token_app())
     try:
         rec = run(f"{app.base}/login", client, browser, credentials=("bob", "Pw-inline"))
-        doc = record.to_descriptor(rec, app_id="inline").document
+        doc = proposal.to_descriptor(rec, app_id="inline").document
         token = doc["spec"]["login"]["csrf"][0]
         assert (token["source"], token["send_as"]) == ("regex", {"header": "x-csrf"})
         assert descriptors.validate(doc) == [], descriptors.validate(doc)
         assert verify.verify(doc, {"username": "bob", "password": "Pw-inline"}, client).ok
     finally:
         app.srv.shutdown()
-    assert "inl0Z9f3kQ2" not in repr(rec) + record.render(record.to_descriptor(rec), rec)
+    assert "inl0Z9f3kQ2" not in repr(rec) + proposal.render(proposal.to_descriptor(rec), rec)
 
 
 def test_wrong_test_account_is_reported(fake, client, browser):
     rec = run(f"{fake.base}/login", client, browser, credentials=("amartin", "wrong"))
     assert rec.login is not None and not rec.login.logged_in
     assert any("test_login_still_on_login_page" in w for w in rec.warnings)
-    assert any("spec.login.success" in t for t in record.to_descriptor(rec).todo)
+    assert any("spec.login.success" in t for t in proposal.to_descriptor(rec).todo)
 
 
 def api_token_app() -> Flask:
@@ -502,7 +502,7 @@ def test_test_account_handles_a_token_obtained_from_an_api(client, browser):
     app = Recorder(api_token_app())
     try:
         rec = run(f"{app.base}/login", client, browser, credentials=("alice", "Pw-chat"))
-        draft = record.to_descriptor(rec, app_id="familly-chat")
+        draft = proposal.to_descriptor(rec, app_id="familly-chat")
         doc = draft.document
         assert descriptors.validate(doc) == [], descriptors.validate(doc)
         assert doc["spec"]["login"]["csrf"] == [
@@ -520,7 +520,7 @@ def test_test_account_handles_a_token_obtained_from_an_api(client, browser):
         assert verify.verify(doc, {"username": "alice", "password": "nope"}, client).reason != "ok"
     finally:
         app.srv.shutdown()
-    assert "api-tok-" not in repr(rec) + record.render(draft, rec) + "\n".join(record.summary(rec))
+    assert "api-tok-" not in repr(rec) + proposal.render(draft, rec) + "\n".join(proposal.summary(rec))
 
 
 def test_login_form_rendered_late_by_javascript_is_found(client, browser):
@@ -601,7 +601,7 @@ def test_react_form_with_unnamed_fields(client, browser):
         dry = run(f"{app.base}/login", client, browser)
         assert (dry.username_field, dry.password_field) == ("#0", "#1")
         assert dry.blocking == [], dry.blocking
-        dry_login = record.to_descriptor(dry).document["spec"]["login"]
+        dry_login = proposal.to_descriptor(dry).document["spec"]["login"]
         assert dry_login["fields"] == {
             "email": {"from_secret": "username"},
             "password": {"from_secret": "password"},
@@ -613,7 +613,7 @@ def test_react_form_with_unnamed_fields(client, browser):
         )
 
         rec = run(f"{app.base}/login", client, browser, credentials=("admin@yast.test", "Pw-yast"))
-        doc = record.to_descriptor(rec, app_id="yast").document
+        doc = proposal.to_descriptor(rec, app_id="yast").document
         assert descriptors.validate(doc) == [], descriptors.validate(doc)
         assert doc["spec"]["session"]["cookies"] == ["token"]
         assert doc["spec"]["public"]["start_path"] == "/dashboard"
@@ -656,9 +656,11 @@ def test_token_based_session_is_reported_by_name(client, browser):
         rec = run(f"{srv.base}/login", client, browser, credentials=("k@yast.test", "Pw-tok"))
     finally:
         srv.srv.shutdown()
-    blocking = " ".join(rec.blocking)
-    assert "session_token_in_response: accessToken, refreshToken" in blocking, rec.blocking
-    text = repr(rec) + "\n".join(record.summary(rec)) + record.render(record.to_descriptor(rec), rec)
+    assert rec.session_token_keys == ["accessToken", "refreshToken"]
+    draft = proposal.to_descriptor(rec)
+    assert any(b.startswith("session_token_in_response: accessToken, refreshToken") for b in draft.blocking)
+    assert proposal.to_descriptor(rec, handoff=True).blocking == [], "résolu par le mode handoff"
+    text = repr(rec) + "\n".join(proposal.summary(rec)) + proposal.render(proposal.to_descriptor(rec), rec)
     assert jwt not in text and "r" * 40 not in text
 
 
@@ -671,7 +673,7 @@ def test_handoff_descriptor_for_a_token_session(client, browser):
     finally:
         app.srv.shutdown()
     assert rec.session_token_keys, "jeton détecté"
-    doc = record.to_descriptor(rec, app_id="yast", handoff=True).document
+    doc = proposal.to_descriptor(rec, app_id="yast", handoff=True).document
     assert descriptors.validate(doc) == [], descriptors.validate(doc)
     session = doc["spec"]["session"]
     assert session["mode"] == "handoff"
@@ -681,7 +683,7 @@ def test_handoff_descriptor_for_a_token_session(client, browser):
     # Session par jeton : le succès suit la réponse réelle (200), pas la redirection par défaut.
     assert doc["spec"]["login"]["success"]["any_of"][0]["status"] == [200]
     # Sans handoff : reste bloquant (proxy ne gère pas), pas de mode handoff.
-    proxy_doc = record.to_descriptor(rec, app_id="yast").document
+    proxy_doc = proposal.to_descriptor(rec, app_id="yast").document
     assert proxy_doc["spec"]["session"].get("mode", "proxy") == "proxy"
 
 

@@ -114,7 +114,7 @@ def cmd_record(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    from . import record
+    from . import proposal, record
 
     if args.probe_failure:
         print(
@@ -151,11 +151,11 @@ def cmd_record(args: argparse.Namespace) -> int:
     except record.RecordError as e:
         print(f"erreur : {e}", file=sys.stderr)
         return 2
-    for line in record.summary(rec):
+    for line in proposal.summary(rec):
         print(line, file=sys.stderr)
     if rec.password_field is None:
         return 1
-    draft = record.to_descriptor(
+    draft = proposal.to_descriptor(
         rec,
         app_id=args.id,
         name=args.name,
@@ -169,13 +169,15 @@ def cmd_record(args: argparse.Namespace) -> int:
     if errors:
         print("descripteur proposé invalide : " + errors[0], file=sys.stderr)
         return 1
-    text = record.render(draft, rec)
+    for line in draft.blocking:
+        print(f"BLOQUANT : {line}", file=sys.stderr)
+    text = proposal.render(draft, rec)
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
         print(f"descripteur écrit dans {args.output}", file=sys.stderr)
     else:
         sys.stdout.write(text)
-    return 1 if rec.blocking else 0
+    return 1 if rec.blocking or draft.blocking else 0
 
 
 def parser() -> argparse.ArgumentParser:

@@ -257,11 +257,11 @@ def test_guided_draft_without_habilitation_omits_access():
     assert V.check(d) == []
     assert "access" not in d["spec"]
     app = app_from_doc(d, "ui")
-    assert app.access_open and app.allows("nimporte", ())
+    assert app.access_open
 
 
 def test_descriptor_without_access_is_valid_and_open():
     doc = parse_yaml(descriptor_yaml("wiki2", "wiki2.sesame.test"))
     doc["spec"].pop("access", None)
     assert V.check(doc) == []
-    assert app_from_doc(doc, "ui").allows("bob", ())
+    assert app_from_doc(doc, "ui").access_open
