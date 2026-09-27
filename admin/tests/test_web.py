@@ -641,3 +641,22 @@ def test_recorder_error_without_findings_is_still_an_error():
 
     with pytest.raises(RecorderError, match="login_url requis"):
         _result({"error": "login_url requis"})
+
+
+def test_handoff_app_shows_the_notice(ctx):
+    """Une appli en mode handoff affiche le bandeau d'avertissement (ADR 0020)."""
+    client, service, *_ = ctx
+    login(client)
+    token = csrf(client, "/apps/new")
+    handoff = (
+        "  session:\n    mode: handoff\n    cookies: [FAKEAPPSESSID]"
+        "\n    handoff:\n      set_cookies: [FAKEAPPSESSID]"
+    )
+    text = descriptor_yaml(app_id="chat", host="chat.sesame.test").replace(
+        "  session:\n    cookies: [FAKEAPPSESSID]", handoff
+    )
+    r = client.post("/apps", data={"csrf": token, "descriptor": text})
+    assert r.status_code == 303, r.text
+    page = client.get("/apps/chat").text
+    assert 'id="handoff-notice"' in page and "mode handoff" in page
+    assert asyncio.run(service.app("chat")).session_mode == "handoff"
