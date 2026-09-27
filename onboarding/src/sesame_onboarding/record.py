@@ -750,7 +750,10 @@ def observe_login(
 
         cookies_set: list[str] = []
         status = location = None
+        token_keys: list[str] = []
         if response is not None:
+            with contextlib.suppress(Exception):
+                token_keys = _token_keys(response.json())  # noms seulement
             status, location = response.status, response.header_value("location")
             cookies_set = _cookie_names(
                 [h["value"] for h in response.headers_array() if h["name"].lower() == "set-cookie"]
@@ -774,7 +777,13 @@ def observe_login(
         if not rec.login.logged_in:
             rec.warnings.append("test_login_still_on_login_page (identifiants du compte de test ?)")
         elif not rec.login.session_cookies:
-            rec.blocking.append("no_session_cookie_after_login (session hors cookies : non gérée)")
+            if token_keys:
+                rec.blocking.append(
+                    "session_token_in_response: " + ", ".join(token_keys) + " (session par jeton renvoyé "
+                    "dans la réponse et envoyé en Authorization par le JavaScript : non gérée)"
+                )
+            else:
+                rec.blocking.append("no_session_cookie_after_login (session hors cookies : non gérée)")
         if password_key is None:
             rec.warnings.append("password_field_not_found_in_request")
         sent.clear()
@@ -786,6 +795,22 @@ def observe_login(
         api_bodies.clear()
         context.close()
         user = password = ""  # noqa: F841 (références effacées)
+
+
+_TOKEN_KEY = re.compile(r"token|jwt|bearer", re.I)
+
+
+def _token_keys(data: Any, prefix: str = "") -> list[str]:
+    """Chemins des champs JSON qui ressemblent à un jeton de session (noms uniquement)."""
+    found: list[str] = []
+    if isinstance(data, dict):
+        for key, value in data.items():
+            path = f"{prefix}{key}"
+            if isinstance(value, str) and _TOKEN_KEY.search(str(key)) and len(value) >= 16:
+                found.append(path)
+            elif isinstance(value, dict):
+                found += _token_keys(value, f"{path}.")
+    return found
 
 
 def _json_path(body: str, value: str) -> str | None:

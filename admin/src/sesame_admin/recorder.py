@@ -28,8 +28,11 @@ BLOCKING_HELP = {
     "login_action_foreign_origin": "le formulaire envoie les identifiants vers un autre domaine : refusé",
     "submission_not_observed": "aucune soumission observée après le clic sur le bouton de connexion",
     "login_page_unreachable_without_javascript": "la page de login n'est pas joignable sans JavaScript",
-    "login_form_not_found_in_raw_html": "le formulaire n'existe qu'après exécution du JavaScript : le proxy "
-    "ne le verra pas",
+    "login_form_not_found_in_raw_html": "le formulaire n'existe qu'après exécution du JavaScript et aucune "
+    "soumission n'a été observée : cible du rejeu inconnue",
+    "session_token_in_response": "l'appli renvoie un jeton (JWT…) dans la réponse au login et son JavaScript "
+    "l'envoie en en-tête Authorization : session par jeton, non gérée aujourd'hui (voir « À faire »)",
+    "no_session_cookie_after_login": "aucun cookie posé par la connexion : session hors cookies, non gérée",
 }
 
 

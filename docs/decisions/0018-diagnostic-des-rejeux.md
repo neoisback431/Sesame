@@ -27,7 +27,9 @@ en échec (`DiagnosticStore`, table `replay_diagnostics`, migration `0004`) :
 
 Avant écriture, le proxy masque (`***`) toutes les valeurs lues dans le coffre sous leurs
 formes brute, encodée URL, échappée HTML et échappée JSON, ainsi que les valeurs des
-`Set-Cookie` (noms et attributs conservés). L'administration l'affiche, échappé, depuis un
+`Set-Cookie` (noms et attributs conservés). Les jetons émis par l'appli sont masqués aussi : valeurs des champs JSON
+dont le nom évoque un jeton ou un secret (`accessToken`, `refreshToken`…), JWT, `Bearer …`,
+paramètres `*_token=`. L'administration l'affiche, échappé, depuis un
 compte en échec (« Voir la réponse de l'appli »), avec une aide selon le code d'échec et
 le descripteur courant. Le diagnostic est supprimé avec le compte (`ON DELETE CASCADE`).
 
