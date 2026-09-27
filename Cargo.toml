@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = ["crates/sesame-core", "crates/sesame-portal", "crates/sesame-proxy"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.85"
+repository = "https://github.com/neoisback431/Sesame"
+
+[workspace.dependencies]
+sesame-core = { path = "crates/sesame-core" }
+async-trait = "0.1"
+axum = "0.8"
+regex = "1"
+secrecy = { version = "0.10", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+print_stdout = "deny"

@@ -1,0 +1,18 @@
+[package]
+name = "sesame-proxy"
+description = "Moteur de proxy Sesame : relais, rejeu des connexions, injection de session."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+sesame-core.workspace = true
+axum.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

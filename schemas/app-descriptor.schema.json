@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sesame.dev/schemas/app-descriptor/v1.json",
+  "title": "Descripteur d'application Sesame",
+  "description": "Décrit comment Sesame expose une application cible et rejoue sa connexion. Un descripteur ne contient JAMAIS de secret : les identifiants sont référencés par nom de champ et lus dans le coffre au moment du rejeu.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "sesame/v1" },
+    "kind": { "const": "AppDescriptor" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "revision"],
+      "properties": {
+        "id": {
+          "description": "Identifiant stable de l'appli. Sert de clé dans le coffre, le magasin de sessions et l'audit.",
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "revision": {
+          "description": "Révision du descripteur, incrémentée à chaque modification validée.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "owner": { "description": "Équipe ou contact responsable de l'appli.", "type": "string" },
+        "labels": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["upstream", "public", "access", "credentials", "login", "session", "expiry"],
+      "properties": {
+        "upstream": { "$ref": "#/$defs/upstream" },
+        "public": { "$ref": "#/$defs/public" },
+        "access": { "$ref": "#/$defs/access" },
+        "credentials": { "$ref": "#/$defs/credentials" },
+        "login": { "$ref": "#/$defs/login" },
+        "session": { "$ref": "#/$defs/session" },
+        "expiry": { "$ref": "#/$defs/expiry" },
+        "logout": { "$ref": "#/$defs/logout" },
+        "rewrite": { "$ref": "#/$defs/rewrite" },
+        "health": { "$ref": "#/$defs/health" }
+      }
+    }
+  },
+  "$defs": {
+    "duration": {
+      "description": "Durée : nombre suivi d'une unité s, m ou h (ex. 30s, 15m, 8h).",
+      "type": "string",
+      "pattern": "^[0-9]+(s|m|h)$"
+    },
+    "regex": { "description": "Expression régulière (syntaxe RE2 / crate regex).", "type": "string", "minLength": 1 },
+    "path": { "description": "Chemin relatif à upstream.base_url, commençant par /.", "type": "string", "pattern": "^/" },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_url"],
+      "properties": {
+        "base_url": { "description": "URL de l'appli telle que le proxy la joint.", "type": "string", "pattern": "^https?://" },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "verify": { "type": "boolean", "default": true },
+            "ca_file": { "type": "string" }
+          }
+        },
+        "timeout": { "$ref": "#/$defs/duration", "default": "30s" },
+        "host_header": {
+          "description": "En-tête Host envoyé à l'appli, si différent de l'hôte de base_url.",
+          "type": "string"
+        }
+      }
+    },
+    "public": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host"],
+      "properties": {
+        "host": {
+          "description": "Nom d'hôte sous lequel le portail expose l'appli. Une appli par nom d'hôte : évite de réécrire les chemins.",
+          "type": "string",
+          "pattern": "^[a-z0-9.-]+(:[0-9]+)?$"
+        }
+      }
+    },
+    "access": {
+      "description": "Habilitations. Un utilisateur est autorisé s'il figure dans users OU appartient à l'un des groups (valeurs issues des claims du fournisseur d'identité).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "groups": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "users": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      },
+      "anyOf": [
+        { "required": ["groups"], "properties": { "groups": { "minItems": 1 } } },
+        { "required": ["users"], "properties": { "users": { "minItems": 1 } } }
+      ]
+    },
+    "credentials": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "keys"],
+      "properties": {
+        "mode": {
+          "description": "per_user : un compte par couple (appli, utilisateur).",
+          "enum": ["per_user"]
+        },
+        "keys": {
+          "description": "Noms des champs lus dans le coffre pour ce couple (appli, utilisateur).",
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      }
+    },
+    "formField": {
+      "description": "Valeur d'un champ du formulaire rejoué : soit une clé du coffre, soit une constante non sensible.",
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["from_secret"] },
+        { "required": ["value"] }
+      ],
+      "properties": {
+        "from_secret": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "value": { "type": "string" }
+      }
+    },
+    "csrfToken": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "name"],
+      "properties": {
+        "source": {
+          "description": "Où lire le jeton sur la page de login.",
+          "enum": ["hidden_input", "meta", "cookie", "regex"]
+        },
+        "name": { "description": "Nom de l'input, de la balise meta ou du cookie.", "type": "string" },
+        "pattern": {
+          "description": "Pour source=regex : expression avec un groupe de capture.",
+          "$ref": "#/$defs/regex"
+        },
+        "send_as": {
+          "description": "Comment renvoyer le jeton. Par défaut : champ de formulaire du même nom.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "field": { "type": "string" },
+            "header": { "type": "string" }
+          }
+        }
+      },
+      "if": { "properties": { "source": { "const": "regex" } } },
+      "then": { "required": ["pattern"] }
+    },
+    "matcher": {
+      "description": "Condition sur une réponse HTTP de l'appli. Toutes les propriétés présentes doivent être vraies.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "status": { "type": "array", "items": { "type": "integer", "minimum": 100, "maximum": 599 }, "minItems": 1 },
+        "location_matches": { "$ref": "#/$defs/regex" },
+        "location_not_matches": { "$ref": "#/$defs/regex" },
+        "cookie_set": { "type": "string" },
+        "body_contains": { "type": "string" },
+        "body_not_contains": { "type": "string" }
+      }
+    },
+    "matcherSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["any_of"],
+      "properties": {
+        "any_of": { "type": "array", "items": { "$ref": "#/$defs/matcher" }, "minItems": 1 }
+      }
+    },
+    "login": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["form_url", "fields", "success"],
+      "properties": {
+        "form_url": { "description": "Page de login, récupérée en GET avant le rejeu.", "$ref": "#/$defs/path" },
+        "form_selector": {
+          "description": "Sélecteur CSS du formulaire si la page en contient plusieurs.",
+          "type": "string",
+          "default": "form"
+        },
+        "action": {
+          "description": "Cible du POST. Par défaut : attribut action du formulaire.",
+          "$ref": "#/$defs/path"
+        },
+        "method": { "enum": ["POST", "GET"], "default": "POST" },
+        "encoding": { "enum": ["form", "json"], "default": "form" },
+        "include_hidden_inputs": {
+          "description": "Renvoie automatiquement tous les input type=hidden du formulaire.",
+          "type": "boolean",
+          "default": true
+        },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/formField" }
+        },
+        "csrf": { "type": "array", "items": { "$ref": "#/$defs/csrfToken" } },
+        "extra_headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "success": {
+          "description": "Conditions indiquant que la connexion a réussi (réponse au POST, avant de suivre les redirections).",
+          "$ref": "#/$defs/matcherSet"
+        },
+        "failure": {
+          "description": "Conditions indiquant un échec explicite (identifiants refusés, compte verrouillé). Prioritaires sur success.",
+          "$ref": "#/$defs/matcherSet"
+        },
+        "max_attempts": {
+          "description": "Nombre maximal de rejeux consécutifs avant d'abandonner (protège contre le verrouillage de compte).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "default": 1
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cookies"],
+      "properties": {
+        "cookies": {
+          "description": "Cookies de session applicatifs à capturer et réinjecter. Ils ne quittent jamais le serveur.",
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "max_ttl": {
+          "description": "Durée de vie maximale d'une session applicative côté Sesame, même si l'appli l'accepte encore.",
+          "$ref": "#/$defs/duration",
+          "default": "8h"
+        },
+        "idle_ttl": {
+          "description": "Durée d'inactivité au-delà de laquelle la session applicative est oubliée.",
+          "$ref": "#/$defs/duration",
+          "default": "30m"
+        }
+      }
+    },
+    "expiry": {
+      "description": "Détection d'une session applicative expirée sur une réponse relayée : déclenche un rejeu puis la répétition de la requête (si elle est idempotente).",
+      "$ref": "#/$defs/matcherSet"
+    },
+    "logout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paths": {
+          "description": "Chemins de déconnexion de l'appli. Leur appel invalide la session applicative stockée.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/regex" }
+        },
+        "action": {
+          "description": "forward : relayer à l'appli puis oublier la session ; portal_logout : déconnecter aussi du portail.",
+          "enum": ["forward", "portal_logout"],
+          "default": "forward"
+        }
+      }
+    },
+    "rewrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "location": {
+          "description": "Réécrit les en-têtes Location pointant vers l'URL interne de l'appli.",
+          "type": "boolean",
+          "default": true
+        },
+        "body_absolute_urls": {
+          "description": "Réécrit les URLs absolues internes dans le corps des réponses.",
+          "type": "boolean",
+          "default": false
+        },
+        "content_types": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["text/html", "text/css", "application/javascript"]
+        }
+      }
+    },
+    "health": {
+      "description": "Test de santé périodique du module d'embarquement.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "interval": { "$ref": "#/$defs/duration", "default": "1h" },
+        "form_fingerprint": {
+          "description": "Empreinte (sha256) de la structure du formulaire de login au moment de la validation. Un écart déclenche une alerte.",
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

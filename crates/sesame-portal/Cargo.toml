@@ -1,0 +1,18 @@
+[package]
+name = "sesame-portal"
+description = "Portail d'authentification Sesame : OIDC, session portail, habilitations."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+sesame-core.workspace = true
+axum.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

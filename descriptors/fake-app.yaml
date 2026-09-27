@@ -1,0 +1,63 @@
+# Descripteur de l'appli factice de dev (dev/fake-app).
+# Aucun secret ici : username et password sont lus dans le coffre
+# sous le couple (fake-app, utilisateur).
+apiVersion: sesame/v1
+kind: AppDescriptor
+metadata:
+  id: fake-app
+  name: Appli factice
+  description: Application de test avec formulaire de login et jeton CSRF.
+  revision: 1
+  owner: sesame-dev
+spec:
+  upstream:
+    base_url: http://fake-app:8000
+    timeout: 10s
+  public:
+    host: fake-app.sesame.localhost:8443
+  access:
+    groups:
+      - fake-app-users
+  credentials:
+    mode: per_user
+    keys: [username, password]
+  login:
+    form_url: /login
+    form_selector: "form#login-form"
+    method: POST
+    encoding: form
+    include_hidden_inputs: true
+    fields:
+      username: { from_secret: username }
+      password: { from_secret: password }
+    csrf:
+      - source: hidden_input
+        name: csrf_token
+    success:
+      any_of:
+        - status: [302, 303]
+          location_not_matches: "^/login"
+          cookie_set: FAKEAPPSESSID
+    failure:
+      any_of:
+        - status: [200, 401]
+          body_contains: "Identifiants invalides"
+    max_attempts: 1
+  session:
+    cookies: [FAKEAPPSESSID]
+    max_ttl: 8h
+    idle_ttl: 30m
+  expiry:
+    any_of:
+      - status: [302, 303]
+        location_matches: "^(http://fake-app:8000)?/login"
+      - status: [401]
+  logout:
+    paths: ["^/logout$"]
+    action: forward
+  rewrite:
+    location: true
+    body_absolute_urls: true
+    content_types: [text/html]
+  health:
+    interval: 1h

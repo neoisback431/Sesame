@@ -1,0 +1,11 @@
+[project]
+name = "sesame-admin"
+version = "0.1.0"
+description = "Interface web d'administration Sesame : applis, descripteurs, habilitations, comptes."
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
