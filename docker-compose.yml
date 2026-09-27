@@ -175,6 +175,16 @@ services:
       interval: 5s
       retries: 60
 
+  # Test de santé des formulaires de login (à planifier : cron, CI…).
+  # Lancement ponctuel : docker compose run --rm health
+  health:
+    build: ./onboarding
+    profiles: [tools]
+    volumes:
+      - ./descriptors:/etc/sesame/descriptors:ro
+      - ./schemas/app-descriptor.schema.json:/etc/sesame/app-descriptor.schema.json:ro
+    depends_on: [fake-app]
+
   fake-app:
     build: ./dev/fake-app
     environment:

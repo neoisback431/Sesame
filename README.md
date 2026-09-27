@@ -4,7 +4,7 @@ Portail SSO à injection de credentials côté serveur, pour les applications we
 
 L'utilisateur s'authentifie une fois auprès du fournisseur d'identité de son organisation (OIDC : Entra ID, Keycloak, Okta…). Sesame rejoue ensuite, côté serveur, la connexion à chaque application avec des identifiants lus dans un coffre de secrets (OpenBao, Vault…). **Aucun mot de passe applicatif ni cookie de session applicatif n'atteint le navigateur.**
 
-> État : MVP. Connexion OIDC, page « Mes applications », rejeu du login, injection de session et détection d'expiration fonctionnent de bout en bout sur l'appli factice. L'UI d'administration gère le registre des comptes et les identifiants applicatifs. Le module d'embarquement reste à faire.
+> État : MVP. Connexion OIDC, page « Mes applications », rejeu du login, injection de session et détection d'expiration fonctionnent de bout en bout sur l'appli factice. L'UI d'administration gère le registre des comptes et les identifiants applicatifs. L'embarquement fournit `sesame-onboard` : vérification d'un descripteur avec un compte de test et test de santé des formulaires de login.
 
 ## Documentation
 
@@ -30,7 +30,7 @@ make up
 | `crates/sesame-proxy` | Moteur de proxy (Rust) |
 | `crates/sesame-store-postgres` | Magasin de sessions et registre des comptes PostgreSQL |
 | `crates/sesame-secrets-openbao` | Coffre OpenBao / Vault |
-| `onboarding/` | Module d'embarquement (Python, Playwright) |
+| `onboarding/` | Embarquement : `sesame-onboard` (vérification, empreinte, test de santé) |
 | `admin/` | UI web d'administration (Python, FastAPI) |
 | `schemas/` | Schéma JSON du descripteur d'appli |
 | `descriptors/` | Descripteurs d'applis (YAML versionné) |

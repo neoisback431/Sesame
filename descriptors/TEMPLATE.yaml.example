@@ -1,0 +1,52 @@
+# Gabarit de descripteur d'appli. Copier en descriptors/<id>.yaml, compléter,
+# puis valider avec un compte de test :
+#   make validate-descriptors
+#   sesame-onboard verify descriptors/<id>.yaml
+#   sesame-onboard fingerprint descriptors/<id>.yaml   # à reporter dans spec.health
+# Référence complète : docs/descriptor.md. Aucun secret dans ce fichier.
+apiVersion: sesame/v1
+kind: AppDescriptor
+metadata:
+  id: mon-appli                    # minuscules, chiffres, tirets
+  name: Mon appli
+  description: À quoi sert l'appli.
+  revision: 1                      # incrémenter à chaque modification validée
+  owner: equipe-responsable
+spec:
+  upstream:
+    base_url: http://mon-appli.interne:8080   # adresse jointe par le proxy
+  public:
+    host: mon-appli.sesame.example            # adresse exposée par Sesame
+  access:
+    groups: [groupe-de-l-idp]                 # valeurs du claim de groupes
+  credentials:
+    mode: per_user
+    keys: [username, password]                # clés lues dans le coffre
+  login:
+    form_url: /login                          # page de login (GET)
+    form_selector: "form#login"               # doit exister dans le HTML brut (sans JavaScript)
+    fields:                                   # noms des champs du formulaire
+      username: { from_secret: username }
+      password: { from_secret: password }
+    csrf:                                     # champs cachés : renvoyés automatiquement ;
+      - source: hidden_input                  # les déclarer ici rend leur absence bloquante
+        name: csrf_token
+    success:                                  # réponse au POST (avant redirection)
+      any_of:
+        - status: [302, 303]
+          location_not_matches: "^/login"
+          cookie_set: SESSIONID
+    failure:
+      any_of:
+        - body_contains: "Identifiants invalides"
+  session:
+    cookies: [SESSIONID]                      # cookies de session à capturer
+  expiry:                                     # session applicative expirée
+    any_of:
+      - status: [302, 303]
+        location_matches: "^(http://mon-appli.interne:8080)?/login"
+  logout:
+    paths: ["^/logout$"]
+  health:
+    interval: 1h
+    # form_fingerprint: "sha256:..."          # sortie de sesame-onboard fingerprint

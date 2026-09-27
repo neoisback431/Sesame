@@ -4,7 +4,7 @@ Un descripteur indique à Sesame comment exposer une appli et comment rejouer sa
 
 **Un descripteur ne contient jamais de secret.** Les identifiants sont désignés par un nom de clé (`from_secret: password`), puis lus dans le coffre au moment du rejeu.
 
-Exemple complet : [`descriptors/fake-app.yaml`](../descriptors/fake-app.yaml).
+Exemple complet : [`descriptors/fake-app.yaml`](../descriptors/fake-app.yaml). Gabarit commenté pour une nouvelle appli : [`descriptors/TEMPLATE.yaml.example`](../descriptors/TEMPLATE.yaml.example).
 
 ## Structure
 
@@ -57,3 +57,5 @@ Une condition vaut si **toutes** ses propriétés sont vraies. Un ensemble `any_
 
 - `make validate-descriptors` vérifie les fichiers contre le schéma JSON et l'unicité des `id`.
 - Au démarrage, le moteur de proxy refait ces contrôles et en ajoute d'autres : regex compilables, `from_secret` correspondant à une clé de `credentials.keys`, etc. Un descripteur invalide empêche le démarrage.
+- `sesame-onboard verify <descripteur>` rejoue le login avec un compte de test, avec les règles du proxy (HTML brut, sans JavaScript), et indique la cause d'un échec.
+- `sesame-onboard fingerprint <descripteur>` calcule l'empreinte à reporter dans `spec.health.form_fingerprint` ; `sesame-onboard health` la surveille ensuite.

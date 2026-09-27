@@ -61,3 +61,5 @@ spec:
     content_types: [text/html]
   health:
     interval: 1h
+    # Empreinte du formulaire validé : sesame-onboard fingerprint descriptors/fake-app.yaml
+    form_fingerprint: "sha256:9a1ec2e453d0c71d420e111d963a082dd2e1e4ce9160bb22c0cbc73b0e6b051f"

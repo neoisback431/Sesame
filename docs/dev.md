@@ -53,6 +53,7 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 | `admin` | UI d'administration (Python) : registre des comptes et identifiants applicatifs |
 | `openbao` + `openbao-seed` | Coffre en mode dev. Le seed (idempotent) crée l'AppRole du proxy (lecture seule), celui de l'admin (écriture sans lecture) et les identifiants de test. |
 | `keycloak` | Fournisseur OIDC de dev, realm importé depuis `dev/keycloak/sesame-realm.json` |
+| `health` | Test de santé des formulaires de login (profil `tools`, lancé à la demande : `make health`) |
 | `fake-app` | Appli cible : formulaire de login, jeton CSRF à usage unique, champ caché, session serveur de 5 min. Aucun port publié. |
 
 ## Parcours à essayer
@@ -67,11 +68,24 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 ## Commandes
 
 ```sh
-make test                  # tests Rust + Python (appli factice, admin)
+make test                  # tests Rust + Python (appli factice, admin, embarquement)
 make test-postgres         # tests de contrat du magasin sur une base PostgreSQL jetable
 make e2e                   # parcours bout en bout Playwright (après make up)
+make health                # test de santé des formulaires de login (après make up)
 make lint                  # fmt, clippy, ruff, validation des descripteurs
 make validate-descriptors
 make deny                  # licences des dépendances Rust (cargo-deny) et Python
 make down
 ```
+
+## Embarquer une appli
+
+```sh
+cp descriptors/TEMPLATE.yaml.example descriptors/mon-appli.yaml   # puis compléter
+make validate-descriptors
+cd onboarding
+uv run sesame-onboard verify ../descriptors/mon-appli.yaml        # compte de test demandé
+uv run sesame-onboard fingerprint ../descriptors/mon-appli.yaml   # empreinte à reporter
+```
+
+`verify` et `fingerprint` doivent pouvoir joindre `spec.upstream.base_url`. Pour une appli de l'environnement de dev, lancez-les dans le réseau du compose, par exemple `docker compose run --rm --entrypoint sesame-onboard health --schema /etc/sesame/app-descriptor.schema.json fingerprint /etc/sesame/descriptors/fake-app.yaml`.

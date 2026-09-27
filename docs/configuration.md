@@ -66,6 +66,14 @@ URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_PUBLI
 
 URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_ADMIN_PUBLIC_URL>/auth/callback`.
 
+## Outil d'embarquement (`sesame-onboard`)
+
+| Variable | Rôle |
+|---|---|
+| `SESAME_ONBOARD_<CLÉ>` 🔒 | Identifiants du compte de test pour `verify`, une variable par clé de `credentials.keys` (ex. `SESAME_ONBOARD_USERNAME`, `SESAME_ONBOARD_PASSWORD`). À défaut, saisie masquée |
+
+Options : `--schema` (schéma JSON), `--ca-file`, `--insecure` (dev uniquement), `--timeout`. `health` et `fingerprint` n'utilisent aucun identifiant.
+
 ## Commun
 
 | Variable | Défaut | Rôle |

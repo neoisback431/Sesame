@@ -129,12 +129,13 @@ Session expirée sur un `POST` : rejeu puis `303` vers la page d'origine (soumis
 | Parcours utilisateur | **Page « Mes applications »** dans le portail ; rejeu à l'arrivée sur l'appli, dans le proxy | Tranché |
 | Registre des comptes | **Table PostgreSQL** sans secret (`AccountRegistry`), source : UI d'admin | Tranché |
 | UI d'admin | **FastAPI + Jinja2** (rendu serveur) ; descripteurs **en fichiers Git**, lecture seule dans l'UI ; AppRole admin en écriture sans lecture | Tranché |
+| Embarquement | **CLI `sesame-onboard`** : `verify` (rejeu sans JavaScript, règles du proxy), `fingerprint`, `health` (empreinte du HTML brut, sans identifiants) ; capture Playwright automatique non implémentée | Tranché |
 
 Les décisions ont été prises le 2026-09-27. Consigner leur justification dans `docs/decisions/` (ADR). Toute nouvelle décision structurante est posée en question avant d'être codée, puis ajoutée à ce tableau.
 
 ## Première étape attendue (initialisation)
 
-Étapes 1 à 5 faites (MVP validé de bout en bout par `make e2e`) ; étape 6 en place (`.gitlab-ci.yml`, non exécutée faute de GitLab). UI d'administration v1 faite (registre des comptes, identifiants). Prochaines pistes : module d'embarquement, OpenTelemetry, déconnexion chez le fournisseur d'identité.
+Étapes 1 à 5 faites (MVP validé de bout en bout par `make e2e`) ; étape 6 en place (`.gitlab-ci.yml`, non exécutée faute de GitLab). UI d'administration v1 faite (registre des comptes, identifiants). Embarquement partiel fait (`verify`, `fingerprint`, `health` ; descripteur rédigé depuis `descriptors/TEMPLATE.yaml.example`). Prochaines pistes : OpenTelemetry, déconnexion chez le fournisseur d'identité, capture automatique à l'embarquement.
 
 1. Proposer la structure du dépôt (un dossier par bloc, dossier `descriptors/`, `deploy/`, `docs/`).
 2. Rédiger `docs/architecture.md` et un schéma Mermaid des flux.
@@ -153,15 +154,15 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 | `crates/sesame-store-postgres` | `SessionStore` + `AccountRegistry` sur PostgreSQL, migrations dans `migrations/` |
 | `crates/sesame-secrets-openbao` | `SecretStore` OpenBao / Vault (AppRole, KV v2), API HTTP sans SDK |
 | `admin/` | UI d'administration (FastAPI) : `service.py` (opérations auditées), `web.py` (routes, CSRF, groupe admin), `auth.py` (OIDC Authlib), `ports.py` (`SecretWriter`, `AccountStore`), `openbao.py`, `store_postgres.py` (asyncpg), `memory.py`, `templates/` |
-| `onboarding/` | Paquet Python (squelette) |
+| `onboarding/` | Embarquement (`sesame-onboard`) : `verify.py` (rejeu sans JavaScript, miroir de `replay.rs`), `fingerprint.py` (formulaire en HTML brut + empreinte), `health.py`, `matcher.py` (miroir de `matcher.rs`), `http.py`, `cli.py` |
 | `schemas/app-descriptor.schema.json` | Schéma du descripteur : **fait foi**, contrat entre Rust et Python |
-| `descriptors/` | Descripteurs YAML (`fake-app.yaml` = exemple de référence, utilisé par les tests Rust) |
+| `descriptors/` | Descripteurs YAML (`fake-app.yaml` = exemple de référence, utilisé par les tests Rust ; `TEMPLATE.yaml.example` = gabarit commenté, ignoré au chargement) |
 | `dev/` | Appli factice (Flask), realm Keycloak, seed OpenBao, seed du registre des comptes |
 | `tests/e2e/` | Parcours bout en bout Playwright sur le compose de dev |
 | `deploy/` | `nginx/nginx.conf`, `docker/rust.Dockerfile` (`--build-arg BIN=…`) |
 | `docs/` | `architecture.md`, `descriptor.md`, `configuration.md` (variables d'environnement), `dev.md`, `decisions/` (ADR) |
 
-Toute modification du schéma du descripteur se reporte dans `descriptor.rs`, `docs/descriptor.md` et `descriptors/fake-app.yaml`.
+Toute modification du schéma du descripteur se reporte dans `descriptor.rs`, `docs/descriptor.md`, `descriptors/fake-app.yaml` et `descriptors/TEMPLATE.yaml.example`. Toute évolution de la sémantique du rejeu ou des conditions se reporte des deux côtés : `crates/sesame-proxy` (Rust) et `onboarding/` (Python). Si le formulaire de l'appli factice change, mettre à jour son `form_fingerprint`.
 Toute nouvelle variable d'environnement se documente dans `docs/configuration.md`.
 UI d'admin : pas de `from __future__ import annotations` dans `web.py` (FastAPI doit résoudre l'alias local `Admin`) ; le schéma de base appartient aux migrations Rust ; le format d'audit Python doit rester identique à celui des services Rust (JSON compact, `"log_type":"audit"`).
 Tests du proxy : banc commun dans `crates/sesame-proxy/tests/common/` (appli simulée + implémentations en mémoire) ; les tests de non-fuite des logs vivent dans un binaire de test séparé (`no_leak.rs`).
@@ -169,9 +170,10 @@ Tests du proxy : banc commun dans `crates/sesame-proxy/tests/common/` (appli sim
 ## Commandes
 
 ```sh
-make test                  # cargo test + pytest (dev/fake-app, admin)
+make test                  # cargo test + pytest (dev/fake-app, admin, onboarding)
 make test-postgres         # tests de contrat PostgreSQL (Rust + Python) sur une base jetable (Docker)
 make e2e                   # parcours bout en bout Playwright (après make up)
+make health                # test de santé des formulaires de login (après make up)
 make lint                  # cargo fmt --check, clippy -D warnings, ruff, validation des descripteurs
 make validate-descriptors  # uv run scripts/validate_descriptors.py
 make deny                  # licences des dépendances Rust (cargo-deny) et Python (scripts/check_python_licenses.py)

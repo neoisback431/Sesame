@@ -265,13 +265,19 @@ Application Python (FastAPI, pages rendues côté serveur) sur son propre nom d'
 
 ## Module d'embarquement
 
-1. Un administrateur fournit l'URL de login et un compte de test.
-2. Playwright effectue une connexion réelle et observe les formulaires, les champs cachés, les jetons CSRF (input, meta, cookie), la requête de login, la redirection et les cookies posés.
-3. Le module génère un descripteur conforme au schéma et une empreinte de la structure du formulaire (`health.form_fingerprint`).
-4. Un humain relit le descripteur, puis le valide dans l'UI d'admin ou par merge request.
-5. En tâche périodique, le module recalcule l'empreinte et alerte en cas d'écart.
+Outil en ligne de commande `sesame-onboard` (Python). Voir [ADR 0012](decisions/0012-embarquement.md).
 
-Hors périmètre initial : login en plusieurs étapes, captcha, MFA applicatif.
+Le moteur de proxy rejoue le login **sans exécuter de JavaScript** : il lit le formulaire dans le HTML brut. L'embarquement repose sur ce même principe.
+
+1. Un administrateur rédige le descripteur à partir de [`descriptors/TEMPLATE.yaml.example`](../descriptors/TEMPLATE.yaml.example) : champs du formulaire, jetons CSRF, conditions de succès, cookie de session, expiration.
+2. `sesame-onboard verify <descripteur>` rejoue le login avec un compte de test, avec les mêmes règles que le proxy (champs cachés, CSRF, conditions, cookie de session). Le résultat indique la cause d'un échec, par exemple `login_form_not_found_in_raw_html` pour un formulaire construit en JavaScript, ou `csrf_token_not_found`, `login_rejected`, `session_cookie_missing`.
+3. `sesame-onboard fingerprint <descripteur>` calcule l'empreinte de la structure du formulaire (action, méthode, champs, sans les valeurs), à reporter dans `spec.health.form_fingerprint`.
+4. Un humain relit le descripteur, qui est fusionné par merge request.
+5. `sesame-onboard health <dossier>` tourne en tâche périodique (cron, CI, service `health` du compose). Il recalcule l'empreinte **sans identifiants** et sort en erreur si le formulaire a changé (`changed`), a disparu (`form_missing`) ou si l'appli est injoignable (`unreachable`).
+
+Les identifiants du compte de test sont lus dans l'environnement (`SESAME_ONBOARD_<CLÉ>`) ou saisis en masqué. Ils ne sont jamais écrits dans un fichier, dans la sortie ni dans les logs.
+
+**Pas encore disponible** : la capture automatique d'un login réel dans un navigateur headless (Playwright), qui générerait le descripteur. Hors périmètre initial : login en plusieurs étapes, captcha, MFA applicatif.
 
 ## Observabilité
 

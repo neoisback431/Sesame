@@ -15,3 +15,4 @@ Une fiche par décision structurante : contexte, décision, conséquences. Une d
 | [0009](0009-parcours-utilisateur.md) | Parcours utilisateur : « Mes applications », rejeu à l'arrivée | 2026-09-27 |
 | [0010](0010-registre-des-comptes.md) | Registre des comptes dans PostgreSQL | 2026-09-27 |
 | [0011](0011-administration.md) | UI d'administration : descripteurs en Git, FastAPI | 2026-09-27 |
+| [0012](0012-embarquement.md) | Embarquement : outil en ligne de commande, vérification sans JavaScript | 2026-09-27 |

@@ -2,14 +2,14 @@
 # Point d'entrée unique pour les développeurs et la CI (les fichiers CI restent minces).
 
 CERTS := deploy/nginx/certs
-# onboarding rejoindra la liste avec ses premiers tests.
-PY_PROJECTS := dev/fake-app admin
+PY_PROJECTS := dev/fake-app admin onboarding
 
-.PHONY: help dev-certs up down logs test test-rust test-python test-postgres e2e lint lint-rust lint-python validate-descriptors images deny deny-python
+.PHONY: help dev-certs up down logs health test test-rust test-python test-postgres e2e lint lint-rust lint-python validate-descriptors images deny deny-python
 
 help:
 	@echo "dev-certs             certificat TLS de dev pour *.sesame.localhost"
 	@echo "up / down / logs      environnement Docker Compose de dev"
+	@echo "health                test de santé des formulaires de login (après make up)"
 	@echo "test                  tests Rust et Python"
 	@echo "test-postgres         tests de contrat sur une base PostgreSQL jetable (Docker)"
 	@echo "e2e                   tests bout en bout Playwright (après make up)"
@@ -40,6 +40,9 @@ down:
 
 logs:
 	docker compose logs -f
+
+health:
+	docker compose run --rm --build health
 
 test: test-rust test-python
 
