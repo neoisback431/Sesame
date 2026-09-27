@@ -7,6 +7,10 @@
   du proxy avant enregistrement. <code>metadata.revision</code> est tenue par Sesame.
   {% if app_id %}Révision courante : {{ revision }} ; l'enregistrement est refusé si quelqu'un l'a modifiée entre-temps.{% endif %}
   Aucun secret dans un descripteur : les constantes <code>value</code> sont visibles de tous les administrateurs.</p>
+{% if notes %}
+<div class="card"><strong>Analyse de la page de login — à relire et compléter :</strong>
+  <ul>{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul></div>
+{% endif %}
 {% if errors %}
 <ul class="errors" role="alert">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
 {% elif valid %}
