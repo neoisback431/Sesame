@@ -23,3 +23,4 @@ Une fiche par décision structurante : contexte, décision, conséquences. Une d
 | [0017](0017-habilitation-par-compte.md) | Le compte suffit : `spec.access` facultatif | 2026-09-28 |
 | [0018](0018-diagnostic-des-rejeux.md) | Diagnostic des rejeux en échec dans l'administration | 2026-09-28 |
 | [0019](0019-recorder-compte-de-test.md) | Recorder avec compte de test (remplace en partie 0015) | 2026-09-28 |
+| [0020](0020-mode-remise-handoff.md) | Mode « remise » (handoff) — **proposé** | 2026-09-28 |
