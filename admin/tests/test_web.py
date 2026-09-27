@@ -499,3 +499,41 @@ def test_provision_form_suggests_known_users(ctx):
     assert '<option value="alice">' in page and '<option value="bob">' in page
     # Le champ pointe vers la liste et l'aide rappelle la clé exacte.
     assert 'list="known-users"' in page and "exactement" in page
+
+
+def test_restricted_app_warns_and_can_be_opened_to_account_holders(ctx):
+    """Appli restreinte à un groupe (ancien défaut du formulaire) : le compte seul ne suffit
+    pas ; l'admin le signale et permet de retirer la restriction (ADR 0017)."""
+    client, service, _, audit = ctx
+    login(client)
+    token = csrf(client, "/apps/new")
+    assert client.post("/apps", data={"csrf": token, "descriptor": descriptor_yaml()}).status_code == 303
+    page = client.get("/apps/crm").text
+    assert 'id="access-restricted"' in page and "<code>fake-app-users</code>" in page
+
+    r = client.post(
+        "/apps/crm/accounts",
+        data={"csrf": token, "user_key": "alice", "cred_username": "a", "cred_password": SECRET},
+    )
+    assert r.status_code == 303 and "restreint" in client.get("/apps/crm").text
+
+    assert client.post("/apps/crm/open-access", data={"csrf": "forged"}).status_code in (303, 400)
+    assert "access" in asyncio.run(service.stored("crm")).document["spec"]
+    r = client.post("/apps/crm/open-access", data={"csrf": token})
+    assert r.status_code == 303
+    page = client.get("/apps/crm").text
+    assert "Restriction retirée" in page and 'id="access-restricted"' not in page and "révision 2" in page
+    stored = asyncio.run(service.stored("crm"))
+    assert "access" not in stored.document["spec"] and stored.revision == 2
+    assert audit.events[-1].action == "descriptor_updated" and audit.events[-1].outcome == "success"
+    assert_no_leak(page)
+
+
+def test_git_app_restriction_cannot_be_opened_from_the_ui(ctx):
+    client, *_ = ctx
+    login(client)
+    page = client.get("/apps/fake-app").text
+    assert 'id="access-restricted"' in page and "/apps/fake-app/open-access" not in page
+    r = client.post("/apps/fake-app/open-access", data={"csrf": csrf(client)})
+    assert r.status_code == 303
+    assert "retirer spec.access par merge request" in client.get("/apps/fake-app").text
