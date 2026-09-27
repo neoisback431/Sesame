@@ -599,3 +599,13 @@ def test_analyze_with_test_account_passes_credentials_without_keeping_them(apps)
         "/apps/analyze", data={"csrf": token, "login_url": "https://crm.interne/login", "test_username": "x"}
     )
     assert recorder.credentials is None
+
+
+def test_guided_form_start_path(ctx):
+    client, *_ = ctx
+    login(client)
+    token = csrf(client, "/apps/new")
+    text = editor_text(client.post("/apps/new", data={"csrf": token, **GUIDED, "start_path": "/chat"}).text)
+    assert "start_path: /chat" in text
+    text = editor_text(client.post("/apps/new", data={"csrf": token, **GUIDED, "start_path": "/"}).text)
+    assert "start_path" not in text

@@ -54,6 +54,9 @@
       <input type="text" id="public_host" name="public_host" required></div>
     <div><label for="base_url">URL de l'appli jointe par le proxy (ex. <code>http://crm.interne:8080</code>)</label>
       <input type="text" id="base_url" name="base_url" required></div>
+    <div><label for="start_path">Page d'arrivée ouverte par la tuile (facultatif, ex. <code>/chat</code> ; défaut
+      <code>/</code>)</label>
+      <input type="text" id="start_path" name="start_path" pattern="/\S*" placeholder="/"></div>
   </div>
   <h2>Habilitations <span class="muted">(facultatif)</span></h2>
   <p class="muted">Laissez vide pour que <strong>tout utilisateur ayant un compte actif</strong> accède à l'appli

@@ -100,6 +100,13 @@ impl Default for Tls {
 #[serde(deny_unknown_fields)]
 pub struct Public {
     pub host: String,
+    /// Page d'arrivée ouverte par la tuile du portail.
+    #[serde(default = "default_start_path")]
+    pub start_path: String,
+}
+
+fn default_start_path() -> String {
+    "/".into()
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -369,6 +376,10 @@ impl AppDescriptor {
         if !id_ok.is_match(&self.metadata.id) {
             return invalid("metadata.id invalide".into());
         }
+        let start = &self.spec.public.start_path;
+        if !start.starts_with('/') || start.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return invalid("public.start_path : chemin commençant par / attendu".into());
+        }
         let spec = &self.spec;
         if spec.credentials.keys.is_empty() {
             return invalid("credentials.keys vide".into());
@@ -570,6 +581,22 @@ mod tests {
             with("name: csrf_token", "name: csrf_token\n        url: /x").is_err(),
             "url réservée"
         );
+    }
+
+    #[test]
+    fn start_path_defaults_to_root_and_must_be_a_path() {
+        assert_eq!(
+            AppDescriptor::from_yaml(FAKE_APP).unwrap().spec.public.start_path,
+            "/"
+        );
+        let with = |p: &str| {
+            AppDescriptor::from_yaml(&FAKE_APP.replace("start_path: /  ", &format!("start_path: \"{p}\"  ")))
+        };
+        assert_eq!(
+            with("/chat?room=1").unwrap().spec.public.start_path,
+            "/chat?room=1"
+        );
+        assert!(with("chat").is_err() && with("/a b").is_err());
     }
 
     #[test]

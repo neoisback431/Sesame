@@ -327,7 +327,10 @@ def draft(form: dict[str, str]) -> dict[str, Any]:
         "metadata": metadata,
         "spec": {
             "upstream": {"base_url": base_url},
-            "public": {"host": get("public_host").lower()},
+            "public": {
+                "host": get("public_host").lower(),
+                **({"start_path": get("start_path")} if get("start_path") not in ("", "/") else {}),
+            },
             # access omis => tout utilisateur avec un compte actif est autorisé.
             **({"access": access} if access else {}),
             "credentials": {"mode": "per_user", "keys": ["username", "password"]},

@@ -42,7 +42,7 @@ def test_reference_descriptor_is_valid():
         ({"- source: hidden_input": "- source: endpoint\n        url: api/csrf"}, "url"),
         ({"        name: csrf_token": "        name: csrf_token\n        url: /api/csrf"}, "url"),
         (
-            {"- source: hidden_input": "- source: endpoint\n        url: /api/csrf\n        pattern: \"(a\""},
+            {"- source: hidden_input": '- source: endpoint\n        url: /api/csrf\n        pattern: "(a"'},
             "regex",
         ),
         ({"max_ttl: 8h": "max_ttl: 99999999999999999999h"}, "durée invalide"),
@@ -57,8 +57,10 @@ def test_checks_mirror_the_proxy(replace, expected):
 
 
 def test_endpoint_token_is_valid():
-    text = (DESCRIPTORS / "fake-app.yaml").read_text().replace(
-        "- source: hidden_input", "- source: endpoint\n        url: /api/csrf-token"
+    text = (
+        (DESCRIPTORS / "fake-app.yaml")
+        .read_text()
+        .replace("- source: hidden_input", "- source: endpoint\n        url: /api/csrf-token")
     )
     assert V.check(yaml.safe_load(text)) == []
 

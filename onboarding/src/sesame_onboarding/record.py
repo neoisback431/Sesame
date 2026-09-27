@@ -723,7 +723,8 @@ def observe_login(
             location=location,
             cookies_set=cookies_set,
             new_cookies=new_cookies,
-            final_path=_path(page.url),
+            # Chemin seul : une chaîne de requête peut porter un jeton.
+            final_path=urlsplit(page.url).path or "/",
             logged_in=visible_password == 0,
             username_key=username_key,
             password_key=password_key,
@@ -854,6 +855,11 @@ def to_descriptor(
 
     login_path = urlsplit(rec.form_url).path or "/"
     base = rec.base_url.rstrip("/")
+    # Page atteinte après la connexion de test : la tuile du portail y mènera, la racine
+    # de certaines applis affichant le formulaire de login même une fois connecté.
+    start_path = None
+    if rec.login and rec.login.logged_in and rec.login.final_path not in ("/", login_path):
+        start_path = rec.login.final_path
     cookie = session_cookie
     observed = rec.login if rec.login and rec.login.logged_in and rec.login.session_cookies else None
     if not cookie and observed:
@@ -920,7 +926,7 @@ def to_descriptor(
         "metadata": {"id": app_id, "name": name or rec.title or app_id, "revision": 1},
         "spec": {
             "upstream": {"base_url": base},
-            "public": {"host": public_host},
+            "public": {"host": public_host, **({"start_path": start_path} if start_path else {})},
             **({"access": access} if access else {}),
             "credentials": {
                 "mode": "per_user",
@@ -1041,6 +1047,8 @@ def summary(rec: Recording) -> list[str]:
         )
         if lo.session_cookies:
             out.append("cookie(s) de session retenu(s) : " + ", ".join(lo.session_cookies))
+        if lo.logged_in:
+            out.append(f"page atteinte après connexion : {lo.final_path}")
         out.append(f"champs envoyés : identifiant={lo.username_key}, mot de passe={lo.password_key}")
         if lo.constants:
             out.append("champs constants envoyés : " + ", ".join(lo.constants))

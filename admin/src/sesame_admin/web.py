@@ -42,6 +42,7 @@ _GUIDED = (
     "description",
     "owner",
     "public_host",
+    "start_path",
     "base_url",
     "groups",
     "users",
