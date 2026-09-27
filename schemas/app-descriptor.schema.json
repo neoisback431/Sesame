@@ -475,12 +475,18 @@
     "session": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "cookies"
-      ],
+      "required": [],
       "properties": {
+        "mode": {
+          "description": "proxy (défaut) : Sesame relaie chaque requête, la session reste côté serveur. handoff : Sesame rejoue le login puis remet l'élément de session au navigateur, qui joint l'appli directement (exception aux principes 1 et 3, ADR 0020).",
+          "enum": [
+            "proxy",
+            "handoff"
+          ],
+          "default": "proxy"
+        },
         "cookies": {
-          "description": "Cookies de session applicatifs à capturer et réinjecter. Ils ne quittent jamais le serveur.",
+          "description": "Cookies de session applicatifs à capturer. En mode proxy : réinjectés à chaque requête, ne quittent jamais le serveur. En mode handoff : capturés puis, selon handoff.set_cookies, posés au navigateur.",
           "type": "array",
           "items": {
             "type": "string"
@@ -497,7 +503,25 @@
           "description": "Durée d'inactivité au-delà de laquelle la session applicative est oubliée.",
           "$ref": "#/$defs/duration",
           "default": "30m"
+        },
+        "handoff": {
+          "$ref": "#/$defs/handoff"
         }
+      },
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "handoff"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "required": [
+          "handoff"
+        ]
       }
     },
     "expiry": {
@@ -565,6 +589,59 @@
           "description": "Empreinte (sha256) de la structure du formulaire de login au moment de la validation. Un écart déclenche une alerte.",
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "handoff": {
+      "description": "Mode handoff (ADR 0020) : élément de session remis au navigateur. Au moins un de set_cookies / local_storage.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "set_cookies": {
+          "description": "Noms, parmi session.cookies, des cookies capturés à poser sur le navigateur.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "local_storage": {
+          "description": "Valeurs écrites dans le stockage local du navigateur, lues dans la réponse au login.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/handoffItem"
+          }
+        },
+        "redirect_status": {
+          "description": "Code de la redirection vers start_path après la remise.",
+          "type": "integer",
+          "enum": [
+            302,
+            303
+          ],
+          "default": 303
+        }
+      }
+    },
+    "handoffItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "from_response"
+      ],
+      "properties": {
+        "key": {
+          "description": "Clé du stockage local (localStorage) écrite sur le navigateur.",
+          "type": "string",
+          "minLength": 1
+        },
+        "from_response": {
+          "description": "Champ de la réponse JSON au login (chemin pointé, ex. accessToken ou data.refreshToken).",
+          "type": "string",
+          "minLength": 1
         }
       }
     }

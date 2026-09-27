@@ -281,11 +281,52 @@ pub struct MatcherSet {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Session {
+    #[serde(default)]
+    pub mode: SessionMode,
+    #[serde(default)]
     pub cookies: Vec<String>,
+    /// Requis en mode handoff : élément de session remis au navigateur (ADR 0020).
+    #[serde(default)]
+    pub handoff: Option<Handoff>,
     #[serde(default = "default_max_ttl", deserialize_with = "de_duration")]
     pub max_ttl: Duration,
     #[serde(default = "default_idle_ttl", deserialize_with = "de_duration")]
     pub idle_ttl: Duration,
+}
+
+/// Chemin dédié où le portail dirige la tuile d'une appli en mode handoff (ADR 0020).
+pub const HANDOFF_PATH: &str = "/__sesame/handoff";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMode {
+    /// Sesame relaie chaque requête ; la session reste côté serveur.
+    #[default]
+    Proxy,
+    /// Sesame rejoue le login puis remet l'élément de session au navigateur (ADR 0020).
+    Handoff,
+}
+
+/// Élément de session remis au navigateur en mode handoff (ADR 0020).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Handoff {
+    /// Cookies capturés (parmi `session.cookies`) à poser sur le navigateur.
+    #[serde(default)]
+    pub set_cookies: Vec<String>,
+    /// Valeurs écrites dans le stockage local, lues dans la réponse au login.
+    #[serde(default)]
+    pub local_storage: Vec<HandoffItem>,
+    #[serde(default = "default_handoff_redirect")]
+    pub redirect_status: u16,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HandoffItem {
+    pub key: String,
+    /// Champ de la réponse JSON au login (chemin pointé).
+    pub from_response: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -425,8 +466,40 @@ impl AppDescriptor {
                 _ => {}
             }
         }
-        if spec.session.cookies.is_empty() {
-            return invalid("session.cookies vide".into());
+        let uniq = |v: &[String]| v.iter().collect::<std::collections::HashSet<_>>().len() == v.len();
+        match spec.session.mode {
+            SessionMode::Proxy => {
+                if spec.session.cookies.is_empty() {
+                    return invalid("session.cookies vide (requis en mode proxy)".into());
+                }
+                if spec.session.handoff.is_some() {
+                    return invalid("session.handoff réservé au mode handoff".into());
+                }
+            }
+            SessionMode::Handoff => {
+                let Some(h) = &spec.session.handoff else {
+                    return invalid("session.handoff requis en mode handoff".into());
+                };
+                if h.set_cookies.is_empty() && h.local_storage.is_empty() {
+                    return invalid("session.handoff : set_cookies ou local_storage requis".into());
+                }
+                for name in &h.set_cookies {
+                    if !spec.session.cookies.contains(name) {
+                        return invalid(format!(
+                            "session.handoff.set_cookies : « {name} » absent de session.cookies"
+                        ));
+                    }
+                }
+                if !uniq(&h.set_cookies) {
+                    return invalid("session.handoff.set_cookies : doublon".into());
+                }
+                if !uniq(&h.local_storage.iter().map(|i| i.key.clone()).collect::<Vec<_>>()) {
+                    return invalid("session.handoff.local_storage : clé en double".into());
+                }
+            }
+        }
+        if !uniq(&spec.session.cookies) {
+            return invalid("session.cookies : doublon".into());
         }
         if !(1..=5).contains(&spec.login.max_attempts) {
             return invalid("login.max_attempts doit être entre 1 et 5".into());
@@ -527,6 +600,10 @@ fn one() -> u8 {
 fn default_timeout() -> Duration {
     Duration::from_secs(30)
 }
+fn default_handoff_redirect() -> u16 {
+    303
+}
+
 fn default_max_ttl() -> Duration {
     Duration::from_secs(8 * 3600)
 }
@@ -617,6 +694,56 @@ mod tests {
         let with_action = without.replace("use_form: false", "use_form: false\n    action: /api/login");
         let d = AppDescriptor::from_yaml(&with_action).expect("valide");
         assert!(!d.spec.login.use_form);
+    }
+
+    #[test]
+    fn handoff_mode_requires_a_handoff_element() {
+        let base = FAKE_APP.replace(
+            "  session:\n    cookies: [FAKEAPPSESSID]",
+            "  session:\n    mode: handoff\n    cookies: [FAKEAPPSESSID]",
+        );
+        assert_ne!(base, FAKE_APP, "ancre session trouvée");
+        assert!(AppDescriptor::from_yaml(&base).is_err(), "handoff sans élément");
+
+        let cookie = base.replace(
+            "    cookies: [FAKEAPPSESSID]",
+            "    cookies: [FAKEAPPSESSID]\n    handoff:\n      set_cookies: [FAKEAPPSESSID]",
+        );
+        let d = AppDescriptor::from_yaml(&cookie).expect("handoff cookie valide");
+        assert_eq!(d.spec.session.mode, SessionMode::Handoff);
+        assert_eq!(d.spec.session.handoff.unwrap().redirect_status, 303);
+
+        // set_cookies doit désigner un cookie capturé.
+        let bad = base.replace(
+            "    cookies: [FAKEAPPSESSID]",
+            "    cookies: [FAKEAPPSESSID]\n    handoff:\n      set_cookies: [autre]",
+        );
+        assert!(
+            AppDescriptor::from_yaml(&bad).is_err(),
+            "cookie hors session.cookies"
+        );
+
+        // local_storage sans cookie : valide (cas jeton, YAST).
+        let ls = FAKE_APP.replace(
+            "  session:\n    cookies: [FAKEAPPSESSID]",
+            "  session:\n    mode: handoff\n    handoff:\n      local_storage:\n        - key: refreshToken\n          from_response: refreshToken",
+        );
+        let d = AppDescriptor::from_yaml(&ls).expect("handoff local_storage valide");
+        assert!(d.spec.session.cookies.is_empty());
+        assert_eq!(
+            d.spec.session.handoff.unwrap().local_storage[0].key,
+            "refreshToken"
+        );
+
+        // handoff interdit en mode proxy.
+        let proxy = FAKE_APP.replace(
+            "    cookies: [FAKEAPPSESSID]",
+            "    cookies: [FAKEAPPSESSID]\n    handoff:\n      set_cookies: [FAKEAPPSESSID]",
+        );
+        assert!(
+            AppDescriptor::from_yaml(&proxy).is_err(),
+            "handoff sans mode handoff"
+        );
     }
 
     #[test]

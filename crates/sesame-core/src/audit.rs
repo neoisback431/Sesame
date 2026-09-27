@@ -11,6 +11,8 @@ pub enum AuditAction {
     AccessDenied,
     SecretRead,
     LoginReplay,
+    /// Remise de la session au navigateur (mode handoff, ADR 0020).
+    SessionHandoff,
     AppSessionExpired,
     AppLogout,
     AccountStatusChanged,

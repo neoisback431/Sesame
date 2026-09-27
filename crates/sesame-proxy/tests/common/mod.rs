@@ -324,6 +324,26 @@ impl Bench {
         reply
     }
 
+    /// Comme `send`, mais sans l'invariant de non-fuite : le mode handoff remet
+    /// délibérément le cookie applicatif au navigateur (ADR 0020).
+    pub async fn send_raw(&self, req: Request<Body>) -> Reply {
+        let resp = self.proxy.clone().oneshot(req).await.unwrap();
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let body =
+            String::from_utf8_lossy(&to_bytes(resp.into_body(), usize::MAX).await.unwrap()).into_owned();
+        Reply {
+            status,
+            headers,
+            body,
+        }
+    }
+
+    pub async fn get_raw(&self, path: &str) -> Reply {
+        self.send_raw(self.request("GET", path).body(Body::empty()).unwrap())
+            .await
+    }
+
     pub fn request(&self, method: &str, path: &str) -> axum::http::request::Builder {
         Request::builder()
             .method(method)
