@@ -325,6 +325,50 @@ async fn login_without_form_posts_directly_to_the_action() {
 }
 
 #[tokio::test]
+async fn handoff_mode_hands_the_cookie_to_the_browser() {
+    use sesame_core::descriptor::{Handoff, SessionMode};
+
+    let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
+    let mut d = descriptor(&b.internal);
+    d.spec.session.mode = SessionMode::Handoff;
+    d.spec.session.handoff = Some(Handoff {
+        set_cookies: vec!["APPSESS".into()],
+        local_storage: Vec::new(),
+        redirect_status: 303,
+    });
+    d.spec.public.start_path = "/dashboard".into();
+    let (apps, rejected) = sesame_proxy::build_apps(vec![d], None, "https");
+    assert!(rejected.is_empty(), "{rejected:?}");
+    b.engine.set_apps(apps);
+
+    // Chemin de remise : rejeu côté serveur, cookie posé au navigateur, redirection.
+    let r = b.get_raw(sesame_core::descriptor::HANDOFF_PATH).await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    assert!(r
+        .headers
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .ends_with("/dashboard"));
+    let set: Vec<String> = r
+        .headers
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok().map(str::to_owned))
+        .collect();
+    assert!(
+        set.iter()
+            .any(|c| c.starts_with("APPSESS=sess-") && c.contains("Secure")),
+        "{set:?}"
+    );
+    assert!(b.actions().contains(&AuditAction::SessionHandoff));
+
+    // Les autres chemins d'une appli handoff ne sont pas servis par le proxy.
+    assert_eq!(b.get("/dashboard").await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn no_diagnostic_is_kept_by_default() {
     let b = bench(&["fake-app-users"], "wrong-password", true).await;
     b.get("/").await;

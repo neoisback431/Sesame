@@ -144,8 +144,21 @@ def _semantic_errors(doc: dict[str, Any]) -> list[str]:
         for m in matcher_set["any_of"]:
             patterns += [m[k] for k in ("location_matches", "location_not_matches") if k in m]
     errors += [err for p in patterns if (err := _regex_error(p))]
-    if not spec["session"]["cookies"]:
-        errors.append("spec/session/cookies : vide")
+    session = spec["session"]
+    cookies = session.get("cookies", [])
+    if session.get("mode", "proxy") == "handoff":
+        handoff = session.get("handoff") or {}
+        set_cookies = handoff.get("set_cookies", [])
+        if not set_cookies and not handoff.get("local_storage"):
+            errors.append("spec/session/handoff : set_cookies ou local_storage requis")
+        for name in set_cookies:
+            if name not in cookies:
+                errors.append(f"spec/session/handoff/set_cookies : « {name} » absent de session.cookies")
+    else:
+        if not cookies:
+            errors.append("spec/session/cookies : vide (requis en mode proxy)")
+        if session.get("handoff"):
+            errors.append("spec/session/handoff : réservé au mode handoff")
     for where, value in _durations(spec):
         m = _DURATION.fullmatch(value)
         if m and int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)] >= 2**64:
