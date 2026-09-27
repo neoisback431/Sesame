@@ -1,0 +1,9 @@
+# Scripts exécutés dans des conteneurs Linux : toujours en fins de ligne LF,
+# même sur un poste Windows (core.autocrlf), sinon sh échoue au démarrage.
+*.sh      text eol=lf
+*.hcl     text eol=lf
+*.sql     text eol=lf
+Makefile  text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+*.conf    text eol=lf

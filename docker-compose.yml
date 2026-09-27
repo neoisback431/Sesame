@@ -143,7 +143,8 @@ services:
 
   openbao-seed:
     image: openbao/openbao:2.4.1
-    entrypoint: ["/seed/seed.sh"]
+    # Lancé via sh : ne dépend pas du bit d'exécution du fichier monté.
+    entrypoint: ["sh", "/seed/seed.sh"]
     environment:
       BAO_ADDR: http://openbao:8200
       BAO_TOKEN: dev-root-token
