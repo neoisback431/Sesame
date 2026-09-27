@@ -402,9 +402,10 @@ class FakeRecorder:
         )
         self.error: str | None = None
 
-    async def analyze(self, login_url, *, probe_failure=False, credentials=None):
+    async def analyze(self, login_url, *, probe_failure=False, credentials=None, handoff=False):
         self.calls.append((login_url, probe_failure))
         self.credentials = credentials
+        self.handoff = handoff
         if self.error:
             raise RecorderError(self.error)
         return self.result
@@ -694,3 +695,19 @@ def test_guided_form_handoff_cookie(ctx):
     assert service.validator.check(doc) == []
     assert doc["spec"]["session"]["handoff"]["set_cookies"] == ["SID"]
     assert doc["spec"]["session"]["cookies"] == ["SID"]
+
+
+def test_analyze_passes_handoff_flag(apps):
+    """La case « Mode handoff » du formulaire d'analyse est transmise au recorder (ADR 0020)."""
+    recorder = FakeRecorder()
+    client, _, _ = ctx_with_recorder(apps, recorder)
+    login(client)
+    assert "handoff" in client.get("/apps/new").text  # case présente
+    token = csrf(client, "/apps/new")
+    client.post(
+        "/apps/analyze",
+        data={"csrf": token, "login_url": "https://spa.interne/login", "handoff": "on"},
+    )
+    assert recorder.handoff is True
+    client.post("/apps/analyze", data={"csrf": token, "login_url": "https://spa.interne/login"})
+    assert recorder.handoff is False

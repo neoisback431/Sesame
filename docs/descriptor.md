@@ -90,7 +90,7 @@ session:
         from_response: refreshToken   # réponse du login : {"refreshToken": "…"}
 ```
 
-Le mot de passe applicatif ne quitte jamais le serveur. Le formulaire guidé de l'admin permet de choisir le mode (proxy par défaut) et, en handoff, les clés de stockage local. Le recorder signale une session par jeton et suggère ce mode, sans l'activer par défaut.
+Le mot de passe applicatif ne quitte jamais le serveur. Le mode se choisit dans le formulaire guidé de l'admin (mode + clés de stockage local), avec le bouton « Analyser une page de login » (case « Mode handoff ») ou en ligne de commande (`sesame-onboard record --handoff`). Par défaut le recorder reste en mode proxy et se contente de signaler une session par jeton.
 
 ## Conditions (`success`, `failure`, `expiry`)
 

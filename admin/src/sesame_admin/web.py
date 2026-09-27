@@ -243,13 +243,16 @@ def create_app(
             return RedirectResponse("/apps/new", status_code=303)
         form = await request.form()
         probe = "probe_failure" in form
+        handoff = "handoff" in form
         # Compte de test facultatif (ADR 0019) : transmis au recorder, jamais conservé ni audité.
         test_password = str(form.get("test_password", ""))
         credentials = (str(form.get("test_username", "")).strip(), test_password) if test_password else None
         del test_password
         reason = f"{host} (compte de test)" if credentials else host
         try:
-            result = await recorder.analyze(login_url, probe_failure=probe, credentials=credentials)
+            result = await recorder.analyze(
+                login_url, probe_failure=probe, credentials=credentials, handoff=handoff
+            )
         except RecorderError as e:
             await audit.record(
                 AuditEvent.of("descriptor_recorded", "failure", admin, correlation_id=cid, reason=reason)

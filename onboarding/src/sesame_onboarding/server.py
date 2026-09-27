@@ -95,6 +95,7 @@ def analyze(cfg: Config, playwright: Any, browser: Any, body: dict[str, Any]) ->
         groups=body.get("groups") or None,
         users=body.get("users") or None,
         session_cookie=body.get("session_cookie") or None,
+        handoff=bool(body.get("handoff")),
     )
     result["todo"] = list(draft.todo)
     result["yaml"] = record.render(draft, rec)
