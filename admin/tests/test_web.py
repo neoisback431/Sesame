@@ -206,3 +206,45 @@ def test_logs_never_contain_secrets(ctx, caplog, capsys):
     captured = capsys.readouterr()
     for text in (caplog.text, captured.out, captured.err):
         assert_no_leak(text)
+
+
+def test_user_view_search_and_bulk_disable(ctx):
+    client, service, _, audit = ctx
+    login(client)
+    token = csrf(client)
+    client.post(
+        "/apps/fake-app/accounts",
+        data={"csrf": token, "user_key": "carol", "cred_username": "u", "cred_password": SECRET},
+    )
+    page = client.get("/users?q=CAR").text
+    assert 'href="/users/carol"' in page and "1 actif(s)" in page
+    assert "Aucun utilisateur ne correspond" in client.get("/users?q=zzz").text
+
+    page = client.get("/users/carol").text
+    assert "Appli factice" in page and "Tout désactiver" in page
+    assert_no_leak(page)
+
+    # Action depuis la vue utilisateur : retour sur cette vue.
+    r = client.post(
+        "/apps/fake-app/accounts/carol/status",
+        data={"csrf": token, "status": "disabled", "back": "/users/carol"},
+    )
+    assert r.headers["location"] == "/users/carol"
+    # Retour hors de l'administration refusé.
+    r = client.post(
+        "/apps/fake-app/accounts/carol/status",
+        data={"csrf": token, "status": "active", "back": "https://evil.example/"},
+    )
+    assert r.headers["location"] == "/apps/fake-app"
+
+    r = client.post("/users/carol/disable-all", data={"csrf": token})
+    assert r.headers["location"] == "/users/carol"
+    assert "1 compte(s)" in client.get("/users/carol").text
+    assert audit.events[-1].reason == "disabled:admin_bulk"
+
+
+def test_bulk_disable_requires_csrf(ctx):
+    client, service, *_ = ctx
+    login(client)
+    client.post("/users/carol/disable-all", data={"csrf": "forged"})
+    assert "CSRF" in client.get("/users/carol").text

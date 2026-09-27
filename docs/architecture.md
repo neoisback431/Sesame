@@ -255,8 +255,11 @@ Application Python (FastAPI, pages rendues côté serveur) sur son propre nom d'
 | Applications | Liste des descripteurs (lecture seule) avec le nombre de comptes par état |
 | Appli → comptes | Registre des comptes de l'appli : état, raison d'un échec, dernière connexion |
 | Enregistrer un compte | Identifiants écrits dans le coffre, **puis** compte `active` dans le registre. Réenregistrer remplace les identifiants et réactive un compte `failed` |
-| Désactiver / réactiver | Change l'état dans le registre (`failed` reste réservé au proxy) |
-| Supprimer | Supprime les identifiants du coffre (toutes versions) puis l'entrée du registre |
+| Désactiver / réactiver | Change l'état dans le registre (`failed` reste réservé au proxy). La désactivation **révoque les sessions applicatives ouvertes** de l'utilisateur sur l'appli : l'accès est coupé immédiatement |
+| Supprimer | Supprime les identifiants du coffre (toutes versions) puis l'entrée du registre, et révoque les sessions ouvertes |
+| Utilisateurs | Recherche d'un utilisateur et liste de tous ses comptes, toutes applis confondues, avec les mêmes actions |
+| Tout désactiver | Départ ou suspension : désactive tous les comptes de l'utilisateur, y compris ceux d'applis dont le descripteur a été retiré, et révoque leurs sessions |
+| Ajouter une application | Hors de l'UI : descripteur Git (gabarit, `sesame-onboard verify`, merge request), marche à suivre rappelée dans l'UI |
 
 - **Accès** : OIDC auprès du même fournisseur d'identité, avec un client dédié. Membres du groupe d'administrateurs uniquement (`SESAME_ADMIN_GROUP`) ; les autres reçoivent `access_denied`.
 - **Coffre** : AppRole de l'admin avec une policy d'écriture sans lecture. Un identifiant saisi ne peut jamais être relu, ni dans l'UI ni par l'API du coffre.

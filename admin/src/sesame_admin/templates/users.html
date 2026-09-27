@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Utilisateurs{% endblock %}
+{% block content %}
+<h1>Utilisateurs</h1>
+<form method="get" action="/users">
+  <label for="q">Rechercher un utilisateur (clé Sesame)</label>
+  <input type="text" id="q" name="q" value="{{ q }}" autofocus>
+  <button type="submit">Rechercher</button>
+</form>
+<table style="margin-top:16px">
+  <thead><tr><th>Utilisateur</th><th>Comptes</th><th></th></tr></thead>
+  <tbody>
+  {% for user_key, counts in rows %}
+    <tr>
+      <td><a href="/users/{{ user_key }}"><code>{{ user_key }}</code></a></td>
+      <td>{{ counts.get('active', 0) }} actif(s){% if counts.get('failed') %}, <strong>{{ counts['failed'] }} en échec</strong>{% endif %}{% if counts.get('disabled') %}, {{ counts['disabled'] }} désactivé(s){% endif %}</td>
+      <td><a class="button" href="/users/{{ user_key }}">Gérer</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="3">{% if q %}Aucun utilisateur ne correspond.{% else %}Aucun compte enregistré.{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted">Seuls les utilisateurs ayant au moins un compte applicatif apparaissent. Pour en créer un, passez par la page de l'application.</p>
+{% endblock %}

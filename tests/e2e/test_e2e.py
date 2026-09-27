@@ -156,13 +156,28 @@ def test_admin_provisions_an_account_then_user_gets_in(browser: Browser):
     carol.get_by_role("link", name=re.compile("Appli factice")).click()
     expect(carol.locator("h1")).to_have_text("Bonjour cdupont")
 
-    # Désactivation : accès refusé sans lecture du coffre ; puis nettoyage.
+    # Désactivation : la session applicative ouverte est révoquée, l'accès est refusé
+    # immédiatement (sans attendre l'expiration) et sans lecture du coffre.
     admin.locator("tr", has_text="carol").get_by_role("button", name="Désactiver").click()
     expect(admin.get_by_role("status")).to_contain_text("désactivé")
-    compose("restart", "fake-app")  # force un nouveau rejeu
-    carol.wait_for_timeout(3000)
     resp = carol.goto(f"{APP}account")
     assert resp is not None and resp.status == 403
+
+    # Vue par utilisateur : réactivation puis désactivation en masse.
+    admin.get_by_role("link", name="Utilisateurs").click()
+    admin.fill("#q", "carol")
+    admin.get_by_role("button", name="Rechercher").click()
+    admin.get_by_role("link", name="carol").click()
+    admin.get_by_role("button", name="Réactiver").click()
+    expect(admin.get_by_role("status")).to_contain_text("réactivé")
+    carol.goto(APP)
+    expect(carol.locator("h1")).to_have_text("Bonjour cdupont")
+    admin.once("dialog", lambda d: d.accept())
+    admin.get_by_role("button", name="Tout désactiver").click()
+    expect(admin.get_by_role("status")).to_contain_text("1 compte(s)")
+    resp = carol.goto(APP)
+    assert resp is not None and resp.status == 403
+    admin.get_by_role("link", name="Appli factice").click()
     admin.once("dialog", lambda d: d.accept())
     admin.locator("tr", has_text="carol").get_by_role("button", name="Supprimer").click()
     expect(admin.get_by_role("status")).to_contain_text("supprimé")

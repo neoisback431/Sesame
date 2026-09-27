@@ -136,7 +136,7 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 
 ## Première étape attendue (initialisation)
 
-Étapes 1 à 5 faites (MVP validé de bout en bout par `make e2e`) ; étape 6 en place (`.gitlab-ci.yml`, non exécutée faute de GitLab). UI d'administration v1 faite (registre des comptes, identifiants). Embarquement partiel fait (`verify`, `fingerprint`, `health` ; descripteur rédigé depuis `descriptors/TEMPLATE.yaml.example`). Déconnexion chez le fournisseur d'identité faite (`SESAME_OIDC_LOGOUT`, désactivée par défaut, activée en dev). Prochaines pistes : OpenTelemetry, capture automatique à l'embarquement.
+Étapes 1 à 5 faites (MVP validé de bout en bout par `make e2e`) ; étape 6 en place (`.gitlab-ci.yml`, non exécutée faute de GitLab). UI d'administration v1 faite (comptes par appli et par utilisateur, désactivation en masse, révocation des sessions ouvertes à la désactivation). Embarquement partiel fait (`verify`, `fingerprint`, `health` ; descripteur rédigé depuis `descriptors/TEMPLATE.yaml.example`). Déconnexion chez le fournisseur d'identité faite (`SESAME_OIDC_LOGOUT`, désactivée par défaut, activée en dev). Prochaines pistes : OpenTelemetry, capture automatique à l'embarquement.
 
 1. Proposer la structure du dépôt (un dossier par bloc, dossier `descriptors/`, `deploy/`, `docs/`).
 2. Rédiger `docs/architecture.md` et un schéma Mermaid des flux.

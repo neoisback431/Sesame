@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ user_key }}{% endblock %}
+{% block content %}
+<p><a href="/users">← Utilisateurs</a></p>
+<h1>Comptes de <code>{{ user_key }}</code></h1>
+<table>
+  <thead><tr><th>Application</th><th>État</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
+  <tbody>
+  {% for a in accounts %}
+    {% set app = apps.get(a.app_id) %}
+    <tr>
+      <td>{% if app %}<a href="/apps/{{ a.app_id }}">{{ app.name }}</a>{% else %}<code>{{ a.app_id }}</code><br><span class="muted">descripteur absent</span>{% endif %}</td>
+      <td><span class="status {{ a.status }}">{{ {"active": "actif", "failed": "en échec", "disabled": "désactivé"}[a.status] }}</span>
+        {% if a.status_reason %}<br><span class="muted">{{ a.status_reason }}</span>{% endif %}</td>
+      <td>{{ a.last_login_at.strftime("%Y-%m-%d %H:%M") if a.last_login_at else "—" }}</td>
+      <td>
+        {% if app %}
+        <form class="inline" method="post" action="/apps/{{ a.app_id }}/accounts/{{ user_key }}/status">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/users/{{ user_key }}">
+          <input type="hidden" name="status" value="{{ 'disabled' if a.status == 'active' else 'active' }}">
+          <button type="submit">{{ "Désactiver" if a.status == "active" else "Réactiver" }}</button></form>
+        <form class="inline" method="post" action="/apps/{{ a.app_id }}/accounts/{{ user_key }}/delete"
+              onsubmit="return confirm('Supprimer ce compte du coffre et du registre ?')">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/users/{{ user_key }}">
+          <button type="submit">Supprimer</button></form>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4">Aucun compte pour cet utilisateur.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if accounts %}
+<div class="card">
+  <h2>Désactiver tous les comptes</h2>
+  <p class="muted">Départ ou suspension : tous les comptes actifs ou en échec passent à « désactivé ». Le proxy ne rejoue plus aucune connexion pour cet utilisateur ; les identifiants restent dans le coffre et un compte peut être réactivé.</p>
+  <form method="post" action="/users/{{ user_key }}/disable-all"
+        onsubmit="return confirm('Désactiver tous les comptes de cet utilisateur ?')">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit">Tout désactiver</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

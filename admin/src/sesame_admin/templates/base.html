@@ -8,6 +8,7 @@
     body{font-family:system-ui,sans-serif;margin:0;background:#f6f7f9;color:#1d2330}
     header{background:#1d2330;color:#fff;padding:12px 24px;display:flex;justify-content:space-between;align-items:center}
     header a{color:#fff;text-decoration:none}
+    header a.nav{margin-left:24px;color:#c9cfdb}
     main{max-width:1000px;margin:32px auto;padding:0 16px}
     table{border-collapse:collapse;width:100%;background:#fff}
     th,td{border-bottom:1px solid #e3e6ec;padding:8px 10px;text-align:left;vertical-align:top}
@@ -26,7 +27,10 @@
 </head>
 <body>
 <header>
-  <a href="/"><strong>Sesame</strong> · Administration</a>
+  <nav>
+    <a href="/"><strong>Sesame</strong> · Administration</a>
+    {% if admin %}<a class="nav" href="/">Applications</a><a class="nav" href="/users">Utilisateurs</a>{% endif %}
+  </nav>
   {% if admin %}
   <form class="inline" method="post" action="/logout">
     <span class="muted" style="color:#c9cfdb">{{ admin.display_name or admin.user_key }}</span>

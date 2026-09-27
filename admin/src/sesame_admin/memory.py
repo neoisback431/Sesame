@@ -23,6 +23,8 @@ class MemorySecretWriter:
 class MemoryAccountStore:
     def __init__(self) -> None:
         self.accounts: dict[tuple[str, str], Account] = {}
+        # Sessions applicatives ouvertes simulées : (appli, utilisateur) -> nombre.
+        self.app_sessions: dict[tuple[str, str], int] = {}
 
     async def list_accounts(self, app_id: str) -> list[Account]:
         return sorted((a for a in self.accounts.values() if a.app_id == app_id), key=lambda a: a.user_key)
@@ -53,3 +55,16 @@ class MemoryAccountStore:
         for a in self.accounts.values():
             counts.setdefault(a.app_id, Counter())[a.status] += 1
         return {k: dict(v) for k, v in counts.items()}
+
+    async def list_user_accounts(self, user_key: str) -> list[Account]:
+        return sorted((a for a in self.accounts.values() if a.user_key == user_key), key=lambda a: a.app_id)
+
+    async def search_users(self, query: str, limit: int) -> list[tuple[str, dict[str, int]]]:
+        counts: dict[str, Counter[str]] = {}
+        for a in self.accounts.values():
+            if query.lower() in a.user_key.lower():
+                counts.setdefault(a.user_key, Counter())[a.status] += 1
+        return [(u, dict(counts[u])) for u in sorted(counts)[:limit]]
+
+    async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:
+        return self.app_sessions.pop((app_id, user_key), 0)

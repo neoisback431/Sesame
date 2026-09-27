@@ -94,6 +94,8 @@ class AdminService:
             event.outcome, event.reason = "failure", "no_account"
             await self.audit.record(event)
             raise
+        if status == "disabled":
+            await self.accounts.revoke_app_sessions(app_id, user_key)
         await self.audit.record(event)
 
     async def delete(self, actor: AdminUser, app_id: str, user_key: str, cid: str) -> None:
@@ -115,4 +117,31 @@ class AdminService:
             await self.accounts.delete_account(app_id, user_key)
         except NotFound:
             pass
+        await self.accounts.revoke_app_sessions(app_id, user_key)
         await self.audit.record(event("account_status_changed", "success", "deleted:admin"))
+
+    async def disable_all(self, actor: AdminUser, user_key: str, cid: str) -> int:
+        """Désactive tous les comptes actifs ou en échec d'un utilisateur (départ, suspension).
+
+        Couvre aussi les comptes d'applis dont le descripteur a été retiré.
+        Renvoie le nombre de comptes désactivés ; chacun est audité.
+        """
+        count = 0
+        for account in await self.accounts.list_user_accounts(user_key):
+            if account.status == "disabled":
+                continue
+            await self.accounts.set_status(account.app_id, user_key, "disabled", "disabled_by_admin")
+            await self.accounts.revoke_app_sessions(account.app_id, user_key)
+            await self.audit.record(
+                AuditEvent.of(
+                    "account_status_changed",
+                    "success",
+                    actor,
+                    app_id=account.app_id,
+                    target_user=user_key,
+                    correlation_id=cid,
+                    reason="disabled:admin_bulk",
+                )
+            )
+            count += 1
+        return count

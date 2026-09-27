@@ -90,3 +90,35 @@ class PostgresAccountStore:
         for r in rows:
             out.setdefault(r["app_id"], {})[r["status"]] = r["n"]
         return out
+
+    async def list_user_accounts(self, user_key: str) -> list[Account]:
+        rows = await (await self.pool()).fetch(
+            f"SELECT {_COLUMNS} FROM app_accounts WHERE user_key = $1 ORDER BY app_id",  # noqa: S608 (colonnes constantes)
+            user_key,
+        )
+        return [_account(r) for r in rows]
+
+    async def search_users(self, query: str, limit: int) -> list[tuple[str, dict[str, int]]]:
+        pattern = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        rows = await (await self.pool()).fetch(
+            """SELECT user_key, status, count(*) AS n FROM app_accounts
+               WHERE user_key IN (
+                 SELECT DISTINCT user_key FROM app_accounts
+                 WHERE user_key ILIKE $1 ESCAPE '\\' ORDER BY user_key LIMIT $2)
+               GROUP BY user_key, status ORDER BY user_key""",
+            pattern,
+            limit,
+        )
+        out: dict[str, dict[str, int]] = {}
+        for r in rows:
+            out.setdefault(r["user_key"], {})[r["status"]] = r["n"]
+        return list(out.items())
+
+    async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:
+        done = await (await self.pool()).execute(
+            """DELETE FROM app_sessions WHERE app_id = $1 AND portal_session IN
+               (SELECT id_hash FROM portal_sessions WHERE user_key = $2)""",
+            app_id,
+            user_key,
+        )
+        return int(done.rsplit(" ", 1)[-1])

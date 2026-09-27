@@ -54,3 +54,19 @@ class AccountStore(Protocol):
     async def delete_account(self, app_id: str, user_key: str) -> None: ...
 
     async def count_by_app(self) -> dict[str, dict[str, int]]: ...
+
+    async def list_user_accounts(self, user_key: str) -> list[Account]:
+        """Tous les comptes d'un utilisateur, toutes applis confondues."""
+        ...
+
+    async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:
+        """Supprime les sessions applicatives ouvertes de l'utilisateur sur l'appli.
+
+        Sans cela, un compte désactivé resterait utilisable jusqu'à l'expiration de sa
+        session en cours. Renvoie le nombre de sessions supprimées.
+        """
+        ...
+
+    async def search_users(self, query: str, limit: int) -> list[tuple[str, dict[str, int]]]:
+        """Utilisateurs dont la clé contient ``query`` (casse ignorée), avec leurs comptes par état."""
+        ...

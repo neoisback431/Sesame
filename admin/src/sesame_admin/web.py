@@ -27,6 +27,8 @@ from .service import AdminService, InvalidInput
 log = logging.getLogger(__name__)
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+# Retour après une action : seulement une page locale de l'administration.
+_BACK = re.compile(r"^/(apps|users)/[A-Za-z0-9@._+-]{1,256}$")
 
 
 class NotAdmin(Exception):
@@ -175,6 +177,8 @@ def create_app(
 
     async def act(request: Request, app_id: str, operation) -> Response:
         cid = correlation_id(request)
+        back = str((await request.form()).get("back", ""))
+        target = back if _BACK.fullmatch(back) else f"/apps/{app_id}"
         try:
             await check_csrf(request)
             message = await operation(cid)
@@ -189,7 +193,7 @@ def create_app(
                 "kind": "error",
                 "text": f"Opération impossible : service indisponible (référence {cid}).",
             }
-        return RedirectResponse(f"/apps/{app_id}", status_code=303)
+        return RedirectResponse(target, status_code=303)
 
     @app.post("/apps/{app_id}/accounts")
     async def provision(
@@ -221,5 +225,43 @@ def create_app(
             return f"Compte de « {user_key} » supprimé (coffre et registre)."
 
         return await act(request, app_id, op)
+
+    @app.get("/users")
+    async def users(request: Request, admin: Admin, q: str = "") -> Response:
+        try:
+            rows = await service.accounts.search_users(q.strip(), 200)
+        except Unavailable:
+            return error(request, 503, "Service indisponible", "Le registre des comptes est injoignable.")
+        return render(request, "users.html", admin=admin, rows=rows, q=q.strip())
+
+    @app.get("/users/{user_key}")
+    async def user_detail(request: Request, user_key: str, admin: Admin) -> Response:
+        try:
+            accounts = await service.accounts.list_user_accounts(user_key)
+        except Unavailable:
+            return error(request, 503, "Service indisponible", "Le registre des comptes est injoignable.")
+        return render(
+            request, "user.html", admin=admin, user_key=user_key, accounts=accounts, apps=service.apps
+        )
+
+    @app.post("/users/{user_key}/disable-all")
+    async def disable_all(request: Request, user_key: str, admin: Admin) -> Response:
+        cid = correlation_id(request)
+        try:
+            await check_csrf(request)
+            n = await service.disable_all(admin, user_key, cid)
+            request.session["flash"] = {
+                "kind": "ok",
+                "text": f"{n} compte(s) de « {user_key} » désactivé(s).",
+            }
+        except InvalidInput as e:
+            request.session["flash"] = {"kind": "error", "text": str(e)}
+        except Unavailable:
+            log.error("brique externe indisponible", extra={"correlation_id": cid})
+            request.session["flash"] = {
+                "kind": "error",
+                "text": f"Opération impossible : service indisponible (référence {cid}).",
+            }
+        return RedirectResponse(f"/users/{user_key}", status_code=303)
 
     return app

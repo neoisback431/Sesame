@@ -121,3 +121,29 @@ async def test_stdout_audit_format_matches_rust_services(capsys):
     await StdoutAuditSink().record(AuditEvent.of("credential_written", "success", ADMIN, app_id="fake-app"))
     line = capsys.readouterr().out.strip()
     assert line.startswith('{"log_type":"audit",') and '"action":"credential_written"' in line
+
+
+async def test_disable_all_covers_every_app_and_revokes_sessions(service):
+    for app in ("fake-app", "retired-app"):  # retired-app : descripteur retiré
+        await service.accounts.upsert_active(app, "carol")
+        service.accounts.app_sessions[(app, "carol")] = 1
+    await service.accounts.upsert_active("fake-app", "dave")
+    service.accounts.app_sessions[("fake-app", "dave")] = 1
+
+    assert await service.disable_all(ADMIN, "carol", "c") == 2
+    assert {a.status for a in await service.accounts.list_user_accounts("carol")} == {"disabled"}
+    assert ("fake-app", "carol") not in service.accounts.app_sessions
+    assert ("retired-app", "carol") not in service.accounts.app_sessions
+    assert service.accounts.app_sessions == {("fake-app", "dave"): 1}
+    assert [e.reason for e in service.audit.events] == ["disabled:admin_bulk"] * 2
+    assert await service.disable_all(ADMIN, "carol", "c") == 0
+
+
+async def test_disable_and_delete_revoke_open_sessions(service):
+    await service.provision(ADMIN, "fake-app", "carol", {"username": "u", "password": "p"}, "c")
+    service.accounts.app_sessions[("fake-app", "carol")] = 2
+    await service.set_status(ADMIN, "fake-app", "carol", "disabled", "c")
+    assert ("fake-app", "carol") not in service.accounts.app_sessions
+    service.accounts.app_sessions[("fake-app", "carol")] = 1
+    await service.delete(ADMIN, "fake-app", "carol", "c")
+    assert ("fake-app", "carol") not in service.accounts.app_sessions
