@@ -31,3 +31,5 @@ packages = ["src/sesame_onboarding"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `make test` (rapide) exclut `browser` ; `make test-full` lance tout.
+markers = ["browser: lance un Chromium headless (Playwright), lent"]

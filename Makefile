@@ -4,14 +4,15 @@
 CERTS := deploy/nginx/certs
 PY_PROJECTS := dev/fake-app admin onboarding
 
-.PHONY: help dev-certs up down logs health record test test-rust test-python test-postgres e2e lint lint-rust lint-python validate-descriptors images deny deny-python
+.PHONY: help dev-certs up down logs health record test test-full test-rust test-python test-python-full test-postgres e2e lint lint-rust lint-python validate-descriptors images deny deny-python
 
 help:
 	@echo "dev-certs             certificat TLS de dev pour *.sesame.localhost"
 	@echo "up / down / logs      environnement Docker Compose de dev"
 	@echo "health                test de santé des formulaires de login (après make up)"
 	@echo "record URL=… [ARGS=…] analyse une page de login et propose un descripteur (après make up)"
-	@echo "test                  tests Rust et Python"
+	@echo "test                  tests rapides (défaut) : Rust + Python, sans navigateur"
+	@echo "test-full             tests complets : test + navigateur (recorder) + PostgreSQL (si Docker)"
 	@echo "test-postgres         tests de contrat sur une base PostgreSQL jetable (Docker)"
 	@echo "e2e                   tests bout en bout Playwright (après make up)"
 	@echo "lint                  fmt, clippy, ruff, validation des descripteurs"
@@ -52,12 +53,21 @@ record:
 	  --entrypoint sesame-onboard recorder \
 	  --schema /etc/sesame/app-descriptor.schema.json record "$(URL)" $(ARGS)
 
+# Deux niveaux : `test` (rapide, à lancer après chaque modification) et `test-full`
+# (complet : ajoute les tests qui lancent un Chromium headless et le contrat PostgreSQL).
 test: test-rust test-python
+
+test-full: test-rust test-python-full
+	@if docker info >/dev/null 2>&1; then $(MAKE) --no-print-directory test-postgres; \
+	  else echo "!! test-postgres IGNORÉ : Docker indisponible"; fi
 
 test-rust:
 	cargo test --workspace --locked
 
 test-python:
+	@for p in $(PY_PROJECTS); do echo "== $$p"; (cd $$p && uv run --group dev pytest -q -m "not browser") || exit 1; done
+
+test-python-full:
 	@for p in $(PY_PROJECTS); do echo "== $$p"; (cd $$p && uv run --group dev pytest -q) || exit 1; done
 
 # Tests de contrat du magasin PostgreSQL sur une base jetable.

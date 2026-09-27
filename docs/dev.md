@@ -72,7 +72,8 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 ## Commandes
 
 ```sh
-make test                  # tests Rust + Python (appli factice, admin, embarquement)
+make test                  # tests rapides : Rust + Python, sans navigateur (~10 s)
+make test-full             # tests complets : + tests Playwright du recorder + contrat PostgreSQL (si Docker)
 make test-postgres         # tests de contrat du magasin sur une base PostgreSQL jetable
 make e2e                   # parcours bout en bout Playwright (après make up)
 make health                # test de santé des formulaires de login (après make up)

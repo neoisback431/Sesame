@@ -22,7 +22,7 @@ def base(monkeypatch):
     # analyze() renvoie l'entrée reçue, sans navigateur.
     monkeypatch.setattr(server, "analyze", lambda cfg, pw, br, body: {"echo": body})
     httpd = HTTPServer(("127.0.0.1", 0), server._handler(Cfg(), None, None))
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
     try:
         yield f"http://127.0.0.1:{httpd.server_address[1]}"
     finally:
