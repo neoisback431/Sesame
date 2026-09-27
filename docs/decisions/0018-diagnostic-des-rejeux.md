@@ -1,7 +1,6 @@
-# 0018 — Diagnostic des rejeux en échec dans l'administration
+# 0018. Diagnostic des rejeux en échec dans l'administration
 
-Date : 2026-09-28
-Statut : accepté
+**Statut** : acceptée (2026-09-28).
 
 ## Contexte
 
