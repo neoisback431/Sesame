@@ -47,14 +47,14 @@ L'objectif est de placer devant elles un portail SSO unique :
 ### 3. Coffre de secrets
 
 - HashiCorp Vault.
-- Identifiants par couple (appli, utilisateur) ou compte partagé par appli selon le cas.
+- Identifiants par couple (appli, utilisateur) (voir Décisions).
 - Seul le moteur de proxy dispose d'une policy de lecture. Authentification du proxy auprès de Vault par AppRole (ou équivalent).
 
 ### 4. Magasin de sessions
 
 - Table de correspondance : session portail → sessions applicatives (cookies par appli).
 - TTL, invalidation à la déconnexion du portail, purge des sessions expirées.
-- Proposition : Redis (à confirmer).
+- Implémentation : PostgreSQL (voir Décisions).
 
 ### 5. Module d'embarquement
 
@@ -83,23 +83,23 @@ L'objectif est de placer devant elles un portail SSO unique :
 - Frontal TLS : Nginx.
 - Cibles de déploiement possibles : on-premises (VMware) et AWS.
 
-## Décisions ouvertes
+## Décisions
 
-| Sujet | Options | État |
+| Sujet | Décision | État |
 |---|---|---|
-| Langage du moteur de proxy | Go (privilégié : proxy, performances) ou Python (pertinent pour l'embarquement / Playwright) | À trancher |
-| Magasin de sessions | Redis ou autre | À trancher |
-| Modèle des credentials | Par utilisateur, partagés par appli, ou mixte | À trancher |
-| Interface d'administration | UI web, ou CLI + fichiers versionnés dans un premier temps | À trancher |
+| Langage | **Rust** pour le back (portail d'authentification + moteur de proxy) ; **Python** pour le reste (module d'embarquement Playwright, UI d'administration) | Tranché |
+| Magasin de sessions | **PostgreSQL** (purge des sessions expirées à implémenter : tâche périodique ou `DELETE` sur `expires_at`) | Tranché |
+| Modèle des credentials | **Par utilisateur** : un compte par couple (appli, utilisateur) dans Vault | Tranché |
+| Interface d'administration | **UI web dès le départ** (Python) ; authentifiée via Entra, réservée à un groupe d'administrateurs, actions tracées dans l'audit | Tranché |
 
-**Poser les questions sur les décisions ouvertes avant de coder le moteur de proxy.** Une fois une décision prise, mettre à jour ce tableau (et consigner la justification dans `docs/decisions/`).
+Les décisions ont été prises le 2026-09-27. Consigner leur justification dans `docs/decisions/` (ADR). Toute nouvelle décision structurante est posée en question avant d'être codée, puis ajoutée à ce tableau.
 
 ## Première étape attendue (initialisation)
 
 1. Proposer la structure du dépôt (un dossier par bloc, dossier `descriptors/`, `deploy/`, `docs/`).
 2. Rédiger `docs/architecture.md` et un schéma Mermaid des flux.
 3. Définir le schéma du descripteur d'appli.
-4. Mettre en place un `docker-compose.yml` de dev : Nginx, portail, proxy, Vault (mode dev), Redis, et une appli factice avec un formulaire de login + CSRF pour les tests.
+4. Mettre en place un `docker-compose.yml` de dev : Nginx, portail, proxy, Vault (mode dev), PostgreSQL, et une appli factice avec un formulaire de login + CSRF pour les tests.
 5. Implémenter un MVP bout en bout sur l'appli factice : login Entra (ou mock OIDC en dev), rejeu, injection de session.
 6. Pipeline GitLab CI minimal : lint, tests, build des images.
 
