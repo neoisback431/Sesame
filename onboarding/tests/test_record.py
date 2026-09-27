@@ -186,7 +186,7 @@ def test_javascript_login_is_analyzed_without_leaking_values(client, browser):
     assert "meta-tok-5531" not in text and DUMMY_PASSWORD not in text and DUMMY_USER not in text
 
 
-def test_form_built_by_javascript_is_blocking(client, browser):
+def test_form_built_by_javascript_without_submission_is_blocking(client, browser):
     app = js_only_app()
 
     @app.get("/")
@@ -206,6 +206,8 @@ def test_form_built_by_javascript_is_blocking(client, browser):
     finally:
         srv.shutdown()
     assert rec.password_field == "p"
+    # Formulaire absent du HTML servi et aucune soumission observée (pas de bouton) : la
+    # cible du rejeu sans formulaire est inconnue, c'est bloquant.
     assert "login_form_not_found_in_raw_html" in rec.blocking
 
 
@@ -545,4 +547,79 @@ def test_login_form_rendered_late_by_javascript_is_found(client, browser):
         srv.srv.shutdown()
     assert (rec.form_selector, rec.password_field) == ("form#late", "pw")
     assert "login_form_not_found" not in rec.blocking
-    assert "login_form_not_found_in_raw_html" in rec.blocking + rec.warnings
+    assert not rec.use_form, "formulaire absent du HTML servi : rejeu sans formulaire"
+
+
+def react_app() -> Flask:
+    """Comme YAST : page React, champs sans attribut name, login JSON, puis /dashboard."""
+    from flask import request
+
+    app = Flask(__name__)
+    sessions: set[str] = set()
+
+    @app.get("/login")
+    def page():
+        return (
+            "<html><body><div id=root></div><script>setTimeout(() => {"
+            "document.getElementById('root').innerHTML = '<form class=space-y-4><div><label>Email</label>"
+            "<input type=email required></div><div><label>Mot de passe</label><input type=password required>"
+            "</div><button type=submit>Se connecter</button></form>';"
+            "document.querySelector('form').addEventListener('submit', e => { e.preventDefault();"
+            "const [m, p] = e.target.querySelectorAll('input');"
+            "fetch('/api/auth/login', {method: 'POST', headers: {'Content-Type': 'application/json'},"
+            "body: JSON.stringify({email: m.value, password: p.value})})"
+            ".then(r => { if (r.ok) location.href = '/dashboard'; }); }); }, 300);</script></body></html>"
+        )
+
+    @app.post("/api/auth/login")
+    def login():
+        body = request.get_json(silent=True) or {}
+        if (body.get("email"), body.get("password")) != ("admin@yast.test", "Pw-yast"):
+            return Response('{"error":"Identifiants invalides"}', 401, content_type="application/json")
+        sid = f"t{len(sessions)}"
+        sessions.add(sid)
+        resp = Response('{"ok":true}', content_type="application/json")
+        resp.set_cookie("token", sid, httponly=True)
+        return resp
+
+    @app.get("/dashboard")
+    def dashboard():
+        if request.cookies.get("token") in sessions:
+            return "<h1>Tableau de bord</h1>"
+        return Response("", 302, {"Location": "/login"})
+
+    app.add_url_rule("/", "root", page)
+    return app
+
+
+def test_react_form_with_unnamed_fields(client, browser):
+    """Champs sans name, formulaire construit en JavaScript : noms réels lus dans la requête."""
+    from sesame_onboarding import verify
+
+    app = Recorder(react_app())
+    try:
+        dry = run(f"{app.base}/login", client, browser)
+        assert (dry.username_field, dry.password_field) == ("#0", "#1")
+        assert dry.blocking == [], dry.blocking
+        dry_login = record.to_descriptor(dry).document["spec"]["login"]
+        assert dry_login["fields"] == {
+            "email": {"from_secret": "username"},
+            "password": {"from_secret": "password"},
+        }
+        assert (dry_login["use_form"], dry_login["action"], dry_login["encoding"]) == (
+            False,
+            "/api/auth/login",
+            "json",
+        )
+
+        rec = run(f"{app.base}/login", client, browser, credentials=("admin@yast.test", "Pw-yast"))
+        doc = record.to_descriptor(rec, app_id="yast").document
+        assert descriptors.validate(doc) == [], descriptors.validate(doc)
+        assert doc["spec"]["session"]["cookies"] == ["token"]
+        assert doc["spec"]["public"]["start_path"] == "/dashboard"
+        creds = {"username": "admin@yast.test", "password": "Pw-yast"}
+        assert verify.verify(doc, creds, client).ok
+        assert not verify.verify(doc, {**creds, "password": "nope"}, client).ok
+    finally:
+        app.srv.shutdown()
+    assert "#0" not in str(doc["spec"]["login"]["fields"])

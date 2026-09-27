@@ -97,15 +97,17 @@ def verify(descriptor: dict[str, Any], credentials: dict[str, str], client: http
         return VerifyResult(False, "login_page_status", status=resp.status_code)
     html = resp.text
 
-    form = parse_form(html, login.get("form_selector", "form"))
-    if form is None:
+    # use_form: false (page construite en JavaScript) : pas de formulaire à lire, la requête
+    # part directement vers action (miroir de replay.rs).
+    form = parse_form(html, login.get("form_selector", "form")) if login.get("use_form", True) else None
+    if form is None and login.get("use_form", True):
         return VerifyResult(False, "login_form_not_found_in_raw_html")
-    action = urljoin(page_url, login.get("action") or form.action or page_url)
+    action = urljoin(page_url, login.get("action") or (form.action if form else None) or page_url)
     if not same_origin(action, base):
         return VerifyResult(False, "login_action_foreign_origin")
 
     fields: dict[str, str] = {}
-    if login.get("include_hidden_inputs", True):
+    if form is not None and login.get("include_hidden_inputs", True):
         fields.update(dict(form.hidden))
     for name, spec_field in login["fields"].items():
         if "from_secret" in spec_field:
@@ -154,7 +156,7 @@ def verify(descriptor: dict[str, Any], credentials: dict[str, str], client: http
         status=resp.status_code,
         location=view.location,
         cookies_set=names,
-        fingerprint=form.fingerprint(),
+        fingerprint=form.fingerprint() if form is not None else None,
     )
     if any_of(login.get("failure"), view):
         result.reason = "login_rejected"

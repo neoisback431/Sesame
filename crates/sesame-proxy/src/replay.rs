@@ -344,13 +344,23 @@ impl Replayer {
             return Ok(Outcome::Indeterminate("login_page_status"));
         }
 
-        let Ok(form) = parse_form(&html, &login.form_selector) else {
-            return Ok(Outcome::Failure("login_form_not_found"));
+        // Sans formulaire (page construite en JavaScript) : la page de login ne sert qu'à ses
+        // cookies et jetons ; la requête part directement vers `action` (validée présente).
+        let form = if login.use_form {
+            let Ok(form) = parse_form(&html, &login.form_selector) else {
+                return Ok(Outcome::Failure("login_form_not_found"));
+            };
+            Some(form)
+        } else {
+            None
         };
         let action = login
             .action
             .as_deref()
-            .or(form.action.as_deref().filter(|a| !a.is_empty()))
+            .or(form
+                .as_ref()
+                .and_then(|f| f.action.as_deref())
+                .filter(|a| !a.is_empty()))
             .map_or(Ok(page_url.clone()), |a| page_url.join(a));
         let action = match action {
             // Jamais d'identifiants envoyés hors de l'origine de l'appli.
@@ -365,7 +375,7 @@ impl Replayer {
             Some(slot) => slot.1 = value,
             None => fields.push((name.to_owned(), value)),
         };
-        if login.include_hidden_inputs {
+        if let Some(form) = form.as_ref().filter(|_| login.include_hidden_inputs) {
             for (name, value) in &form.hidden {
                 set(name, Zeroizing::new(value.clone()));
             }

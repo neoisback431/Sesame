@@ -39,6 +39,7 @@ def test_reference_descriptor_is_valid():
         ({'paths: ["^/logout$"]': 'paths: ["(a)\\\\1"]'}, "références arrière"),
         ({"- source: hidden_input": "- source: regex"}, "pattern"),
         ({"- source: hidden_input": "- source: endpoint"}, "url"),
+        ({'form_selector: "form#login-form"': "use_form: false"}, "action"),
         ({"- source: hidden_input": "- source: endpoint\n        url: api/csrf"}, "url"),
         ({"        name: csrf_token": "        name: csrf_token\n        url: /api/csrf"}, "url"),
         (

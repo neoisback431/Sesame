@@ -35,6 +35,8 @@ spec:
     csrf:                                     # champs cachés : renvoyés automatiquement ;
       - source: hidden_input                  # les déclarer ici rend leur absence bloquante
         name: csrf_token
+      # Page de login construite en JavaScript (formulaire absent du HTML servi) :
+      # use_form: false + action obligatoire (voir docs/descriptor.md).
       # Jeton obtenu par un appel d'API avant le login (JavaScript de l'appli) :
       # - source: endpoint
       #   url: /api/csrf-token                # GET, même origine, cookies conservés

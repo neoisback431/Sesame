@@ -300,6 +300,31 @@ async fn csrf_token_from_an_api_endpoint() {
 }
 
 #[tokio::test]
+async fn login_without_form_posts_directly_to_the_action() {
+    // Page de login sans formulaire exploitable (construite en JavaScript) : la requête part
+    // directement, avec les cookies de la page et le jeton lu par regex dans son HTML.
+    let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
+    let mut d = descriptor(&b.internal);
+    d.spec.login.use_form = false;
+    d.spec.login.form_selector = "form#absent".into();
+    d.spec.login.action = Some("/login".into());
+    d.spec.login.csrf = vec![serde_json::from_value(serde_json::json!({
+        "source": "regex", "name": "csrf_token",
+        "pattern": "name=\"csrf_token\" value=\"([^\"]+)\""
+    }))
+    .unwrap()];
+    d.spec.login.fields.insert(
+        "lang".into(),
+        sesame_core::descriptor::FormField::Value("fr".into()),
+    );
+    let (apps, rejected) = sesame_proxy::build_apps(vec![d], None, "https");
+    assert!(rejected.is_empty(), "{rejected:?}");
+    b.engine.set_apps(apps);
+    let r = b.get("/").await;
+    assert!(r.body.contains("Bonjour amartin"), "{}", r.body);
+}
+
+#[tokio::test]
 async fn no_diagnostic_is_kept_by_default() {
     let b = bench(&["fake-app-users"], "wrong-password", true).await;
     b.get("/").await;
