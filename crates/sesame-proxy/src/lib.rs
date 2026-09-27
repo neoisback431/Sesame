@@ -9,6 +9,7 @@
 pub mod config;
 pub mod diagnostic;
 pub mod form;
+pub mod handoff;
 pub mod jar;
 pub mod matcher;
 pub mod replay;
@@ -29,7 +30,7 @@ use regex::Regex;
 use sesame_core::audit::{AuditAction, AuditEvent, AuditOutcome};
 use sesame_core::cookies::{self, PortalCookie};
 use sesame_core::crypto::hash_token;
-use sesame_core::descriptor::{AppDescriptor, LogoutAction};
+use sesame_core::descriptor::{AppDescriptor, LogoutAction, SessionMode, HANDOFF_PATH};
 use sesame_core::html::error_page;
 use sesame_core::ports::{AppSession, AuditSink, PortalSession, SessionStore};
 use sesame_core::secret::ExposeSecret;
@@ -290,6 +291,79 @@ impl Proxy {
             })
     }
 
+    /// Mode handoff (ADR 0020) : rejeu côté serveur, puis remise de l'élément de session au
+    /// navigateur (cookies en `Set-Cookie`, valeurs de stockage local via une page dédiée),
+    /// et redirection vers `start_path`. L'appli est ensuite jointe directement.
+    async fn handoff(&self, ctx: &Ctx<'_>) -> Response {
+        let spec = &ctx.app.descriptor.spec;
+        let handoff = match &spec.session.handoff {
+            Some(h) => h,
+            None => return self.unavailable(&ctx.cid), // écarté par validate()
+        };
+        let session = match self
+            .replayer
+            .replay(&ctx.app.http, &ctx.app.descriptor, &ctx.session.user, &ctx.cid)
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => return self.replay_error(&e, &ctx.cid),
+        };
+        let values = match handoff::local_storage_values(handoff, session.login_body.as_deref()) {
+            Ok(v) => v,
+            Err(reason) => {
+                tracing::warn!(app = ctx.app.id(), correlation_id = %ctx.cid, reason, "remise impossible");
+                let _ = self
+                    .audit
+                    .record(
+                        self.event(ctx, AuditAction::SessionHandoff, AuditOutcome::Failure)
+                            .reason(reason),
+                    )
+                    .await;
+                return self.page(
+                    StatusCode::BAD_GATEWAY,
+                    "Connexion impossible",
+                    "La connexion automatique à l'application a échoué. Contactez votre administrateur.",
+                    &ctx.cid,
+                );
+            }
+        };
+
+        // Cookies capturés à poser sur le domaine de l'appli (visibles du navigateur : handoff).
+        let mut cookie_headers = Vec::new();
+        for name in &handoff.set_cookies {
+            if let Some(value) = session.jar.get(name) {
+                if let Ok(v) = HeaderValue::from_str(&format!(
+                    "{name}={}; Path=/; Secure; SameSite=Lax",
+                    value.expose_secret()
+                )) {
+                    cookie_headers.push(v);
+                }
+            }
+        }
+
+        if self
+            .audit
+            .record(self.event(ctx, AuditAction::SessionHandoff, AuditOutcome::Success))
+            .await
+            .is_err()
+        {
+            return self.unavailable(&ctx.cid);
+        }
+
+        let start = &spec.public.start_path;
+        let mut resp = if values.is_empty() {
+            let status = StatusCode::from_u16(handoff.redirect_status).unwrap_or(StatusCode::SEE_OTHER);
+            redirect(status, &format!("{}{}", ctx.app.public_origin, start))
+        } else {
+            let html = handoff::page(&values, start, self.portal_url.as_str());
+            ([(header::CACHE_CONTROL, "no-store")], Html(html)).into_response()
+        };
+        for v in cookie_headers {
+            resp.headers_mut().append(header::SET_COOKIE, v);
+        }
+        resp
+    }
+
     fn login_redirect(&self, app: &App, path_and_query: &str) -> Response {
         let return_to = format!("{}{}", app.public_origin, path_and_query);
         let mut url = self
@@ -361,7 +435,8 @@ impl Proxy {
                 .replayer
                 .replay(&ctx.app.http, &ctx.app.descriptor, &ctx.session.user, &ctx.cid)
                 .await
-                .map_err(|e| self.replay_error(&e, &ctx.cid))?;
+                .map_err(|e| self.replay_error(&e, &ctx.cid))?
+                .jar;
             let now = SystemTime::now();
             let max = now + ctx.app.descriptor.spec.session.max_ttl;
             let session = AppSession {
@@ -599,6 +674,20 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
             StatusCode::FORBIDDEN,
             "Accès refusé",
             "Vous n'êtes pas habilité à utiliser cette application.",
+            &ctx.cid,
+        );
+    }
+
+    // Mode handoff (ADR 0020) : la remise se fait sur un chemin dédié ; les autres chemins
+    // d'une appli handoff ne sont pas servis ici (l'appli est jointe directement).
+    if matches!(app.descriptor.spec.session.mode, SessionMode::Handoff) {
+        if req.uri().path() == HANDOFF_PATH {
+            return p.handoff(&ctx).await;
+        }
+        return p.page(
+            StatusCode::NOT_FOUND,
+            "Application inconnue",
+            "Cette adresse ne correspond à aucune application.",
             &ctx.cid,
         );
     }

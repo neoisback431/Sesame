@@ -45,8 +45,15 @@ pub enum ReplayError {
     Audit,
 }
 
+/// Résultat d'un rejeu réussi : jar des cookies capturés et, en mode handoff avec
+/// `local_storage`, le corps de la réponse au login (pour en extraire les valeurs).
+pub struct ReplaySession {
+    pub jar: Jar,
+    pub login_body: Option<String>,
+}
+
 enum Outcome {
-    Success(Jar),
+    Success(Jar, Option<String>),
     /// Échec certain : inutile de réessayer.
     Failure(&'static str),
     /// Réponse inattendue : un nouvel essai est permis dans la limite de `max_attempts`.
@@ -131,7 +138,7 @@ impl Replayer {
         d: &AppDescriptor,
         user: &UserIdentity,
         cid: &str,
-    ) -> Result<Jar, ReplayError> {
+    ) -> Result<ReplaySession, ReplayError> {
         let app = d.metadata.id.as_str();
         let event = |action, outcome| {
             AuditEvent::new(action, outcome)
@@ -188,7 +195,7 @@ impl Replayer {
         let mut capture: Option<Capture> = None;
         for attempt in 1..=d.spec.login.max_attempts {
             match self.login(http, d, &credential, &mut capture).await {
-                Ok(Outcome::Success(jar)) => {
+                Ok(Outcome::Success(jar, login_body)) => {
                     self.audit(event(AuditAction::LoginReplay, AuditOutcome::Success))
                         .await?;
                     if let Err(e) = self
@@ -199,7 +206,7 @@ impl Replayer {
                         tracing::warn!(error = %e, app, "date de dernière connexion non enregistrée");
                     }
                     tracing::info!(app, correlation_id = cid, attempt, "rejeu réussi");
-                    return Ok(jar);
+                    return Ok(ReplaySession { jar, login_body });
                 }
                 Ok(Outcome::Failure(reason)) => {
                     last = ReplayError::Rejected(reason);
@@ -524,6 +531,14 @@ impl Replayer {
         if !spec.session.cookies.iter().all(|c| jar.contains(c)) {
             return Ok(Outcome::Failure("session_cookie_missing"));
         }
-        Ok(Outcome::Success(jar))
+        // Mode handoff avec local_storage : conserver le corps du login pour en extraire
+        // les valeurs à remettre au navigateur (le corps peut contenir des jetons).
+        let keep_body = matches!(spec.session.mode, sesame_core::descriptor::SessionMode::Handoff)
+            && spec
+                .session
+                .handoff
+                .as_ref()
+                .is_some_and(|h| !h.local_storage.is_empty());
+        Ok(Outcome::Success(jar, keep_body.then_some(body)))
     }
 }
