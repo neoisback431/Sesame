@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Moteur de proxy Sesame.
 //!
-//! Pour chaque requête : appli choisie d'après `Host`, session portail vérifiée,
-//! habilitation contrôlée, session applicative retrouvée ou obtenue par rejeu,
-//! requête relayée avec le jar de cookies côté serveur. Aucun cookie applicatif
-//! n'atteint le navigateur ; le cookie du portail n'atteint jamais l'appli.
+//! Pour chaque requête : appli choisie d'après `Host`, session portail vérifiée (sinon
+//! redirection vers le portail pour une navigation, `401` pour une sous-ressource),
+//! habilitation contrôlée, puis selon `spec.session.mode` :
+//!
+//! - **proxy** (défaut) : session applicative retrouvée ou obtenue par rejeu, requête relayée
+//!   avec le jar de cookies côté serveur. Aucun cookie applicatif n'atteint le navigateur.
+//! - **handoff** (ADR 0020) : à la première arrivée, rejeu puis remise de l'élément de session
+//!   au navigateur (voir [`handoff`]) ; ensuite, relais où le navigateur porte la session.
+//!
+//! Dans les deux cas, les cookies propres à Sesame (portail, marqueur de remise) ne sont
+//! jamais relayés à l'appli.
 
 pub mod config;
 pub mod diagnostic;
@@ -22,6 +29,7 @@ use std::time::{Duration, SystemTime};
 use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::{Request, State};
 use axum::http::header::{self, HeaderMap, HeaderValue};
+use axum::http::request::Parts;
 use axum::http::{Method, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
@@ -42,9 +50,6 @@ use crate::replay::{ReplayError, Replayer};
 
 /// Délai minimal entre deux mises à jour de `last_used_at` d'une session applicative.
 const TOUCH_INTERVAL: Duration = Duration::from_secs(30);
-/// Marqueur posé au navigateur après la remise (mode handoff) : sa présence fait passer les
-/// requêtes suivantes en relais transparent, sans nouveau rejeu.
-const HANDOFF_MARKER: &str = "__sesame_handoff";
 
 /// Appli exposée : descripteur et éléments précalculés.
 pub struct App {
@@ -341,25 +346,8 @@ impl Proxy {
             }
         };
 
-        // Cookies capturés à poser sur le domaine de l'appli (visibles du navigateur : handoff),
-        // plus le marqueur qui fait basculer les requêtes suivantes en relais transparent.
-        let ttl = spec.session.max_ttl.as_secs();
-        let mut cookie_headers = Vec::new();
-        for name in &handoff.set_cookies {
-            if let Some(value) = session.jar.get(name) {
-                if let Ok(v) = HeaderValue::from_str(&format!(
-                    "{name}={}; Path=/; Secure; SameSite=Lax; Max-Age={ttl}",
-                    value.expose_secret()
-                )) {
-                    cookie_headers.push(v);
-                }
-            }
-        }
-        if let Ok(v) = HeaderValue::from_str(&format!(
-            "{HANDOFF_MARKER}=1; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={ttl}"
-        )) {
-            cookie_headers.push(v);
-        }
+        let cookie_headers =
+            handoff::set_cookie_headers(handoff, &session.jar, spec.session.max_ttl.as_secs());
 
         if self
             .audit
@@ -379,8 +367,10 @@ impl Proxy {
             let html = handoff::page(&values, return_path, self.portal_url.as_str());
             ([(header::CACHE_CONTROL, "no-store")], Html(html)).into_response()
         };
-        for v in cookie_headers {
-            resp.headers_mut().append(header::SET_COOKIE, v);
+        for c in cookie_headers {
+            if let Ok(v) = HeaderValue::from_str(&c) {
+                resp.headers_mut().append(header::SET_COOKIE, v);
+            }
         }
         resp
     }
@@ -501,38 +491,41 @@ impl Proxy {
         Ok(Some(s))
     }
 
+    /// Relaie la requête à l'appli. `check_expiry` : le corps est lu en entier si les
+    /// conditions d'expiration en ont besoin (sinon il est diffusé tel quel).
     async fn forward(
         &self,
         app: &App,
-        method: &Method,
-        path_and_query: &str,
-        headers: &HeaderMap,
+        parts: &Parts,
         body: &Bytes,
         inject: Injection<'_>,
+        check_expiry: bool,
     ) -> Result<Upstream, reqwest::Error> {
         let spec = &app.descriptor.spec;
-        let url = format!("{}{}", app.internal_origin, path_and_query);
-        let mut req = app.http.request(method.clone(), url);
-        // En mode handoff transparent, le navigateur porte lui-même la session : ses cookies
-        // (hors cookie du portail) et son en-tête Authorization sont relayés tels quels.
+        let url = format!("{}{}", app.internal_origin, path_and_query(parts));
+        let mut req = app.http.request(parts.method.clone(), url);
+        // En mode handoff, le navigateur porte lui-même la session : ses cookies (hors cookies
+        // propres à Sesame) et son en-tête Authorization sont relayés tels quels.
         let passthrough = matches!(inject, Injection::Browser);
-        for (name, value) in headers {
+        let own_cookies = [self.cookie.name.as_str(), handoff::MARKER];
+        for (name, value) in &parts.headers {
             let drop = DROP_REQUEST.contains(&name.as_str())
                 && !(passthrough && (name == header::COOKIE || name == header::AUTHORIZATION));
-            if !drop {
-                if passthrough && name == header::COOKIE {
-                    if let Some(v) = value
-                        .to_str()
-                        .ok()
-                        .and_then(|c| cookies::without(c, &self.cookie.name))
-                        .and_then(|c| HeaderValue::from_str(&c).ok())
-                    {
-                        req = req.header(header::COOKIE, v);
-                    }
-                    continue;
-                }
-                req = req.header(name, value);
+            if drop {
+                continue;
             }
+            if name == header::COOKIE {
+                if let Some(v) = value
+                    .to_str()
+                    .ok()
+                    .and_then(|c| cookies::without(c, &own_cookies))
+                    .and_then(|c| HeaderValue::from_str(&c).ok())
+                {
+                    req = req.header(header::COOKIE, v);
+                }
+                continue;
+            }
+            req = req.header(name, value);
         }
         if let Some(h) = &spec.upstream.host_header {
             req = req.header(header::HOST, h);
@@ -560,7 +553,7 @@ impl Proxy {
             body: UpstreamBody::Stream(resp),
         };
         let rw = &spec.rewrite;
-        let needs_body = matcher::needs_body(&spec.expiry)
+        let needs_body = (check_expiry && matcher::needs_body(&spec.expiry))
             || (rw.body_absolute_urls
                 && rewrite::content_type_matches(upstream.content_type(), &rw.content_types));
         if needs_body {
@@ -652,13 +645,15 @@ impl Proxy {
     }
 }
 
-/// Le navigateur présente-t-il le marqueur de remise (handoff déjà effectué) ?
-fn handoff_done(headers: &HeaderMap) -> bool {
-    let cookies = headers
-        .get_all(header::COOKIE)
-        .iter()
-        .filter_map(|v| v.to_str().ok());
-    cookies::find(cookies, HANDOFF_MARKER).is_some()
+fn path_and_query(parts: &Parts) -> &str {
+    parts.uri.path_and_query().map_or("/", |pq| pq.as_str())
+}
+
+/// Noms des cookies posés par une réponse de l'appli (pour les conditions `cookie_set`).
+fn set_cookie_names(upstream: &Upstream) -> Vec<String> {
+    Jar::default()
+        .apply(upstream.set_cookies.iter().map(String::as_str))
+        .0
 }
 
 /// La requête est-elle une navigation de premier niveau (barre d'adresse, clic sur un lien) ?
@@ -704,25 +699,23 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
             &cid,
         );
     };
-    let path_and_query = req
-        .uri()
-        .path_and_query()
-        .map_or("/", |pq| pq.as_str())
-        .to_owned();
+    let (parts, body) = req.into_parts();
 
-    let session = match p.portal_session(req.headers()).await {
+    let session = match p.portal_session(&parts.headers).await {
         Ok(Some(s)) => s,
         // Rediriger vers le login n'a de sens que pour une navigation. Une sous-ressource
         // (manifest, image, fetch/XHR) recevrait une redirection cross-origin que le
         // navigateur bloque en CORS : on répond 401, sans redirection.
-        Ok(None) if is_navigation(req.headers()) => return p.login_redirect(&app, &path_and_query),
+        Ok(None) if is_navigation(&parts.headers) => {
+            return p.login_redirect(&app, path_and_query(&parts));
+        }
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
                 [(header::CACHE_CONTROL, "no-store")],
                 "authentication required",
             )
-                .into_response()
+                .into_response();
         }
         Err(()) => return p.unavailable(&cid),
     };
@@ -752,16 +745,6 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
         );
     }
 
-    // Mode handoff (ADR 0020) : totalement transparent, sans chemin dédié. À la première
-    // arrivée (pas de marqueur), Sesame rejoue le login et remet la session au navigateur,
-    // puis redirige vers l'URL demandée ; ensuite (marqueur présent), il relaie l'appli en
-    // laissant le navigateur porter la session (ses cookies et son Authorization).
-    let handoff_mode = matches!(app.descriptor.spec.session.mode, SessionMode::Handoff);
-    if handoff_mode && !handoff_done(req.headers()) {
-        return p.handoff(&ctx, &path_and_query).await;
-    }
-
-    let (parts, body) = req.into_parts();
     let Ok(body) = to_bytes(body, p.max_body_bytes).await else {
         return p.page(
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -771,130 +754,131 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
         );
     };
 
-    // Handoff, requête suivante (marqueur présent) : relais transparent, le navigateur porte
-    // la session. Aucun rejeu ni session côté serveur ; Set-Cookie de l'appli relayés.
-    if handoff_mode {
-        return match p
-            .forward(
-                &app,
-                &parts.method,
-                &path_and_query,
-                &parts.headers,
-                &body,
-                Injection::Browser,
-            )
-            .await
-        {
-            Ok(upstream) => p.to_browser(&app, upstream, true),
-            Err(e) => {
-                tracing::warn!(app = app.id(), correlation_id = %ctx.cid, error = %e.without_url(), "appli injoignable");
-                p.replay_error(&ReplayError::Upstream, &ctx.cid)
-            }
-        };
+    match app.descriptor.spec.session.mode {
+        SessionMode::Proxy => p.serve_proxy(&ctx, &parts, &body).await,
+        SessionMode::Handoff => p.serve_handoff(&ctx, &parts, &body).await,
+    }
+}
+
+impl Proxy {
+    fn upstream_error(&self, ctx: &Ctx<'_>, e: reqwest::Error) -> Response {
+        tracing::warn!(app = ctx.app.id(), correlation_id = %ctx.cid, error = %e.without_url(), "appli injoignable");
+        self.replay_error(&ReplayError::Upstream, &ctx.cid)
     }
 
-    let mut app_session = match p.app_session(&ctx).await {
-        Ok(s) => s,
-        Err(resp) => return resp,
-    };
-
-    let path = parts.uri.path();
-    let is_logout = app.logout.iter().any(|r| r.is_match(path));
-
-    let jar = Jar::from_cookies(app_session.cookies.clone());
-    let mut upstream = match p
-        .forward(
-            &app,
-            &parts.method,
-            &path_and_query,
-            &parts.headers,
-            &body,
-            Injection::Server(&jar),
-        )
-        .await
-    {
-        Ok(u) => u,
-        Err(e) => {
-            tracing::warn!(app = app.id(), correlation_id = %ctx.cid, error = %e.without_url(), "appli injoignable");
-            return p.replay_error(&ReplayError::Upstream, &ctx.cid);
+    /// Mode handoff (ADR 0020), sans chemin dédié. Sans marqueur : remise (rejeu, élément de
+    /// session et marqueur posés au navigateur, retour à l'URL demandée). Avec marqueur :
+    /// relais où le navigateur porte la session. Si l'appli signale alors une session expirée
+    /// sur une navigation, nouvelle remise (reconnexion automatique).
+    async fn serve_handoff(&self, ctx: &Ctx<'_>, parts: &Parts, body: &Bytes) -> Response {
+        if !handoff::done(&parts.headers) {
+            return self.handoff(ctx, path_and_query(parts)).await;
         }
-    };
-
-    if is_logout {
-        let _ = p.sessions.delete_app_session(&session.id, app.id()).await;
-        let _ = p
-            .audit
-            .record(p.event(&ctx, AuditAction::AppLogout, AuditOutcome::Success))
-            .await;
-        if app.descriptor.spec.logout.action == LogoutAction::PortalLogout {
-            let _ = p.sessions.delete_portal_session(&session.id).await;
-            let _ = p
-                .audit
-                .record(p.event(&ctx, AuditAction::PortalLogout, AuditOutcome::Success))
-                .await;
-            let mut resp = redirect(StatusCode::FOUND, p.portal_url.as_str());
-            if let Ok(v) = HeaderValue::from_str(&p.cookie.clear()) {
-                resp.headers_mut().append(header::SET_COOKIE, v);
-            }
-            return resp;
-        }
-        return p.to_browser(&app, upstream, false);
-    }
-
-    let names: Vec<String> = {
-        let mut probe = Jar::default();
-        probe.apply(upstream.set_cookies.iter().map(String::as_str)).0
-    };
-    if p.expired(&app, &upstream, &names) {
-        tracing::info!(app = app.id(), correlation_id = %ctx.cid, "session applicative expirée");
-        let _ = p.sessions.delete_app_session(&session.id, app.id()).await;
-        if p.audit
-            .record(p.event(&ctx, AuditAction::AppSessionExpired, AuditOutcome::Success))
-            .await
-            .is_err()
-        {
-            return p.unavailable(&ctx.cid);
-        }
-        app_session = match p.app_session(&ctx).await {
-            Ok(s) => s,
-            Err(resp) => return resp,
-        };
-        if !idempotent(&parts.method) {
-            // Pas de nouvelle soumission : retour à la page d'origine.
-            let back = parts
-                .headers
-                .get(header::REFERER)
-                .and_then(|r| r.to_str().ok())
-                .filter(|r| r.starts_with(&format!("{}/", app.public_origin)))
-                .map_or_else(|| format!("{}/", app.public_origin), str::to_owned);
-            return redirect(StatusCode::SEE_OTHER, &back);
-        }
-        let jar = Jar::from_cookies(app_session.cookies.clone());
-        upstream = match p
-            .forward(
-                &app,
-                &parts.method,
-                &path_and_query,
-                &parts.headers,
-                &body,
-                Injection::Server(&jar),
-            )
+        let renew = is_navigation(&parts.headers) && idempotent(&parts.method);
+        let upstream = match self
+            .forward(ctx.app, parts, body, Injection::Browser, renew)
             .await
         {
             Ok(u) => u,
-            Err(_) => return p.replay_error(&ReplayError::Upstream, &ctx.cid),
+            Err(e) => return self.upstream_error(ctx, e),
         };
-        let names: Vec<String> = Jar::default()
-            .apply(upstream.set_cookies.iter().map(String::as_str))
-            .0;
-        if p.expired(&app, &upstream, &names) {
-            tracing::warn!(app = app.id(), correlation_id = %ctx.cid, "session expirée juste après le rejeu");
-            let _ = p.sessions.delete_app_session(&session.id, app.id()).await;
-            return p.replay_error(&ReplayError::Rejected("expired_after_replay"), &ctx.cid);
+        if renew && self.expired(ctx.app, &upstream, &set_cookie_names(&upstream)) {
+            tracing::info!(app = ctx.app.id(), correlation_id = %ctx.cid, "session remise expirée");
+            if self
+                .audit
+                .record(self.event(ctx, AuditAction::AppSessionExpired, AuditOutcome::Success))
+                .await
+                .is_err()
+            {
+                return self.unavailable(&ctx.cid);
+            }
+            return self.handoff(ctx, path_and_query(parts)).await;
         }
+        self.to_browser(ctx.app, upstream, true)
     }
 
-    let set_cookies = std::mem::take(&mut upstream.set_cookies);
-    p.absorb_cookies(&ctx, &mut app_session, &set_cookies).await;
-    p.to_browser(&app, upstream, false)
+    /// Mode proxy : session applicative côté serveur, rejeu à la demande, expiration détectée
+    /// sur les réponses relayées (rejeu puis répétition si la requête est idempotente).
+    async fn serve_proxy(&self, ctx: &Ctx<'_>, parts: &Parts, body: &Bytes) -> Response {
+        let app = ctx.app;
+        let session = ctx.session;
+        let mut app_session = match self.app_session(ctx).await {
+            Ok(s) => s,
+            Err(resp) => return resp,
+        };
+
+        let jar = Jar::from_cookies(app_session.cookies.clone());
+        let mut upstream = match self
+            .forward(app, parts, body, Injection::Server(&jar), true)
+            .await
+        {
+            Ok(u) => u,
+            Err(e) => return self.upstream_error(ctx, e),
+        };
+
+        if app.logout.iter().any(|r| r.is_match(parts.uri.path())) {
+            let _ = self.sessions.delete_app_session(&session.id, app.id()).await;
+            let _ = self
+                .audit
+                .record(self.event(ctx, AuditAction::AppLogout, AuditOutcome::Success))
+                .await;
+            if app.descriptor.spec.logout.action == LogoutAction::PortalLogout {
+                let _ = self.sessions.delete_portal_session(&session.id).await;
+                let _ = self
+                    .audit
+                    .record(self.event(ctx, AuditAction::PortalLogout, AuditOutcome::Success))
+                    .await;
+                let mut resp = redirect(StatusCode::FOUND, self.portal_url.as_str());
+                if let Ok(v) = HeaderValue::from_str(&self.cookie.clear()) {
+                    resp.headers_mut().append(header::SET_COOKIE, v);
+                }
+                return resp;
+            }
+            return self.to_browser(app, upstream, false);
+        }
+
+        if self.expired(app, &upstream, &set_cookie_names(&upstream)) {
+            tracing::info!(app = app.id(), correlation_id = %ctx.cid, "session applicative expirée");
+            let _ = self.sessions.delete_app_session(&session.id, app.id()).await;
+            if self
+                .audit
+                .record(self.event(ctx, AuditAction::AppSessionExpired, AuditOutcome::Success))
+                .await
+                .is_err()
+            {
+                return self.unavailable(&ctx.cid);
+            }
+            app_session = match self.app_session(ctx).await {
+                Ok(s) => s,
+                Err(resp) => return resp,
+            };
+            if !idempotent(&parts.method) {
+                // Pas de nouvelle soumission : retour à la page d'origine.
+                let back = parts
+                    .headers
+                    .get(header::REFERER)
+                    .and_then(|r| r.to_str().ok())
+                    .filter(|r| r.starts_with(&format!("{}/", app.public_origin)))
+                    .map_or_else(|| format!("{}/", app.public_origin), str::to_owned);
+                return redirect(StatusCode::SEE_OTHER, &back);
+            }
+            let jar = Jar::from_cookies(app_session.cookies.clone());
+            upstream = match self
+                .forward(app, parts, body, Injection::Server(&jar), true)
+                .await
+            {
+                Ok(u) => u,
+                Err(e) => return self.upstream_error(ctx, e),
+            };
+            if self.expired(app, &upstream, &set_cookie_names(&upstream)) {
+                tracing::warn!(app = app.id(), correlation_id = %ctx.cid, "session expirée juste après le rejeu");
+                let _ = self.sessions.delete_app_session(&session.id, app.id()).await;
+                return self.replay_error(&ReplayError::Rejected("expired_after_replay"), &ctx.cid);
+            }
+        }
+
+        let set_cookies = std::mem::take(&mut upstream.set_cookies);
+        self.absorb_cookies(ctx, &mut app_session, &set_cookies).await;
+        self.to_browser(app, upstream, false)
+    }
 }

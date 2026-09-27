@@ -309,23 +309,15 @@ pub struct Reply {
 }
 
 impl Bench {
+    /// Relaie la requête et vérifie l'invariant de non-fuite (mode proxy).
     pub async fn send(&self, req: Request<Body>) -> Reply {
-        let resp = self.proxy.clone().oneshot(req).await.unwrap();
-        let status = resp.status();
-        let headers = resp.headers().clone();
-        let body =
-            String::from_utf8_lossy(&to_bytes(resp.into_body(), usize::MAX).await.unwrap()).into_owned();
-        let reply = Reply {
-            status,
-            headers,
-            body,
-        };
+        let reply = self.send_raw(req).await;
         reply.assert_no_leak();
         reply
     }
 
-    /// Comme `send`, mais sans l'invariant de non-fuite : le mode handoff remet
-    /// délibérément le cookie applicatif au navigateur (ADR 0020).
+    /// Comme `send`, sans l'invariant de non-fuite : le mode handoff remet délibérément
+    /// l'élément de session au navigateur (ADR 0020).
     pub async fn send_raw(&self, req: Request<Body>) -> Reply {
         let resp = self.proxy.clone().oneshot(req).await.unwrap();
         let status = resp.status();
