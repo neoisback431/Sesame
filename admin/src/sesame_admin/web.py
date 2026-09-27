@@ -15,6 +15,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -27,6 +28,8 @@ from .service import AdminService, InvalidDescriptor, InvalidInput
 
 log = logging.getLogger(__name__)
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+# Logo, favicon, bannière : générés par scripts/build_web_assets.py, publics.
+STATIC = Path(__file__).parent / "static"
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 # Retour après une action : seulement une page locale de l'administration.
 _BACK = re.compile(r"^/(apps|users)/[A-Za-z0-9@._+-]{1,256}$")
@@ -74,6 +77,7 @@ def create_app(
     secure_cookies: bool = True,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")
     app.add_middleware(
         SessionMiddleware,
         secret_key=session_key,

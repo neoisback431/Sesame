@@ -370,3 +370,13 @@ def test_db_app_pages_do_not_leak_credentials(ctx):
         assert_no_leak(client.get(path).text)
     r = client.post("/apps/crm/delete", data={"csrf": token, "revision": "1"})
     assert "comptes" in client.get(r.headers["location"]).text
+
+
+def test_brand_assets_are_public_and_used(ctx):
+    client, *_ = ctx
+    r = client.get("/static/logo-64.png")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    assert client.get("/static/banner.webp").status_code == 200
+    assert client.get("/static/../web.py").status_code == 404
+    page = client.get("/logged-out").text
+    assert 'src="/static/banner.webp"' in page and 'href="/static/favicon-32.png"' in page

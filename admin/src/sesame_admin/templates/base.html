@@ -4,24 +4,37 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Administration{% endblock %} · Sesame</title>
+  <link rel="icon" type="image/png" href="/static/favicon-32.png">
   <style>
-    body{font-family:system-ui,sans-serif;margin:0;background:#f6f7f9;color:#1d2330}
-    header{background:#1d2330;color:#fff;padding:12px 24px;display:flex;justify-content:space-between;align-items:center}
+    /* Couleurs reprises du logo (voir sesame_core::html) : bleu nuit, bleu, cyan. */
+    :root{--navy:#0a1f5c;--blue:#1464c0;--cyan:#13b5cf;--ink:#15213b;--muted:#5b6475;--line:#d9e1ee;--bg:#f3f6fb}
+    body{font-family:system-ui,sans-serif;margin:0;background:var(--bg);color:var(--ink)}
+    header{background:linear-gradient(90deg,var(--navy),var(--blue) 65%,var(--cyan));color:#fff;padding:10px 24px;
+      display:flex;justify-content:space-between;align-items:center}
+    header nav{display:flex;align-items:center}
     header a{color:#fff;text-decoration:none}
-    header a.nav{margin-left:24px;color:#c9cfdb}
+    header a.nav{margin-left:24px;color:#dcecf8}header a.nav:hover{color:#fff}
+    .brand{display:flex;align-items:center;gap:10px;font-size:1.2em}.brand b{color:#8fe3f0}.brand img{border-radius:8px}
+    .brand small{font-size:.7em;color:#cfe6f7;border-left:1px solid rgba(255,255,255,.35);padding-left:12px;margin-left:4px}
+    h1{color:var(--navy)}a{color:var(--blue)}
     main{max-width:1000px;margin:32px auto;padding:0 16px}
     table{border-collapse:collapse;width:100%;background:#fff}
-    th,td{border-bottom:1px solid #e3e6ec;padding:8px 10px;text-align:left;vertical-align:top}
-    th{background:#eef0f4;font-weight:600}
-    .card{background:#fff;border:1px solid #d9dde5;border-radius:8px;padding:16px;margin:16px 0}
-    .muted{color:#5b6475;font-size:.9em}
+    th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+    th{background:#e8eef8;font-weight:600;color:var(--navy)}
+    .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;margin:16px 0}
+    .muted{color:var(--muted);font-size:.9em}
+    .hero{text-align:center}.hero img{max-width:100%;height:auto;border-radius:14px}
     .flash{padding:10px 14px;border-radius:6px;margin-bottom:16px}
     .flash.ok{background:#e5f5ea;border:1px solid #9fd4ae}.flash.error{background:#fdecec;border:1px solid #efa6a6}
     .status{padding:2px 8px;border-radius:10px;font-size:.85em}
     .status.active{background:#e5f5ea}.status.failed{background:#fdecec}.status.disabled{background:#eceef2}
     label{display:block;margin:8px 0 4px}input[type=text],input[type=password]{width:100%;max-width:360px;padding:6px}
-    form.inline{display:inline}button{padding:4px 12px}
-    a.button{display:inline-block;padding:4px 12px;border:1px solid #9aa3b5;border-radius:4px;background:#fff;color:inherit;text-decoration:none;white-space:nowrap}
+    form.inline{display:inline}
+    button{padding:5px 12px;border:1px solid var(--blue);border-radius:5px;background:var(--blue);color:#fff;font:inherit;cursor:pointer}
+    button:hover{background:var(--navy);border-color:var(--navy)}
+    header button{background:transparent;border-color:rgba(255,255,255,.6)}header button:hover{background:rgba(255,255,255,.15)}
+    a.button{display:inline-block;padding:4px 12px;border:1px solid var(--blue);border-radius:5px;background:#fff;color:var(--blue);text-decoration:none;white-space:nowrap}
+    a.button:hover{background:#e8f1fb}
     details.card summary{cursor:pointer}pre{background:#f0f2f5;padding:12px;overflow:auto}
     textarea{width:100%;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:.9em;padding:8px}
     .tag{display:inline-block;padding:1px 6px;border-radius:4px;font-size:.8em;background:#eceef2}
@@ -32,7 +45,7 @@
 <body>
 <header>
   <nav>
-    <a href="/"><strong>Sesame</strong> · Administration</a>
+    <a class="brand" href="/"><img src="/static/logo-64.png" alt="" width="32" height="32"><span><b>SE</b>same</span><small>Administration</small></a>
     {% if admin %}<a class="nav" href="/">Applications</a><a class="nav" href="/users">Utilisateurs</a>{% endif %}
   </nav>
   {% if admin %}

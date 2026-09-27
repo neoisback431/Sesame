@@ -46,7 +46,7 @@ flowchart LR
 | Composant | Rôle | Accès aux secrets applicatifs |
 |---|---|---|
 | Nginx | Terminaison TLS, routage par nom d'hôte | Aucun |
-| Portail | OIDC, session portail, page « Mes applications », déconnexion | Aucun |
+| Portail | OIDC, session portail, page « Mes applications », déconnexion, ressources statiques de la charte (`/static/`) | Aucun |
 | Moteur de proxy | Relais, rejeu du login, injection de session, détection d'expiration | **Seul lecteur du coffre** |
 | Magasin de sessions | Session portail → sessions applicatives (cookies chiffrés) | Cookies applicatifs (chiffrés) |
 | UI d'administration | Applis, descripteurs, habilitations, registre des comptes | Écriture seule, sans relecture (voir plus bas) |

@@ -17,8 +17,8 @@ pub mod oidc;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Query, State};
-use axum::http::header::{CACHE_CONTROL, COOKIE, LOCATION, SET_COOKIE};
+use axum::extract::{Path, Query, State};
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
@@ -61,6 +61,7 @@ pub fn router(portal: Arc<Portal>) -> Router {
         .route("/auth/callback", get(callback))
         .route("/auth/logout", post(logout))
         .route("/auth/logged-out", get(logged_out))
+        .route("/static/{name}", get(static_asset))
         .route(
             "/healthz",
             get(|| async { Json(serde_json::json!({ "status": "ok" })) }),
@@ -163,7 +164,12 @@ async fn home(State(p): State<AppState>, headers: HeaderMap) -> Response {
     };
     let descriptors = p.descriptors();
     let tiles = catalog::tiles(&descriptors, &session.user, &accounts);
-    let html = catalog::render(&session.user, &tiles, p.public_url.scheme());
+    let html = catalog::render(
+        &session.user,
+        &tiles,
+        p.public_url.scheme(),
+        p.public_url.as_str(),
+    );
     ([(CACHE_CONTROL, "no-store")], Html(html)).into_response()
 }
 
@@ -303,17 +309,34 @@ async fn logout(State(p): State<AppState>, headers: HeaderMap) -> Response {
     }
 }
 
+/// Logo, favicon, bannière : publics, mis en cache par le navigateur.
+async fn static_asset(Path(name): Path<String>) -> Response {
+    match sesame_core::html::asset(&name) {
+        Some((mime, bytes)) => (
+            [(CONTENT_TYPE, mime), (CACHE_CONTROL, "public, max-age=86400")],
+            bytes,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 async fn logged_out(State(p): State<AppState>) -> Response {
     logged_out_page(&p, None)
 }
 
 fn logged_out_page(p: &Portal, clear_cookie: Option<String>) -> Response {
+    let url = p.public_url.as_str();
     let html = sesame_core::html::page(
         "Déconnecté",
         &format!(
-            "<h1>Vous êtes déconnecté</h1><p><a href=\"{}\">Se reconnecter</a></p>",
-            sesame_core::html::escape(p.public_url.as_str())
+            "<div class=\"hero\"><img src=\"{}\" alt=\"Sesame : la clé d'un accès universel\" \
+width=\"603\" height=\"359\"><h1>Vous êtes déconnecté</h1>\
+<p><a class=\"button\" href=\"{}\">Se reconnecter</a></p></div>",
+            sesame_core::html::escape(&sesame_core::html::asset_url(url, "banner.webp")),
+            sesame_core::html::escape(url)
         ),
+        url,
     );
     let mut resp = ([(CACHE_CONTROL, "no-store")], Html(html)).into_response();
     if let Some(v) = clear_cookie.and_then(|c| HeaderValue::from_str(&c).ok()) {
@@ -433,5 +456,17 @@ mod tests {
         assert!(constant_time_eq(b"abc", b"abc"));
         assert!(!constant_time_eq(b"abc", b"abd"));
         assert!(!constant_time_eq(b"abc", b"ab"));
+    }
+
+    #[tokio::test]
+    async fn static_assets_are_served_and_unknown_names_refused() {
+        let resp = static_asset(Path("logo-64.png".into())).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers()[CONTENT_TYPE], "image/png");
+        assert_eq!(resp.headers()[CACHE_CONTROL], "public, max-age=86400");
+        for name in ["inconnu.png", "../Cargo.toml", ""] {
+            let resp = static_asset(Path(name.into())).await;
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{name}");
+        }
     }
 }

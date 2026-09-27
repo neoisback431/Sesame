@@ -39,7 +39,15 @@ pub fn tiles<'a>(
         .collect()
 }
 
-pub fn render(user: &UserIdentity, tiles: &[Tile<'_>], scheme: &str) -> String {
+/// Initiale affichée dans la pastille de la tuile.
+fn initial(name: &str) -> String {
+    name.chars()
+        .find(|c| c.is_alphanumeric())
+        .map(|c| c.to_uppercase().collect())
+        .unwrap_or_else(|| "?".into())
+}
+
+pub fn render(user: &UserIdentity, tiles: &[Tile<'_>], scheme: &str, portal_url: &str) -> String {
     let name = user.display_name.as_deref().unwrap_or(&user.user_key);
     let mut body = format!(
         "<h1>Mes applications</h1><p class=\"muted\">Connecté en tant que {}</p>",
@@ -59,14 +67,18 @@ pub fn render(user: &UserIdentity, tiles: &[Tile<'_>], scheme: &str) -> String {
                 .unwrap_or_default();
             if t.failed {
                 body.push_str(&format!(
-                    "<li class=\"tile\"><div><strong>{}</strong><br>{desc}<br>\
-<span class=\"warn\">Connexion impossible : contactez votre administrateur.</span></div></li>",
+                    "<li class=\"tile\"><div><span class=\"ico\" aria-hidden=\"true\">{}</span><span>\
+<strong>{}</strong><br>{desc}<br>\
+<span class=\"warn\">Connexion impossible : contactez votre administrateur.</span></span></div></li>",
+                    escape(&initial(&d.metadata.name)),
                     escape(&d.metadata.name)
                 ));
             } else {
                 body.push_str(&format!(
-                    "<li class=\"tile\"><a href=\"{scheme}://{}/\"><strong>{}</strong><br>{desc}</a></li>",
+                    "<li class=\"tile\"><a href=\"{scheme}://{}/\"><span class=\"ico\" aria-hidden=\"true\">{}</span>\
+<span><strong>{}</strong><br>{desc}</span></a></li>",
                     escape(&d.spec.public.host),
+                    escape(&initial(&d.metadata.name)),
                     escape(&d.metadata.name)
                 ));
             }
@@ -76,7 +88,7 @@ pub fn render(user: &UserIdentity, tiles: &[Tile<'_>], scheme: &str) -> String {
     body.push_str(
         "<form class=\"logout\" method=\"post\" action=\"/auth/logout\"><button type=\"submit\">Se déconnecter</button></form>",
     );
-    page("Mes applications", &body)
+    page("Mes applications", &body, portal_url)
 }
 
 #[cfg(test)]
@@ -125,8 +137,11 @@ mod tests {
     fn renders_escaped_links() {
         let ds = vec![AppDescriptor::from_yaml(FAKE_APP).unwrap()];
         let u = user(&["fake-app-users"]);
-        let html = render(&u, &tiles(&ds, &u, &[account(AccountStatus::Active)]), "https");
+        let active = [account(AccountStatus::Active)];
+        let html = render(&u, &tiles(&ds, &u, &active), "https", "https://sesame.test/");
         assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/\""));
+        assert!(html.contains("<span class=\"ico\" aria-hidden=\"true\">A</span>"));
+        assert!(html.contains("https://sesame.test/static/logo-64.png"));
         assert!(html.contains("Alice &lt;admin&gt;"));
     }
 }
