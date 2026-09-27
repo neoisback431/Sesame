@@ -17,6 +17,25 @@
 {% if app.updated_by %}<p class="muted">Dernière modification {{ app.updated_at.strftime("%Y-%m-%d %H:%M") if app.updated_at else "" }} par <code>{{ app.updated_by }}</code>.</p>{% endif %}
 {% endif %}
 
+{% if not app.access_open %}
+<div class="card" id="access-restricted">
+  <strong>Accès restreint : un compte ne suffit pas.</strong>
+  <p>Seuls les utilisateurs
+    {% if app.groups %}membres d'un de ces groupes (claim OIDC) : {% for g in app.groups %}<code>{{ g }}</code> {% endfor %}{% endif %}
+    {% if app.groups and app.users %}ou {% endif %}
+    {% if app.users %}listés : {% for u in app.users %}<code>{{ u }}</code> {% endfor %}{% endif %}
+    voient cette appli, même avec un compte actif. Si ces groupes n'existent pas chez le fournisseur d'identité,
+    l'appli reste invisible.</p>
+  {% if app.editable %}
+  <form class="inline" method="post" action="/apps/{{ app.id }}/open-access">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit">Ouvrir à tous les titulaires d'un compte</button></form>
+  {% else %}
+  <p class="muted">Appli décrite par un fichier Git : retirer <code>spec.access</code> par merge request.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 <h2>Comptes</h2>
 <table>
   <thead><tr><th>Utilisateur</th><th>État</th><th>Dernière connexion</th><th>Actions</th></tr></thead>

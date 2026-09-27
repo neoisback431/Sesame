@@ -413,6 +413,17 @@ def create_app(
             }
         return RedirectResponse(target, status_code=303)
 
+    @app.post("/apps/{app_id}/open-access")
+    async def open_access(request: Request, app_id: str, admin: Admin) -> Response:
+        async def op(cid: str) -> str:
+            revision = await service.open_access(admin, app_id, cid)
+            return (
+                f"Restriction retirée (révision {revision}) : tout utilisateur ayant un compte actif "
+                "voit l'appli dans son portail d'ici quelques secondes."
+            )
+
+        return await act(request, app_id, op)
+
     @app.post("/apps/{app_id}/accounts")
     async def provision(
         request: Request, app_id: str, admin: Admin, user_key: Annotated[str, Form()]
@@ -422,7 +433,10 @@ def create_app(
             form = await request.form()
             fields = {k: str(form.get(f"cred_{k}", "")) for k in target.credential_keys}
             await service.provision(admin, app_id, user_key, fields, cid)
-            return f"Compte de « {user_key.strip()} » enregistré et activé."
+            done = f"Compte de « {user_key.strip()} » enregistré et activé."
+            if not target.access_open:
+                done += " Attention : accès restreint à des groupes, l'appli n'apparaîtra qu'à leurs membres."
+            return done
 
         return await act(request, app_id, op)
 

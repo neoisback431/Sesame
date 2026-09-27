@@ -176,6 +176,17 @@ class AdminService:
         log.info("appli modifiée", extra={"app_id": app_id, "correlation_id": cid})
         return revision
 
+    async def open_access(self, actor: AdminUser, app_id: str, cid: str) -> int:
+        """Retire ``spec.access`` : tout titulaire d'un compte actif accède à l'appli (ADR 0017).
+        Nouvelle révision, auditée comme toute modification de descripteur."""
+        if app_id in self.files:
+            await self._audit("descriptor_updated", actor, app_id, cid, "failure", "read_only")
+            raise InvalidInput("Appli décrite par un fichier Git : retirer spec.access par merge request.")
+        stored = await self.stored(app_id)
+        doc = {**stored.document, "spec": dict(stored.document.get("spec", {}))}
+        doc["spec"].pop("access", None)
+        return await self.update_descriptor(actor, app_id, self.validator.to_yaml(doc), stored.revision, cid)
+
     async def delete_descriptor(
         self, actor: AdminUser, app_id: str, expected_revision: int, cid: str
     ) -> None:
