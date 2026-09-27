@@ -74,8 +74,11 @@ URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_ADMIN
 | Variable | Rôle |
 |---|---|
 | `SESAME_ONBOARD_<CLÉ>` 🔒 | Identifiants du compte de test pour `verify`, une variable par clé de `credentials.keys` (ex. `SESAME_ONBOARD_USERNAME`, `SESAME_ONBOARD_PASSWORD`). À défaut, saisie masquée |
+| `SESAME_ONBOARD_CHROMIUM` | Exécutable Chromium du recorder (`record`), si ce n'est pas celui installé par Playwright |
 
-Options : `--schema` (schéma JSON), `--ca-file`, `--insecure` (dev uniquement), `--timeout`. `health` et `fingerprint` n'utilisent aucun identifiant.
+Options : `--schema` (schéma JSON), `--ca-file`, `--insecure` (dev uniquement), `--timeout`. `health`, `fingerprint` et `record` n'utilisent aucun identifiant.
+
+Options de `record` : `--base-url`, `--protected-path` (page protégée sondée, `/` par défaut), `--probe-failure` (envoie une connexion factice pour observer l'échec), `--id`, `--name`, `--public-host`, `--group` / `--user` (répétables), `--session-cookie`, `--chromium`, `-o` (fichier de sortie). Le recorder nécessite l'extra `capture` (`pip install 'sesame-onboarding[capture]'`, puis `playwright install chromium`) ou l'image `recorder` (`make record`). `--ca-file` ne s'applique pas au navigateur : utiliser le magasin de certificats du système ou, en dev, `--insecure`.
 
 ## Commun
 

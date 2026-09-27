@@ -1,6 +1,6 @@
 # 0012. Embarquement : outil en ligne de commande, vérification sans JavaScript
 
-**Statut** : acceptée (2026-09-27)
+**Statut** : acceptée (2026-09-27). Complétée par [0015](0015-recorder.md) (recorder).
 
 ## Contexte
 

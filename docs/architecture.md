@@ -289,11 +289,11 @@ flowchart LR
 
 ## Module d'embarquement
 
-Outil en ligne de commande `sesame-onboard` (Python). Voir [ADR 0012](decisions/0012-embarquement.md).
+Outil en ligne de commande `sesame-onboard` (Python). Voir [ADR 0012](decisions/0012-embarquement.md) et [ADR 0015](decisions/0015-recorder.md) (recorder).
 
 Le moteur de proxy rejoue le login **sans exécuter de JavaScript** : il lit le formulaire dans le HTML brut. L'embarquement repose sur ce même principe.
 
-1. Un administrateur rédige le descripteur à partir de [`descriptors/TEMPLATE.yaml.example`](../descriptors/TEMPLATE.yaml.example) : champs du formulaire, jetons CSRF, conditions de succès, cookie de session, expiration.
+1. `sesame-onboard record <URL de login>` propose un descripteur (voir « Recorder » ci-dessous), ou un administrateur le rédige à partir de [`descriptors/TEMPLATE.yaml.example`](../descriptors/TEMPLATE.yaml.example) ou du formulaire guidé de l'administration.
 2. `sesame-onboard verify <descripteur>` rejoue le login avec un compte de test, avec les mêmes règles que le proxy (champs cachés, CSRF, conditions, cookie de session). Le résultat indique la cause d'un échec, par exemple `login_form_not_found_in_raw_html` pour un formulaire construit en JavaScript, ou `csrf_token_not_found`, `login_rejected`, `session_cookie_missing`.
 3. `sesame-onboard fingerprint <descripteur>` calcule l'empreinte de la structure du formulaire (action, méthode, champs, sans les valeurs), à reporter dans `spec.health.form_fingerprint`.
 4. Un humain relit le descripteur, qui est fusionné par merge request, ou l'enregistre dans l'éditeur de l'administration.
@@ -301,7 +301,36 @@ Le moteur de proxy rejoue le login **sans exécuter de JavaScript** : il lit le 
 
 Les identifiants du compte de test sont lus dans l'environnement (`SESAME_ONBOARD_<CLÉ>`) ou saisis en masqué. Ils ne sont jamais écrits dans un fichier, dans la sortie ni dans les logs.
 
-**Pas encore disponible** : la capture automatique d'un login réel dans un navigateur headless (Playwright), qui générerait le descripteur. Hors périmètre initial : login en plusieurs étapes, captcha, MFA applicatif.
+### Recorder
+
+`sesame-onboard record` analyse le comportement de la page de login dans un Chromium headless (Playwright), **sans aucun identifiant réel**.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant R as Recorder
+    participant B as Chromium headless
+    participant A as Appli cible
+    R->>B: ouvrir la page de login (contexte jetable)
+    B->>A: GET /login (JavaScript exécuté)
+    R->>B: repérer formulaire, champs, jetons CSRF, captcha
+    R->>B: remplir des valeurs factices, soumettre
+    B--xR: soumission interceptée et annulée (méthode, cible, encodage, noms des champs, en-têtes)
+    opt --probe-failure
+        B->>A: soumission factice relayée (une seule)
+        A-->>B: réponse d'échec (statut, message)
+    end
+    R->>A: GET /login sans JavaScript (vue du proxy, empreinte)
+    R->>A: GET page protégée sans session (règle d'expiration)
+    R-->>R: descripteur YAML + points à confirmer
+```
+
+- Sont conservés : noms de champs, de cookies et d'en-têtes, codes de statut, chemins, message d'erreur visible. Jamais : valeurs des champs cachés, jetons CSRF, cookies, valeurs factices.
+- Pendant l'analyse, aucune requête d'écriture ne sort de l'origine de l'appli ; une seule soumission au plus.
+- Blocages signalés (code de sortie 1) : formulaire absent du HTML brut, page de login hors de l'appli (SSO), captcha, login en plusieurs étapes, soumission non observée. Avertissements : login soumis par JavaScript, champs ajoutés à la soumission, encodage non pris en charge.
+- Non observable sans identifiants : le cookie de session et la réponse de succès. Ils sont marqués « à confirmer » ; `sesame-onboard verify` avec un compte de test les valide.
+
+Hors périmètre initial : login en plusieurs étapes, captcha, MFA applicatif, enregistrement d'une connexion réelle.
 
 ## Observabilité
 

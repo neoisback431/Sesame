@@ -4,12 +4,13 @@
 CERTS := deploy/nginx/certs
 PY_PROJECTS := dev/fake-app admin onboarding
 
-.PHONY: help dev-certs up down logs health test test-rust test-python test-postgres e2e lint lint-rust lint-python validate-descriptors images deny deny-python
+.PHONY: help dev-certs up down logs health record test test-rust test-python test-postgres e2e lint lint-rust lint-python validate-descriptors images deny deny-python
 
 help:
 	@echo "dev-certs             certificat TLS de dev pour *.sesame.localhost"
 	@echo "up / down / logs      environnement Docker Compose de dev"
 	@echo "health                test de santé des formulaires de login (après make up)"
+	@echo "record URL=… [ARGS=…] analyse une page de login et propose un descripteur (après make up)"
 	@echo "test                  tests Rust et Python"
 	@echo "test-postgres         tests de contrat sur une base PostgreSQL jetable (Docker)"
 	@echo "e2e                   tests bout en bout Playwright (après make up)"
@@ -43,6 +44,11 @@ logs:
 
 health:
 	docker compose run --rm --build health
+
+# Ex. : make record URL=http://fake-app:8000/login ARGS="--id fake-app --probe-failure"
+record:
+	@test -n "$(URL)" || (echo "usage : make record URL=<page de login> [ARGS=…]" && exit 2)
+	docker compose run --rm --build recorder "$(URL)" $(ARGS)
 
 test: test-rust test-python
 

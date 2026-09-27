@@ -18,3 +18,4 @@ Une fiche par décision structurante : contexte, décision, conséquences. Une d
 | [0012](0012-embarquement.md) | Embarquement : outil en ligne de commande, vérification sans JavaScript | 2026-09-27 |
 | [0013](0013-deconnexion-fournisseur.md) | Déconnexion chez le fournisseur d'identité, sans conserver l'ID token | 2026-09-27 |
 | [0014](0014-applis-en-base.md) | Applis en base, créées dans l'administration (remplace en partie 0011) | 2026-09-27 |
+| [0015](0015-recorder.md) | Recorder : analyse d'une page de login sans identifiant | 2026-09-27 |

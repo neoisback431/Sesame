@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Navigateur headless : nécessaire à la capture uniquement (pas au test de santé).
+# Navigateur headless : nécessaire au recorder (record) uniquement, pas au test de santé.
 capture = ["playwright>=1.47"]
 
 [project.scripts]

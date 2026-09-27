@@ -63,5 +63,6 @@ Un descripteur vit soit dans un fichier YAML de `descriptors/` (relu par merge r
 - Au démarrage, le moteur de proxy refait ces contrôles et en ajoute d'autres : regex compilables, `from_secret` correspondant à une clé de `credentials.keys`, etc. Un fichier invalide empêche le démarrage ; un descripteur en base invalide est écarté et journalisé, sans interrompre le service.
 - L'éditeur de l'administration applique le schéma et ces mêmes contrôles avant d'enregistrer. Les regex doivent rester dans la syntaxe commune à Python et à la crate `regex` : pas de références arrière ni d'assertions de voisinage.
 - Pour un descripteur en base, `sesame-onboard verify` s'utilise sur une copie du YAML de l'éditeur enregistrée dans un fichier. `sesame-onboard health` ne couvre pour l'instant que les fichiers.
+- `sesame-onboard record <URL de login>` propose un descripteur en analysant la page dans un navigateur headless, sans identifiant, avec la liste des points à confirmer.
 - `sesame-onboard verify <descripteur>` rejoue le login avec un compte de test, avec les règles du proxy (HTML brut, sans JavaScript), et indique la cause d'un échec.
 - `sesame-onboard fingerprint <descripteur>` calcule l'empreinte à reporter dans `spec.health.form_fingerprint` ; `sesame-onboard health` la surveille ensuite.

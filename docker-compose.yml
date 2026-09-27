@@ -189,6 +189,14 @@ services:
       - ./schemas/app-descriptor.schema.json:/etc/sesame/app-descriptor.schema.json:ro
     depends_on: [fake-app]
 
+  # Recorder : analyse d'une page de login, sans identifiant (make record URL=…).
+  recorder:
+    build: { context: ./onboarding, dockerfile: recorder.Dockerfile }
+    profiles: [tools]
+    volumes:
+      - ./schemas/app-descriptor.schema.json:/etc/sesame/app-descriptor.schema.json:ro
+    depends_on: [fake-app]
+
   fake-app:
     build: ./dev/fake-app
     environment:

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Ligne de commande ``sesame-onboard`` : ``verify``, ``health``, ``fingerprint``.
+"""Ligne de commande ``sesame-onboard`` : ``record``, ``verify``, ``health``, ``fingerprint``.
 
 Codes de sortie : 0 succès, 1 échec (vérification ou santé), 2 erreur d'usage.
 """
@@ -99,6 +99,77 @@ def cmd_fingerprint(args: argparse.Namespace) -> int:
     return 0
 
 
+def _chromium(explicit: str | None) -> str | None:
+    """Chromium à utiliser : option, ``SESAME_ONBOARD_CHROMIUM``, sinon celui de Playwright."""
+    return explicit or os.environ.get("SESAME_ONBOARD_CHROMIUM") or None
+
+
+def cmd_record(args: argparse.Namespace) -> int:
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print(
+            "Playwright absent : pip install 'sesame-onboarding[capture]' puis playwright install chromium",
+            file=sys.stderr,
+        )
+        return 2
+    from . import record
+
+    if args.probe_failure:
+        print(
+            "sonde d'échec : une connexion avec un identifiant factice (sesame-recorder-…) "
+            "sera envoyée à l'appli",
+            file=sys.stderr,
+        )
+    try:
+        with sync_playwright() as p, _client(args) as client:
+            browser = p.chromium.launch(executable_path=_chromium(args.chromium))
+            try:
+                rec = record.record(
+                    args.login_url,
+                    client,
+                    browser,
+                    base_url=args.base_url,
+                    protected_path=args.protected_path,
+                    probe_failure=args.probe_failure,
+                    timeout=args.timeout,
+                    ignore_https_errors=args.insecure,
+                )
+            finally:
+                browser.close()
+    except PlaywrightError as e:
+        print(f"navigateur : {str(e).splitlines()[0][:200]}", file=sys.stderr)
+        return 1
+    except record.RecordError as e:
+        print(f"erreur : {e}", file=sys.stderr)
+        return 2
+    for line in record.summary(rec):
+        print(line, file=sys.stderr)
+    if rec.password_field is None:
+        return 1
+    draft = record.to_descriptor(
+        rec,
+        app_id=args.id,
+        name=args.name,
+        public_host=args.public_host,
+        groups=args.group,
+        users=args.user,
+        session_cookie=args.session_cookie,
+    )
+    errors = descriptors.validate(draft.document, Path(args.schema))
+    if errors:
+        print("descripteur proposé invalide : " + errors[0], file=sys.stderr)
+        return 1
+    text = record.render(draft, rec)
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
+        print(f"descripteur écrit dans {args.output}", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+    return 1 if rec.blocking else 0
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="sesame-onboard", description="Embarquement des applis dans Sesame.")
     p.add_argument("--schema", default=str(descriptors.DEFAULT_SCHEMA), help="schéma JSON des descripteurs")
@@ -106,6 +177,27 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--insecure", action="store_true", help="ne pas vérifier TLS (dev uniquement)")
     p.add_argument("--timeout", type=float, default=15.0)
     sub = p.add_subparsers(dest="command", required=True)
+
+    r = sub.add_parser(
+        "record", help="analyser une page de login (navigateur headless) et proposer un descripteur"
+    )
+    r.add_argument("login_url", help="URL de la page de login, telle que le proxy la joint")
+    r.add_argument("--base-url", help="URL de base de l'appli (défaut : origine de la page de login)")
+    r.add_argument("--protected-path", default="/", help="page protégée sondée sans session (défaut : /)")
+    r.add_argument(
+        "--probe-failure",
+        action="store_true",
+        help="envoyer une connexion factice pour observer la réponse d'échec",
+    )
+    r.add_argument("--id", help="metadata.id")
+    r.add_argument("--name", help="metadata.name (défaut : titre de la page)")
+    r.add_argument("--public-host", help="hôte public exposé par Sesame")
+    r.add_argument("--group", action="append", help="groupe habilité (répétable)")
+    r.add_argument("--user", action="append", help="utilisateur habilité (répétable)")
+    r.add_argument("--session-cookie", help="cookie de session de l'appli, s'il est connu")
+    r.add_argument("--chromium", help="exécutable Chromium (défaut : SESAME_ONBOARD_CHROMIUM ou Playwright)")
+    r.add_argument("-o", "--output", help="fichier du descripteur (défaut : sortie standard)")
+    r.set_defaults(func=cmd_record)
 
     v = sub.add_parser("verify", help="valider un descripteur avec un compte de test (rejeu sans JavaScript)")
     v.add_argument("descriptor")

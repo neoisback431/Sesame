@@ -54,6 +54,7 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 | `openbao` + `openbao-seed` | Coffre en mode dev. Le seed (idempotent) crée l'AppRole du proxy (lecture seule), celui de l'admin (écriture sans lecture) et les identifiants de test. |
 | `keycloak` | Fournisseur OIDC de dev, realm importé depuis `dev/keycloak/sesame-realm.json` |
 | `health` | Test de santé des formulaires de login (profil `tools`, lancé à la demande : `make health`) |
+| `recorder` | Recorder avec Chromium headless (profil `tools`, image Playwright officielle : `make record URL=…`) |
 | `fake-app` | Appli cible : formulaire de login, jeton CSRF à usage unique, champ caché, session serveur de 5 min. Aucun port publié. |
 
 ## Parcours à essayer
@@ -64,7 +65,8 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 4. `docker compose restart fake-app` fait perdre ses sessions à l'appli. Rechargez la page : Sesame rejoue le login sans que vous le voyiez.
 5. Avec `carol` / `carol`, aucune tuile : elle est habilitée mais n'a pas de compte. Dans https://admin.sesame.localhost:8443 (`admin` / `admin`), ouvrez « Appli factice » et enregistrez `carol` avec `cdupont` / `dev-cdupont-app-password`. Rechargez le portail de carol : la tuile apparaît.
 6. Dans l'administration, « Nouvelle application » crée une appli sans redémarrage : par exemple `fake-app-bis`, hôte public `fake-app-bis.sesame.localhost:8443`, URL `http://fake-app:8000`, groupe `fake-app-users`, sélecteur `form#login-form`, champ CSRF `csrf_token`, cookie `FAKEAPPSESSID`. Après un compte enregistré pour `alice`, la tuile apparaît dans son portail sous une dizaine de secondes (`SESAME_DESCRIPTORS_RELOAD`).
-7. `docker compose logs proxy admin | grep audit` montre les événements d'audit (lecture du coffre, rejeu, expiration, actions d'administration).
+7. `make record URL=http://fake-app:8000/login ARGS="--id fake-app --group fake-app-users --probe-failure"` analyse la page de login de l'appli factice et affiche un descripteur proposé, proche de `descriptors/fake-app.yaml` (seul le cookie de session reste à renseigner).
+8. `docker compose logs proxy admin | grep audit` montre les événements d'audit (lecture du coffre, rejeu, expiration, actions d'administration).
 
 ## Commandes
 
@@ -73,6 +75,7 @@ make test                  # tests Rust + Python (appli factice, admin, embarque
 make test-postgres         # tests de contrat du magasin sur une base PostgreSQL jetable
 make e2e                   # parcours bout en bout Playwright (après make up)
 make health                # test de santé des formulaires de login (après make up)
+make record URL=…        # recorder : analyse une page de login, propose un descripteur (après make up)
 make lint                  # fmt, clippy, ruff, validation des descripteurs
 make validate-descriptors
 make deny                  # licences des dépendances Rust (cargo-deny) et Python
