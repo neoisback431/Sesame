@@ -7,4 +7,7 @@ COPY pyproject.toml ./
 COPY src ./src
 RUN pip install --no-cache-dir --break-system-packages ".[capture]" "playwright==1.63.0"
 USER pwuser
-ENTRYPOINT ["sesame-onboard", "--schema", "/etc/sesame/app-descriptor.schema.json", "record"]
+EXPOSE 8090
+# Service HTTP interne appelé par l'admin. Pour une analyse ponctuelle en ligne de
+# commande (make record), l'entrypoint est remplacé par « sesame-onboard … record ».
+ENTRYPOINT ["sesame-recorder"]
