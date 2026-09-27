@@ -30,7 +30,7 @@ use regex::Regex;
 use sesame_core::audit::{AuditAction, AuditEvent, AuditOutcome};
 use sesame_core::cookies::{self, PortalCookie};
 use sesame_core::crypto::hash_token;
-use sesame_core::descriptor::{AppDescriptor, LogoutAction, SessionMode, HANDOFF_PATH};
+use sesame_core::descriptor::{AppDescriptor, LogoutAction, SessionMode};
 use sesame_core::html::error_page;
 use sesame_core::ports::{AppSession, AuditSink, PortalSession, SessionStore};
 use sesame_core::secret::ExposeSecret;
@@ -42,6 +42,9 @@ use crate::replay::{ReplayError, Replayer};
 
 /// Délai minimal entre deux mises à jour de `last_used_at` d'une session applicative.
 const TOUCH_INTERVAL: Duration = Duration::from_secs(30);
+/// Marqueur posé au navigateur après la remise (mode handoff) : sa présence fait passer les
+/// requêtes suivantes en relais transparent, sans nouveau rejeu.
+const HANDOFF_MARKER: &str = "__sesame_handoff";
 
 /// Appli exposée : descripteur et éléments précalculés.
 pub struct App {
@@ -232,6 +235,15 @@ const DROP_RESPONSE: &[&str] = &[
     "upgrade",
 ];
 
+/// Comment la session applicative est fournie à l'appli lors du relais.
+enum Injection<'a> {
+    /// Mode proxy : cookies applicatifs côté serveur, Authorization du navigateur retiré.
+    Server(&'a Jar),
+    /// Mode handoff transparent : le navigateur porte la session ; ses cookies (hors cookie
+    /// du portail) et son Authorization sont relayés, rien n'est injecté.
+    Browser,
+}
+
 enum UpstreamBody {
     Full(Bytes),
     Stream(reqwest::Response),
@@ -291,10 +303,11 @@ impl Proxy {
             })
     }
 
-    /// Mode handoff (ADR 0020) : rejeu côté serveur, puis remise de l'élément de session au
-    /// navigateur (cookies en `Set-Cookie`, valeurs de stockage local via une page dédiée),
-    /// et redirection vers `start_path`. L'appli est ensuite jointe directement.
-    async fn handoff(&self, ctx: &Ctx<'_>) -> Response {
+    /// Mode handoff (ADR 0020), première arrivée : rejeu côté serveur, remise de l'élément de
+    /// session au navigateur (cookies en `Set-Cookie`, valeurs de stockage local via une page
+    /// dédiée) et d'un marqueur, puis redirection vers `return_path`. Les requêtes suivantes
+    /// (marqueur présent) sont relayées de façon transparente.
+    async fn handoff(&self, ctx: &Ctx<'_>, return_path: &str) -> Response {
         let spec = &ctx.app.descriptor.spec;
         let handoff = match &spec.session.handoff {
             Some(h) => h,
@@ -328,17 +341,24 @@ impl Proxy {
             }
         };
 
-        // Cookies capturés à poser sur le domaine de l'appli (visibles du navigateur : handoff).
+        // Cookies capturés à poser sur le domaine de l'appli (visibles du navigateur : handoff),
+        // plus le marqueur qui fait basculer les requêtes suivantes en relais transparent.
+        let ttl = spec.session.max_ttl.as_secs();
         let mut cookie_headers = Vec::new();
         for name in &handoff.set_cookies {
             if let Some(value) = session.jar.get(name) {
                 if let Ok(v) = HeaderValue::from_str(&format!(
-                    "{name}={}; Path=/; Secure; SameSite=Lax",
+                    "{name}={}; Path=/; Secure; SameSite=Lax; Max-Age={ttl}",
                     value.expose_secret()
                 )) {
                     cookie_headers.push(v);
                 }
             }
+        }
+        if let Ok(v) = HeaderValue::from_str(&format!(
+            "{HANDOFF_MARKER}=1; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={ttl}"
+        )) {
+            cookie_headers.push(v);
         }
 
         if self
@@ -350,12 +370,13 @@ impl Proxy {
             return self.unavailable(&ctx.cid);
         }
 
-        let start = &spec.public.start_path;
+        // Retour vers l'URL demandée (marqueur désormais présent → relais transparent).
+        let target = format!("{}{}", ctx.app.public_origin, return_path);
         let mut resp = if values.is_empty() {
             let status = StatusCode::from_u16(handoff.redirect_status).unwrap_or(StatusCode::SEE_OTHER);
-            redirect(status, &format!("{}{}", ctx.app.public_origin, start))
+            redirect(status, &target)
         } else {
-            let html = handoff::page(&values, start, self.portal_url.as_str());
+            let html = handoff::page(&values, return_path, self.portal_url.as_str());
             ([(header::CACHE_CONTROL, "no-store")], Html(html)).into_response()
         };
         for v in cookie_headers {
@@ -487,21 +508,39 @@ impl Proxy {
         path_and_query: &str,
         headers: &HeaderMap,
         body: &Bytes,
-        jar: &Jar,
+        inject: Injection<'_>,
     ) -> Result<Upstream, reqwest::Error> {
         let spec = &app.descriptor.spec;
         let url = format!("{}{}", app.internal_origin, path_and_query);
         let mut req = app.http.request(method.clone(), url);
+        // En mode handoff transparent, le navigateur porte lui-même la session : ses cookies
+        // (hors cookie du portail) et son en-tête Authorization sont relayés tels quels.
+        let passthrough = matches!(inject, Injection::Browser);
         for (name, value) in headers {
-            if !DROP_REQUEST.contains(&name.as_str()) {
+            let drop = DROP_REQUEST.contains(&name.as_str())
+                && !(passthrough && (name == header::COOKIE || name == header::AUTHORIZATION));
+            if !drop {
+                if passthrough && name == header::COOKIE {
+                    if let Some(v) = value
+                        .to_str()
+                        .ok()
+                        .and_then(|c| cookies::without(c, &self.cookie.name))
+                        .and_then(|c| HeaderValue::from_str(&c).ok())
+                    {
+                        req = req.header(header::COOKIE, v);
+                    }
+                    continue;
+                }
                 req = req.header(name, value);
             }
         }
         if let Some(h) = &spec.upstream.host_header {
             req = req.header(header::HOST, h);
         }
-        if let Some(c) = jar.header() {
-            req = req.header(header::COOKIE, c.expose_secret());
+        if let Injection::Server(jar) = inject {
+            if let Some(c) = jar.header() {
+                req = req.header(header::COOKIE, c.expose_secret());
+            }
         }
         if !body.is_empty() {
             req = req.body(body.clone());
@@ -548,11 +587,13 @@ impl Proxy {
         matcher::any(&app.descriptor.spec.expiry, &view)
     }
 
-    fn to_browser(&self, app: &App, upstream: Upstream) -> Response {
+    /// `keep_set_cookie` : en mode handoff transparent, les `Set-Cookie` de l'appli sont
+    /// relayés au navigateur (il porte lui-même la session) ; sinon ils sont retenus.
+    fn to_browser(&self, app: &App, upstream: Upstream, keep_set_cookie: bool) -> Response {
         let rw = &app.descriptor.spec.rewrite;
         let mut headers = HeaderMap::new();
         for (name, value) in &upstream.headers {
-            if DROP_RESPONSE.contains(&name.as_str()) {
+            if DROP_RESPONSE.contains(&name.as_str()) && !(keep_set_cookie && name == header::SET_COOKIE) {
                 continue;
             }
             if name == header::LOCATION && rw.location {
@@ -609,6 +650,15 @@ impl Proxy {
             }
         }
     }
+}
+
+/// Le navigateur présente-t-il le marqueur de remise (handoff déjà effectué) ?
+fn handoff_done(headers: &HeaderMap) -> bool {
+    let cookies = headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok());
+    cookies::find(cookies, HANDOFF_MARKER).is_some()
 }
 
 fn redirect(status: StatusCode, to: &str) -> Response {
@@ -678,18 +728,13 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
         );
     }
 
-    // Mode handoff (ADR 0020) : la remise se fait sur un chemin dédié ; les autres chemins
-    // d'une appli handoff ne sont pas servis ici (l'appli est jointe directement).
-    if matches!(app.descriptor.spec.session.mode, SessionMode::Handoff) {
-        if req.uri().path() == HANDOFF_PATH {
-            return p.handoff(&ctx).await;
-        }
-        return p.page(
-            StatusCode::NOT_FOUND,
-            "Application inconnue",
-            "Cette adresse ne correspond à aucune application.",
-            &ctx.cid,
-        );
+    // Mode handoff (ADR 0020) : totalement transparent, sans chemin dédié. À la première
+    // arrivée (pas de marqueur), Sesame rejoue le login et remet la session au navigateur,
+    // puis redirige vers l'URL demandée ; ensuite (marqueur présent), il relaie l'appli en
+    // laissant le navigateur porter la session (ses cookies et son Authorization).
+    let handoff_mode = matches!(app.descriptor.spec.session.mode, SessionMode::Handoff);
+    if handoff_mode && !handoff_done(req.headers()) {
+        return p.handoff(&ctx, &path_and_query).await;
     }
 
     let (parts, body) = req.into_parts();
@@ -702,6 +747,28 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
         );
     };
 
+    // Handoff, requête suivante (marqueur présent) : relais transparent, le navigateur porte
+    // la session. Aucun rejeu ni session côté serveur ; Set-Cookie de l'appli relayés.
+    if handoff_mode {
+        return match p
+            .forward(
+                &app,
+                &parts.method,
+                &path_and_query,
+                &parts.headers,
+                &body,
+                Injection::Browser,
+            )
+            .await
+        {
+            Ok(upstream) => p.to_browser(&app, upstream, true),
+            Err(e) => {
+                tracing::warn!(app = app.id(), correlation_id = %ctx.cid, error = %e.without_url(), "appli injoignable");
+                p.replay_error(&ReplayError::Upstream, &ctx.cid)
+            }
+        };
+    }
+
     let mut app_session = match p.app_session(&ctx).await {
         Ok(s) => s,
         Err(resp) => return resp,
@@ -712,7 +779,14 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
 
     let jar = Jar::from_cookies(app_session.cookies.clone());
     let mut upstream = match p
-        .forward(&app, &parts.method, &path_and_query, &parts.headers, &body, &jar)
+        .forward(
+            &app,
+            &parts.method,
+            &path_and_query,
+            &parts.headers,
+            &body,
+            Injection::Server(&jar),
+        )
         .await
     {
         Ok(u) => u,
@@ -740,7 +814,7 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
             }
             return resp;
         }
-        return p.to_browser(&app, upstream);
+        return p.to_browser(&app, upstream, false);
     }
 
     let names: Vec<String> = {
@@ -773,7 +847,14 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
         }
         let jar = Jar::from_cookies(app_session.cookies.clone());
         upstream = match p
-            .forward(&app, &parts.method, &path_and_query, &parts.headers, &body, &jar)
+            .forward(
+                &app,
+                &parts.method,
+                &path_and_query,
+                &parts.headers,
+                &body,
+                Injection::Server(&jar),
+            )
             .await
         {
             Ok(u) => u,
@@ -791,5 +872,5 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
 
     let set_cookies = std::mem::take(&mut upstream.set_cookies);
     p.absorb_cookies(&ctx, &mut app_session, &set_cookies).await;
-    p.to_browser(&app, upstream)
+    p.to_browser(&app, upstream, false)
 }

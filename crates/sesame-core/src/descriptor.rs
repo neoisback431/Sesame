@@ -294,9 +294,6 @@ pub struct Session {
     pub idle_ttl: Duration,
 }
 
-/// Chemin dédié où le portail dirige la tuile d'une appli en mode handoff (ADR 0020).
-pub const HANDOFF_PATH: &str = "/__sesame/handoff";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionMode {
