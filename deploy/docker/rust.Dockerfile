@@ -6,8 +6,11 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock rustfmt.toml ./
 COPY crates ./crates
 COPY descriptors ./descriptors
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
+# Caches partagés entre les images portail et proxy, construites en parallèle
+# par Compose : sharing=locked sérialise l'accès (sinon deux cargo décompressent
+# le même paquet en même temps et échouent sur « File exists »).
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/src/target,sharing=locked \
     cargo build --release --locked -p "$BIN" && cp "target/release/$BIN" /app
 
 FROM gcr.io/distroless/cc-debian12:nonroot
