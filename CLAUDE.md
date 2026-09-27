@@ -25,7 +25,10 @@ L'objectif est de placer devant elles un portail SSO unique :
 ### Conséquences pour le code (à respecter systématiquement)
 
 - Ne jamais logger, sérialiser, ni inclure dans une erreur un credential, un cookie applicatif ou un jeton : utiliser des types dédiés dont la représentation texte est masquée (`***`).
-- Supprimer des réponses relayées au navigateur tout `Set-Cookie` émis par une appli cible.
+- Capturer côté serveur **tous** les `Set-Cookie` émis par une appli cible : aucun n'atteint le navigateur.
+- Retirer le cookie du portail (et l'en-tête `Authorization` du navigateur) avant de relayer une requête à une appli.
+- Jetons de session portail stockés hachés ; cookies applicatifs chiffrés au repos.
+- En cas d'échec de rejeu, page d'erreur générique avec identifiant de corrélation, jamais le contenu de la réponse de l'appli.
 - Tout chemin de code qui lit le coffre de secrets ou déclenche un rejeu émet un événement d'audit, y compris en cas d'échec.
 - Aucun secret réel dans le dépôt : uniquement des valeurs de dev explicites (appli factice, coffre en mode dev).
 - Aucune donnée propre à une organisation dans le dépôt (noms d'hôtes internes, tenant IDs, noms de groupes réels, URLs d'applis réelles) : tout passe par la configuration.
@@ -123,12 +126,41 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 
 ## Première étape attendue (initialisation)
 
+Étapes 1 à 4 faites ; étape 6 amorcée (`.gitlab-ci.yml`). Prochaine : 5, le MVP bout en bout.
+
 1. Proposer la structure du dépôt (un dossier par bloc, dossier `descriptors/`, `deploy/`, `docs/`).
 2. Rédiger `docs/architecture.md` et un schéma Mermaid des flux.
 3. Définir le schéma du descripteur d'appli.
 4. Mettre en place un `docker-compose.yml` de dev : Nginx, portail, proxy, OpenBao (mode dev), PostgreSQL, un fournisseur OIDC local (Keycloak ou Dex), et une appli factice avec un formulaire de login + CSRF pour les tests.
 5. Implémenter un MVP bout en bout sur l'appli factice : login OIDC (fournisseur local en dev), rejeu, injection de session.
 6. Pipeline GitLab CI minimal : lint, tests, build des images.
+
+## Structure du dépôt
+
+| Dossier | Contenu |
+|---|---|
+| `crates/sesame-core` | Cœur Rust sans dépendance fournisseur : modèle des descripteurs (`descriptor.rs`), interfaces `SecretStore` / `SessionStore` / `AuditSink` (`ports.rs`), types secrets (`secret.rs`), identité, audit, logs |
+| `crates/sesame-portal`, `crates/sesame-proxy` | Binaires Rust (squelettes : `/healthz`) |
+| `onboarding/`, `admin/` | Paquets Python (squelettes) |
+| `schemas/app-descriptor.schema.json` | Schéma du descripteur : **fait foi**, contrat entre Rust et Python |
+| `descriptors/` | Descripteurs YAML (`fake-app.yaml` = exemple de référence, utilisé par les tests Rust) |
+| `dev/` | Appli factice (Flask), realm Keycloak, seed OpenBao |
+| `deploy/` | `nginx/nginx.conf`, `docker/rust.Dockerfile` (`--build-arg BIN=…`) |
+| `docs/` | `architecture.md`, `descriptor.md`, `dev.md`, `decisions/` (ADR) |
+
+Toute modification du schéma du descripteur se reporte dans `descriptor.rs`, `docs/descriptor.md` et `descriptors/fake-app.yaml`.
+
+## Commandes
+
+```sh
+make test                  # cargo test + pytest (dev/fake-app)
+make lint                  # cargo fmt --check, clippy -D warnings, ruff, validation des descripteurs
+make validate-descriptors  # uv run scripts/validate_descriptors.py
+make deny                  # licences des dépendances Rust (cargo-deny)
+make up / make down        # environnement Docker Compose de dev (make dev-certs en préalable automatique)
+```
+
+Environnement de dev : voir `docs/dev.md` (URLs `*.sesame.localhost:8443`, comptes `alice` / `bob` / `admin`).
 
 ## Conventions de travail
 
