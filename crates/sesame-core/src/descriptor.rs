@@ -533,8 +533,7 @@ mod tests {
 
     #[test]
     fn descriptor_without_access_is_valid_and_open() {
-        let text = FAKE_APP
-            .replace("  access:\n    groups:\n      - fake-app-users\n", "");
+        let text = FAKE_APP.replace("  access:\n    groups:\n      - fake-app-users\n", "");
         let d = AppDescriptor::from_yaml(&text).expect("access facultatif");
         assert!(d.spec.access.is_empty());
         assert!(d.spec.access.allows("nimporte", &[]));

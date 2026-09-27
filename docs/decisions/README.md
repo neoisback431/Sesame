@@ -21,3 +21,4 @@ Une fiche par décision structurante : contexte, décision, conséquences. Une d
 | [0015](0015-recorder.md) | Recorder : analyse d'une page de login sans identifiant | 2026-09-27 |
 | [0016](0016-recorder-dans-admin.md) | Recorder appelé depuis l'administration | 2026-09-27 |
 | [0017](0017-habilitation-par-compte.md) | Le compte suffit : `spec.access` facultatif | 2026-09-28 |
+| [0018](0018-diagnostic-des-rejeux.md) | Diagnostic des rejeux en échec dans l'administration | 2026-09-28 |

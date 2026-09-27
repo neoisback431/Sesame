@@ -44,7 +44,8 @@
     <tr>
       <td><code>{{ a.user_key }}</code></td>
       <td><span class="status {{ a.status }}">{{ {"active": "actif", "failed": "en échec", "disabled": "désactivé"}[a.status] }}</span>
-        {% if a.status_reason %}<br><span class="muted">{{ a.status_reason }}</span>{% endif %}</td>
+        {% if a.status_reason %}<br><span class="muted">{{ a.status_reason }}</span>{% endif %}
+        {% if a.status == "failed" %}<br><a href="/apps/{{ app.id }}/accounts/{{ a.user_key }}/diagnostic">Voir la réponse de l'appli</a>{% endif %}</td>
       <td>{{ a.last_login_at.strftime("%Y-%m-%d %H:%M") if a.last_login_at else "—" }}</td>
       <td>
         {% if a.status == "active" %}
