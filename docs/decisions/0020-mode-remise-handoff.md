@@ -1,7 +1,7 @@
 # 0020 — Mode « remise » (handoff) : exception aux principes 1 et 3
 
 Date : 2026-09-28
-Statut : **proposé** (à valider par l'exploitant avant implémentation)
+Statut : accepté (validé par l'exploitant le 2026-09-28)
 
 ## Contexte
 
@@ -16,7 +16,7 @@ ainsi :
 
 Pour elles, le proxy ne peut pas rendre la connexion transparente.
 
-## Décision proposée
+## Décision
 
 Mode facultatif, **par appli**, **désactivé par défaut** : `spec.session.mode: proxy |
 handoff` (défaut `proxy`).
