@@ -12,6 +12,7 @@ import secrets
 import uuid
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -24,6 +25,7 @@ from .auth import Authenticator, AuthError
 from .descriptors import draft
 from .identity import AdminUser, ClaimsError, identity_from_claims
 from .ports import NotFound, Unavailable
+from .recorder import Recorder, RecorderError
 from .service import AdminService, InvalidDescriptor, InvalidInput
 
 log = logging.getLogger(__name__)
@@ -75,6 +77,7 @@ def create_app(
     groups_claim: str,
     session_ttl_secs: int = 3600,
     secure_cookies: bool = True,
+    recorder: Recorder | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -199,6 +202,7 @@ def create_app(
         revision: int = 0,
         errors: list[str] | None = None,
         valid: bool = False,
+        notes: list[str] | None = None,
         status: int = 200,
     ) -> HTMLResponse:
         return render(
@@ -211,11 +215,46 @@ def create_app(
             revision=revision,
             errors=errors or [],
             valid=valid,
+            notes=notes or [],
         )
 
     @app.get("/apps/new")
     async def app_new(request: Request, admin: Admin) -> Response:
-        return render(request, "app_new.html", admin=admin)
+        return render(request, "app_new.html", admin=admin, recorder_enabled=recorder is not None)
+
+    @app.post("/apps/analyze")
+    async def app_analyze(request: Request, admin: Admin, login_url: Annotated[str, Form()]) -> Response:
+        """Analyse une page de login via le recorder et pré-remplit l'éditeur."""
+        cid = correlation_id(request)
+        try:
+            await check_csrf(request)
+        except InvalidInput as e:
+            return error(request, 400, "Requête refusée", str(e))
+        if recorder is None:
+            return error(request, 404, "Indisponible", "L'analyse de page de login n'est pas configurée.")
+        login_url = login_url.strip()
+        host = urlsplit(login_url).hostname or ""
+        if urlsplit(login_url).scheme not in ("http", "https") or not host:
+            msg = "URL de login invalide (http ou https attendu)."
+            request.session["flash"] = {"kind": "error", "text": msg}
+            return RedirectResponse("/apps/new", status_code=303)
+        probe = "probe_failure" in await request.form()
+        try:
+            result = await recorder.analyze(login_url, probe_failure=probe)
+        except RecorderError as e:
+            await audit.record(
+                AuditEvent.of("descriptor_recorded", "failure", admin, correlation_id=cid, reason=host)
+            )
+            request.session["flash"] = {"kind": "error", "text": f"Analyse impossible : {e}"}
+            return RedirectResponse("/apps/new", status_code=303)
+        await audit.record(
+            AuditEvent.of("descriptor_recorded", "success", admin, correlation_id=cid, reason=host)
+        )
+        if result.yaml is None:
+            msg = "Aucun formulaire de login exploitable détecté."
+            request.session["flash"] = {"kind": "error", "text": msg}
+            return render(request, "app_new.html", admin=admin, recorder_enabled=True, notes=result.notes)
+        return editor(request, admin, text=result.yaml, notes=result.notes)
 
     @app.post("/apps/new")
     async def app_draft(request: Request, admin: Admin) -> Response:
