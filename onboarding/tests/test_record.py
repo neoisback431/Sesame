@@ -253,3 +253,179 @@ def test_failure_message_echoing_the_dummy_login_is_ignored(client, browser):
     assert target.posts() == ["/login"]
     assert rec.failure.status == 403 and rec.failure.message is None
     assert record.to_descriptor(rec).document["spec"]["login"]["failure"] == {"any_of": [{"status": [403]}]}
+
+
+# --- Connexion réelle avec un compte de test (ADR 0019) --------------------------------
+
+
+def test_test_account_completes_the_descriptor(fake, client, browser):
+    """Formulaire classique : cookie de session et succès observés, descripteur rejouable tel quel."""
+    from sesame_onboarding import verify
+
+    rec = run(f"{fake.base}/login", client, browser, credentials=("amartin", "Pw-real"))
+    assert fake.posts() == ["/login"], "une seule connexion réelle"
+    assert rec.login.logged_in and rec.login.status == 302
+    assert rec.login.session_cookies == ["FAKEAPPSESSID"]
+    draft = record.to_descriptor(rec)
+    doc = draft.document
+    assert descriptors.validate(doc) == []
+    assert doc["spec"]["session"]["cookies"] == ["FAKEAPPSESSID"]
+    assert doc["spec"]["login"]["success"]["any_of"][0]["cookie_set"] == "FAKEAPPSESSID"
+    assert not any("spec.login.success" in t or "spec.session.cookies" in t for t in draft.todo)
+    assert verify.verify(doc, {"username": "amartin", "password": "Pw-real"}, client).ok
+    text = record.render(draft, rec) + "\n".join(record.summary(rec)) + repr(rec)
+    assert "Pw-real" not in text and "amartin" not in text
+
+
+def xsrf_spa_app() -> Flask:
+    """SPA : jeton dans un cookie XSRF-TOKEN renvoyé en en-tête, JSON aux champs renommés,
+    réponse 200 JSON qui pose le cookie de session."""
+    app = Flask(__name__)
+    tokens: set[str] = set()
+    sessions: set[str] = set()
+
+    @app.get("/login")
+    def page():
+        tok = f"xsrf-{len(tokens)}-7c1e9a"
+        tokens.add(tok)
+        html = (
+            "<html><head><title>Famille</title></head><body><form id=f><input name=email type=email>"
+            "<input type=password name=pass><button>Entrer</button></form><script>"
+            "document.getElementById('f').addEventListener('submit', e => { e.preventDefault();"
+            "const t = document.cookie.split('; ').find(c => c.startsWith('XSRF-TOKEN=')).split('=')[1];"
+            "fetch('/api/auth/login', {method: 'POST', headers: {'Content-Type': 'application/json',"
+            "'X-XSRF-TOKEN': t}, body: JSON.stringify({login: e.target.email.value,"
+            "pwd: e.target.pass.value, remember: 'true'})}).then(r => { if (r.ok) location.href = '/'; });"
+            "});</script></body></html>"
+        )
+        resp = Response(html)
+        resp.set_cookie("XSRF-TOKEN", tok)
+        return resp
+
+    @app.post("/api/auth/login")
+    def login():
+        from flask import request
+
+        if request.headers.get("X-XSRF-TOKEN") not in tokens or request.cookies.get(
+            "XSRF-TOKEN"
+        ) != request.headers.get("X-XSRF-TOKEN"):
+            return Response(
+                '{"error":"Jeton de sécurité invalide, rechargez la page."}',
+                403,
+                content_type="application/json",
+            )
+        body = request.get_json(silent=True) or {}
+        if (body.get("login"), body.get("pwd")) != ("amartin@example.org", "Pw-SPA-real"):
+            return Response('{"error":"bad"}', 401, content_type="application/json")
+        sid = f"s{len(sessions)}"
+        sessions.add(sid)
+        resp = Response('{"ok":true}', content_type="application/json")
+        resp.set_cookie("app_session", sid, httponly=True)
+        return resp
+
+    @app.get("/")
+    def home():
+        from flask import request
+
+        if request.cookies.get("app_session") in sessions:
+            return "<h1>Bienvenue</h1>"
+        return Response("", 302, {"Location": "/login"})
+
+    return app
+
+
+def test_test_account_handles_javascript_login_with_cookie_token(client, browser):
+    from sesame_onboarding import verify
+
+    spa = Recorder(xsrf_spa_app())
+    try:
+        rec = run(f"{spa.base}/login", client, browser, credentials=("amartin@example.org", "Pw-SPA-real"))
+        draft = record.to_descriptor(rec, app_id="famille")
+        doc = draft.document
+        login = doc["spec"]["login"]
+        assert descriptors.validate(doc) == [], descriptors.validate(doc)
+        assert (login["action"], login["encoding"]) == ("/api/auth/login", "json")
+        assert login["csrf"] == [
+            {"source": "cookie", "name": "XSRF-TOKEN", "send_as": {"header": "x-xsrf-token"}}
+        ]
+        assert login["fields"] == {
+            "login": {"from_secret": "username"},
+            "pwd": {"from_secret": "password"},
+            "remember": {"value": "true"},
+        }
+        assert login["include_hidden_inputs"] is False
+        assert doc["spec"]["session"]["cookies"] == ["app_session"]
+        assert login["success"] == {"any_of": [{"status": [200], "cookie_set": "app_session"}]}
+        creds = {"username": "amartin@example.org", "password": "Pw-SPA-real"}
+        assert verify.verify(doc, creds, client).ok
+        wrong = verify.verify(doc, {**creds, "password": "nope"}, client)
+        assert not wrong.ok
+    finally:
+        spa.srv.shutdown()
+    text = record.render(draft, rec) + "\n".join(record.summary(rec)) + repr(rec)
+    assert "Pw-SPA-real" not in text and "amartin@example.org" not in text and "xsrf-0-7c1e9a" not in text
+
+
+def inline_token_app() -> Flask:
+    """Jeton seulement dans un script inline, envoyé en en-tête X-Csrf."""
+    app = Flask(__name__)
+    issued: set[str] = set()
+
+    @app.get("/login")
+    def page():
+        tok = f"inl{len(issued)}Z9f3kQ2"
+        issued.add(tok)
+        return (
+            f'<html><body><script>window.APP = {{csrfToken: "{tok}"}};</script>'
+            "<form id=f><input name=user><input type=password name=password><button>Go</button></form>"
+            "<script>document.getElementById('f').addEventListener('submit', e => { e.preventDefault();"
+            "fetch('/session', {method: 'POST', headers: {'X-Csrf': window.APP.csrfToken,"
+            "'Content-Type': 'application/x-www-form-urlencoded'},"
+            "body: new URLSearchParams(new FormData(e.target))}).then(() => location.href = '/'); });"
+            "</script></body></html>"
+        )
+
+    @app.post("/session")
+    def session():
+        from flask import request
+
+        if request.headers.get("X-Csrf") not in issued:
+            return Response("csrf", 403)
+        if (request.form.get("user"), request.form.get("password")) != ("bob", "Pw-inline"):
+            return Response("bad", 401)
+        resp = Response("", 204)
+        resp.set_cookie("SID", "ok-session")
+        return resp
+
+    @app.get("/")
+    def home():
+        from flask import request
+
+        return (
+            "ok" if request.cookies.get("SID") == "ok-session" else Response("", 302, {"Location": "/login"})
+        )
+
+    return app
+
+
+def test_test_account_finds_a_token_in_an_inline_script(client, browser):
+    from sesame_onboarding import verify
+
+    app = Recorder(inline_token_app())
+    try:
+        rec = run(f"{app.base}/login", client, browser, credentials=("bob", "Pw-inline"))
+        doc = record.to_descriptor(rec, app_id="inline").document
+        token = doc["spec"]["login"]["csrf"][0]
+        assert (token["source"], token["send_as"]) == ("regex", {"header": "x-csrf"})
+        assert descriptors.validate(doc) == [], descriptors.validate(doc)
+        assert verify.verify(doc, {"username": "bob", "password": "Pw-inline"}, client).ok
+    finally:
+        app.srv.shutdown()
+    assert "inl0Z9f3kQ2" not in repr(rec) + record.render(record.to_descriptor(rec), rec)
+
+
+def test_wrong_test_account_is_reported(fake, client, browser):
+    rec = run(f"{fake.base}/login", client, browser, credentials=("amartin", "wrong"))
+    assert rec.login is not None and not rec.login.logged_in
+    assert any("test_login_still_on_login_page" in w for w in rec.warnings)
+    assert any("spec.login.success" in t for t in record.to_descriptor(rec).todo)

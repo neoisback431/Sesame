@@ -401,8 +401,9 @@ class FakeRecorder:
         )
         self.error: str | None = None
 
-    async def analyze(self, login_url, *, probe_failure=False):
+    async def analyze(self, login_url, *, probe_failure=False, credentials=None):
         self.calls.append((login_url, probe_failure))
+        self.credentials = credentials
         if self.error:
             raise RecorderError(self.error)
         return self.result
@@ -571,3 +572,30 @@ def test_failed_account_shows_the_replay_diagnostic(ctx):
     assert "Mot de passe incorrect" in page and "<script>alert(1)" not in page and "&lt;script&gt;" in page
     assert "spec.login.success" in page
     assert_no_leak(page)
+
+
+def test_analyze_with_test_account_passes_credentials_without_keeping_them(apps):
+    recorder = FakeRecorder()
+    client, _, audit = ctx_with_recorder(apps, recorder)
+    login(client)
+    page = client.get("/apps/new").text
+    assert 'name="test_password"' in page and 'autocomplete="new-password"' in page
+    token = csrf(client, "/apps/new")
+    r = client.post(
+        "/apps/analyze",
+        data={
+            "csrf": token,
+            "login_url": "https://crm.interne/login",
+            "test_username": " testeur ",
+            "test_password": SECRET,
+        },
+    )
+    assert r.status_code == 200
+    assert recorder.credentials == ("testeur", SECRET)
+    assert audit.events[-1].reason == "crm.interne (compte de test)"
+    assert SECRET not in r.text and all(SECRET not in repr(e) for e in audit.events)
+    # Sans mot de passe : pas de connexion réelle.
+    client.post(
+        "/apps/analyze", data={"csrf": token, "login_url": "https://crm.interne/login", "test_username": "x"}
+    )
+    assert recorder.credentials is None

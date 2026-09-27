@@ -12,13 +12,23 @@
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <h2>Analyser une page de login</h2>
   <p class="muted">Sesame ouvre la page dans un navigateur sans identité, repère le formulaire et propose
-    un descripteur à relire dans l'éditeur. Aucun identifiant n'est envoyé (seule une valeur factice sert
-    à observer la soumission). L'appli doit être joignable depuis Sesame.</p>
+    un descripteur à relire dans l'éditeur. Sans compte de test, aucun identifiant n'est envoyé (seule une
+    valeur factice sert à observer la soumission). L'appli doit être joignable depuis Sesame.</p>
   <div class="grid">
     <div><label for="login_url">URL de la page de login</label>
       <input type="url" id="login_url" name="login_url" placeholder="https://mon-appli.interne/login" required></div>
     <div><label><input type="checkbox" name="probe_failure"> Envoyer une connexion factice pour repérer
       le message d'échec</label></div>
+  </div>
+  <h3>Compte de test <span class="muted">(facultatif, recommandé)</span></h3>
+  <p class="muted">Avec un compte de test, Sesame se connecte réellement : il observe la requête de login
+    (y compris envoyée en JavaScript), l'origine des jetons de sécurité, la réponse et le cookie de session,
+    et propose un descripteur complet. Les identifiants ne sont ni enregistrés, ni journalisés, ni affichés.</p>
+  <div class="grid">
+    <div><label for="test_username">Identifiant</label>
+      <input type="text" id="test_username" name="test_username" autocomplete="off"></div>
+    <div><label for="test_password">Mot de passe</label>
+      <input type="password" id="test_password" name="test_password" autocomplete="new-password"></div>
   </div>
   <p><button type="submit">Analyser</button></p>
 </form>
