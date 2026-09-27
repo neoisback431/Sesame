@@ -129,13 +129,14 @@ Session expirée sur un `POST` : rejeu puis `303` vers la page d'origine (soumis
 | Parcours utilisateur | **Page « Mes applications »** dans le portail ; rejeu à l'arrivée sur l'appli, dans le proxy | Tranché |
 | Registre des comptes | **Table PostgreSQL** sans secret (`AccountRegistry`), source : UI d'admin | Tranché |
 | UI d'admin | **FastAPI + Jinja2** (rendu serveur) ; descripteurs **en fichiers Git**, lecture seule dans l'UI ; AppRole admin en écriture sans lecture | Tranché |
+| Déconnexion fournisseur | **RP-Initiated Logout** optionnel (`SESAME_OIDC_LOGOUT`) : `client_id` + `post_logout_redirect_uri`, **sans `id_token_hint`** (l'ID token n'est pas conservé) | Tranché |
 | Embarquement | **CLI `sesame-onboard`** : `verify` (rejeu sans JavaScript, règles du proxy), `fingerprint`, `health` (empreinte du HTML brut, sans identifiants) ; capture Playwright automatique non implémentée | Tranché |
 
 Les décisions ont été prises le 2026-09-27. Consigner leur justification dans `docs/decisions/` (ADR). Toute nouvelle décision structurante est posée en question avant d'être codée, puis ajoutée à ce tableau.
 
 ## Première étape attendue (initialisation)
 
-Étapes 1 à 5 faites (MVP validé de bout en bout par `make e2e`) ; étape 6 en place (`.gitlab-ci.yml`, non exécutée faute de GitLab). UI d'administration v1 faite (registre des comptes, identifiants). Embarquement partiel fait (`verify`, `fingerprint`, `health` ; descripteur rédigé depuis `descriptors/TEMPLATE.yaml.example`). Prochaines pistes : OpenTelemetry, déconnexion chez le fournisseur d'identité, capture automatique à l'embarquement.
+Étapes 1 à 5 faites (MVP validé de bout en bout par `make e2e`) ; étape 6 en place (`.gitlab-ci.yml`, non exécutée faute de GitLab). UI d'administration v1 faite (registre des comptes, identifiants). Embarquement partiel fait (`verify`, `fingerprint`, `health` ; descripteur rédigé depuis `descriptors/TEMPLATE.yaml.example`). Déconnexion chez le fournisseur d'identité faite (`SESAME_OIDC_LOGOUT`, désactivée par défaut, activée en dev). Prochaines pistes : OpenTelemetry, capture automatique à l'embarquement.
 
 1. Proposer la structure du dépôt (un dossier par bloc, dossier `descriptors/`, `deploy/`, `docs/`).
 2. Rédiger `docs/architecture.md` et un schéma Mermaid des flux.

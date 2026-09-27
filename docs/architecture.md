@@ -84,7 +84,7 @@ Compléments :
 - **Accès direct** : un favori ou un lien profond (`https://compta.sesame.example/factures/42`) fonctionne aussi. SSO si nécessaire, rejeu, puis la page demandée.
 - **Échec du rejeu** : le proxy affiche une page d'erreur neutre (identifiant de corrélation, lien de retour au portail) et passe le compte à l'état `failed` dans le registre. La tuile le signale jusqu'à ce qu'un administrateur corrige le compte.
 - **Retour au portail** : par son adresse, ou via le lien des pages d'erreur. Sesame n'injecte pas de bandeau dans les pages des applis, ce serait fragile et risqué.
-- **Déconnexion** : se déconnecter du portail détruit la session portail et toutes les sessions applicatives. Fermer aussi la session chez le fournisseur d'identité (RP-initiated logout) sera une option de configuration, désactivée par défaut (pas encore implémentée).
+- **Déconnexion** : se déconnecter du portail détruit la session portail et toutes les sessions applicatives. Avec `SESAME_OIDC_LOGOUT=true` (désactivé par défaut), le portail ferme aussi la session chez le fournisseur d'identité (OIDC RP-Initiated Logout : `end_session_endpoint` avec `client_id` et `post_logout_redirect_uri`), puis l'utilisateur revient sur `/auth/logged-out`. Voir [ADR 0013](decisions/0013-deconnexion-fournisseur.md).
 
 ## Registre des comptes
 

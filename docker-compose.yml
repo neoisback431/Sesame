@@ -39,6 +39,8 @@ services:
       # En dev, clé coffre lisible ; en production préférer sub (ou oid pour Entra ID).
       SESAME_OIDC_USER_KEY_CLAIM: preferred_username
       SESAME_OIDC_GROUPS_CLAIM: groups
+      # Déconnexion aussi chez Keycloak (désactivée par défaut, activée en dev pour la tester).
+      SESAME_OIDC_LOGOUT: "true"
       SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
       # Clé de dev (base64, 32 octets) : chiffre l'état OIDC temporaire.
       SESAME_PORTAL_STATE_KEY: c2VzYW1lLWRldi1wb3J0YWwtc3RhdGUta2V5LTAwMDE=

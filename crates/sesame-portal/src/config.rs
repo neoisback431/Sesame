@@ -31,6 +31,8 @@ pub struct OidcConfig {
     /// Claim servant de clé utilisateur (coffre, registre). Défaut : `sub`.
     pub user_key_claim: String,
     pub groups_claim: String,
+    /// Déconnexion aussi chez le fournisseur d'identité (RP-initiated logout).
+    pub idp_logout: bool,
 }
 
 impl PortalConfig {
@@ -60,6 +62,7 @@ impl PortalConfig {
                     .collect(),
                 user_key_claim: config::or("SESAME_OIDC_USER_KEY_CLAIM", "sub"),
                 groups_claim: config::or("SESAME_OIDC_GROUPS_CLAIM", "groups"),
+                idp_logout: config::flag("SESAME_OIDC_LOGOUT"),
             },
         })
     }

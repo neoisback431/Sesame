@@ -4,7 +4,9 @@
 //! - `GET /` : page « Mes applications » (connexion OIDC si nécessaire) ;
 //! - `GET /auth/login?return_to=…` : départ vers le fournisseur d'identité ;
 //! - `GET /auth/callback` : retour OIDC, création de la session portail ;
-//! - `POST /auth/logout` : destruction de la session portail et des sessions applicatives.
+//! - `POST /auth/logout` : destruction de la session portail et des sessions applicatives,
+//!   puis, si activée, déconnexion chez le fournisseur d'identité ;
+//! - `GET /auth/logged-out` : page de confirmation (retour du fournisseur).
 //!
 //! Le portail n'accède jamais au coffre de secrets.
 
@@ -57,6 +59,7 @@ pub fn router(portal: Arc<Portal>) -> Router {
         .route("/auth/login", get(login))
         .route("/auth/callback", get(callback))
         .route("/auth/logout", post(logout))
+        .route("/auth/logged-out", get(logged_out))
         .route(
             "/healthz",
             get(|| async { Json(serde_json::json!({ "status": "ok" })) }),
@@ -258,16 +261,43 @@ async fn callback(State(p): State<AppState>, headers: HeaderMap, Query(q): Query
 
 async fn logout(State(p): State<AppState>, headers: HeaderMap) -> Response {
     let cid = correlation_id(&headers);
+    let back = p
+        .public_url
+        .join("auth/logged-out")
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| p.public_url.to_string());
+    let idp_logout = p.oidc.logout_url(&back);
     if let Some(session) = p.current_session(&headers).await {
         let event = AuditEvent::new(AuditAction::PortalLogout, AuditOutcome::Success)
             .actor(&session.user)
-            .correlation(&cid);
+            .correlation(&cid)
+            .reason(if idp_logout.is_some() {
+                "with_idp_logout"
+            } else {
+                "local"
+            });
         if let Err(e) = p.sessions.delete_portal_session(&session.id).await {
             tracing::error!(correlation_id = %cid, error = %e, "suppression de la session portail impossible");
         } else if let Err(e) = p.audit.record(event).await {
             tracing::error!(correlation_id = %cid, error = %e, "audit de déconnexion impossible");
         }
     }
+    match idp_logout {
+        // 303 : le navigateur suit en GET vers le point de déconnexion du fournisseur.
+        Some(url) => {
+            let mut resp = redirect(&url, &[p.cookie.clear()]);
+            *resp.status_mut() = StatusCode::SEE_OTHER;
+            resp
+        }
+        None => logged_out_page(&p, Some(p.cookie.clear())),
+    }
+}
+
+async fn logged_out(State(p): State<AppState>) -> Response {
+    logged_out_page(&p, None)
+}
+
+fn logged_out_page(p: &Portal, clear_cookie: Option<String>) -> Response {
     let html = sesame_core::html::page(
         "Déconnecté",
         &format!(
@@ -275,11 +305,11 @@ async fn logout(State(p): State<AppState>, headers: HeaderMap) -> Response {
             sesame_core::html::escape(p.public_url.as_str())
         ),
     );
-    (
-        [(SET_COOKIE, p.cookie.clear()), (CACHE_CONTROL, "no-store".into())],
-        Html(html),
-    )
-        .into_response()
+    let mut resp = ([(CACHE_CONTROL, "no-store")], Html(html)).into_response();
+    if let Some(v) = clear_cookie.and_then(|c| HeaderValue::from_str(&c).ok()) {
+        resp.headers_mut().append(SET_COOKIE, v);
+    }
+    resp
 }
 
 fn authority(url: &Url) -> Option<String> {

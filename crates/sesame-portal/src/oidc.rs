@@ -39,6 +39,9 @@ pub enum OidcError {
 
 pub struct Oidc {
     client: Client,
+    client_id: String,
+    /// `end_session_endpoint` du fournisseur, si la déconnexion chez lui est activée.
+    end_session: Option<url::Url>,
     http: reqwest::Client,
     issuer: String,
     scopes: Vec<String>,
@@ -73,14 +76,32 @@ impl Oidc {
             Some(ClientSecret::new(cfg.client_secret.expose_secret().to_owned())),
         )
         .set_redirect_uri(RedirectUrl::new(redirect).map_err(|e| OidcError::Discovery(e.to_string()))?);
+        let end_session = if cfg.idp_logout {
+            let endpoint = end_session_endpoint(&cfg.issuer, &http).await;
+            if endpoint.is_none() {
+                tracing::warn!("déconnexion chez le fournisseur demandée mais end_session_endpoint absent : déconnexion locale seulement");
+            }
+            endpoint
+        } else {
+            None
+        };
         Ok(Self {
             client,
+            client_id: cfg.client_id.clone(),
+            end_session,
             http,
             issuer: cfg.issuer.clone(),
             scopes: cfg.scopes.clone(),
             user_key_claim: cfg.user_key_claim.clone(),
             groups_claim: cfg.groups_claim.clone(),
         })
+    }
+
+    /// URL de déconnexion chez le fournisseur (RP-initiated logout), si activée.
+    pub fn logout_url(&self, post_logout_redirect: &str) -> Option<String> {
+        self.end_session
+            .as_ref()
+            .map(|e| logout_url(e, &self.client_id, post_logout_redirect))
     }
 
     /// URL d'autorisation et état à conserver jusqu'au retour.
@@ -139,6 +160,40 @@ impl Oidc {
     }
 }
 
+/// Lit `end_session_endpoint` dans le document de discovery (absent du modèle standard
+/// d'`openidconnect`). Refuse un point de déconnexion d'un autre schéma que l'émetteur.
+async fn end_session_endpoint(issuer: &str, http: &reqwest::Client) -> Option<url::Url> {
+    let url = format!(
+        "{}/.well-known/openid-configuration",
+        issuer.trim_end_matches('/')
+    );
+    let doc: Value = http
+        .get(url)
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    let endpoint = url::Url::parse(doc.get("end_session_endpoint")?.as_str()?).ok()?;
+    let issuer_scheme = url::Url::parse(issuer).ok()?.scheme().to_owned();
+    (endpoint.scheme() == issuer_scheme).then_some(endpoint)
+}
+
+/// URL de déconnexion OIDC RP-Initiated Logout : `client_id` + `post_logout_redirect_uri`.
+///
+/// Pas d'`id_token_hint` : Sesame ne conserve pas l'ID token. Certains fournisseurs
+/// (Keycloak) demandent alors une confirmation à l'utilisateur.
+pub fn logout_url(endpoint: &url::Url, client_id: &str, post_logout_redirect: &str) -> String {
+    let mut url = endpoint.clone();
+    url.query_pairs_mut()
+        .append_pair("client_id", client_id)
+        .append_pair("post_logout_redirect_uri", post_logout_redirect);
+    url.to_string()
+}
+
 /// Construit l'identité à partir des claims d'un ID token déjà vérifié.
 pub fn identity_from_claims(
     claims: &Map<String, Value>,
@@ -185,6 +240,26 @@ mod tests {
 
     fn claims(v: Value) -> Map<String, Value> {
         v.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn builds_rp_initiated_logout_url() {
+        let endpoint = url::Url::parse("https://idp.example/realms/r/logout?x=1").unwrap();
+        let u = logout_url(
+            &endpoint,
+            "sesame-portal",
+            "https://sesame.example/auth/logged-out",
+        );
+        let parsed = url::Url::parse(&u).unwrap();
+        let q: std::collections::HashMap<_, _> = parsed.query_pairs().into_owned().collect();
+        assert_eq!(parsed.path(), "/realms/r/logout");
+        assert_eq!(q["x"], "1");
+        assert_eq!(q["client_id"], "sesame-portal");
+        assert_eq!(
+            q["post_logout_redirect_uri"],
+            "https://sesame.example/auth/logged-out"
+        );
+        assert!(!q.contains_key("id_token_hint"));
     }
 
     #[test]

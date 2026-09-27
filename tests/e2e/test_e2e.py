@@ -111,16 +111,22 @@ def test_bob_has_no_tile_and_is_denied(browser: Browser):
     page.context.close()
 
 
-def test_portal_logout_destroys_app_sessions(browser: Browser):
+def test_portal_logout_destroys_app_sessions_and_idp_session(browser: Browser):
     page = login(browser, "alice", start=APP)
     expect(page.locator("h1")).to_have_text("Bonjour amartin")
     user_sessions = "SELECT count(*) FROM portal_sessions WHERE user_key = 'alice'"
     before = int(sql(user_sessions))
     page.goto(PORTAL)
     page.get_by_role("button", name="Se déconnecter").click()
+    # Déconnexion chez Keycloak (SESAME_OIDC_LOGOUT) : sans id_token_hint, il demande confirmation.
+    page.locator("#kc-logout").click()
     expect(page.locator("h1")).to_have_text("Vous êtes déconnecté")
+    assert page.url == f"{PORTAL}auth/logged-out"
     assert "sesame_session" not in browser_cookie_names(page)
     assert int(sql(user_sessions)) == before - 1
+    # Session SSO terminée : revenir sur l'appli redemande le mot de passe.
+    page.goto(APP)
+    expect(page.locator("#password")).to_be_visible()
     page.context.close()
 
 

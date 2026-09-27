@@ -23,8 +23,9 @@ Durées au format `30s`, `15m`, `8h`. Clés de chiffrement : 32 octets aléatoir
 | `SESAME_OIDC_SCOPES` | `openid profile email` | Scopes demandés |
 | `SESAME_OIDC_USER_KEY_CLAIM` | `sub` | Claim servant de clé utilisateur (coffre, registre). Pour Entra ID : `oid` |
 | `SESAME_OIDC_GROUPS_CLAIM` | `groups` | Claim portant les groupes. Absent = aucun groupe |
+| `SESAME_OIDC_LOGOUT` | `false` | `true` : la déconnexion ferme aussi la session chez le fournisseur d'identité (RP-Initiated Logout). Sans `end_session_endpoint` dans la discovery, déconnexion locale seulement (avertissement au démarrage) |
 
-URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_PUBLIC_URL>/auth/callback`.
+URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_PUBLIC_URL>/auth/callback`. Avec `SESAME_OIDC_LOGOUT`, déclarer aussi l'URL de retour après déconnexion : `<SESAME_PUBLIC_URL>/auth/logged-out`.
 
 ## Moteur de proxy (`sesame-proxy`)
 
