@@ -182,7 +182,8 @@ Tests du proxy : banc commun dans `crates/sesame-proxy/tests/common/` (appli sim
 ## Commandes
 
 ```sh
-make test                  # cargo test + pytest (dev/fake-app, admin, onboarding)
+make test                  # tests RAPIDES (défaut, ~10 s) : cargo test + pytest sans navigateur (marqueur `browser` exclu)
+make test-full             # tests COMPLETS : test + tests Playwright du recorder + test-postgres (si Docker)
 make test-postgres         # tests de contrat PostgreSQL (Rust + Python) sur une base jetable (Docker)
 make e2e                   # parcours bout en bout Playwright (après make up)
 make health                # test de santé des formulaires de login (après make up)
@@ -199,6 +200,7 @@ Environnement de dev : voir `docs/dev.md` (URLs `*.sesame.localhost:8443`, compt
 
 - Documentation et commentaires de conception en français ; identifiants de code en anglais.
 - Commits petits et ciblés, messages descriptifs.
+- Tests : après chaque modification, lancer **`make test`** (rapide). `make test-full` seulement quand la modification touche le recorder (`record.py`, `proposal.py`, `server.py`), en fin de lot avant un push, ou sur demande. Un test qui lance un navigateur porte le marqueur `browser` (`pytestmark = pytest.mark.browser`).
 - Licence Apache-2.0 : chaque fichier source commence par l'en-tête SPDX `SPDX-License-Identifier: Apache-2.0`.
 - Dépendances : uniquement des licences compatibles Apache-2.0 (MIT, BSD, Apache-2.0, ISC, MPL-2.0…) ; pas de GPL/AGPL. Vérification en CI (`cargo deny` côté Rust, outil équivalent côté Python).
 - Mettre à jour ce fichier quand l'architecture, les commandes de build/test ou les décisions évoluent.

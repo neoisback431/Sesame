@@ -16,6 +16,8 @@ from .conftest import ROOT, create_app, js_only_app, serve
 
 playwright = pytest.importorskip("playwright.sync_api")
 
+pytestmark = pytest.mark.browser
+
 DUMMY_USER, DUMMY_PASSWORD = "sesame-recorder-test", "Dummy-Pw-7731-never-shown"
 
 
@@ -70,8 +72,8 @@ def fake():
     r.srv.shutdown()
 
 
-def run(url, client, browser, **kw):
-    return record.record(url, client, browser, timeout=10, **kw)
+def run(url, client, browser, timeout=10, **kw):
+    return record.record(url, client, browser, timeout=timeout, **kw)
 
 
 def test_fake_app_without_any_login_attempt(fake, client, browser):
@@ -202,7 +204,8 @@ def test_form_built_by_javascript_without_submission_is_blocking(client, browser
     )
     srv, base = serve(app)
     try:
-        rec = run(f"{base}/login", client, browser)
+        # Délai court : la soumission attendue n'arrive jamais.
+        rec = run(f"{base}/login", client, browser, timeout=3)
     finally:
         srv.shutdown()
     assert rec.password_field == "p"
