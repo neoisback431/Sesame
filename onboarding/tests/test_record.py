@@ -623,3 +623,40 @@ def test_react_form_with_unnamed_fields(client, browser):
     finally:
         app.srv.shutdown()
     assert "#0" not in str(doc["spec"]["login"]["fields"])
+
+
+def test_token_based_session_is_reported_by_name(client, browser):
+    """Comme YAST : jeton renvoyé dans la réponse JSON, aucun cookie. Signalé, sans valeur."""
+    from flask import request
+
+    app = Flask(__name__)
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjJ9.c2lnbmF0dXJlLXRlc3Q"
+
+    @app.get("/login")
+    def page():
+        return (
+            "<html><body><form id=f><input type=email><input type=password><button>OK</button></form>"
+            "<script>document.getElementById('f').addEventListener('submit', e => { e.preventDefault();"
+            "const [m, p] = e.target.querySelectorAll('input');"
+            "fetch('/api/auth/login', {method: 'POST', headers: {'Content-Type': 'application/json'},"
+            "body: JSON.stringify({email: m.value, password: p.value})}).then(r => r.json())"
+            ".then(j => { window.token = j.accessToken; document.body.innerHTML = '<h1>OK</h1>'; }); });"
+            "</script></body></html>"
+        )
+
+    @app.post("/api/auth/login")
+    def login():
+        body = request.get_json(silent=True) or {}
+        if body.get("password") != "Pw-tok":
+            return Response('{"error":"bad"}', 401, content_type="application/json")
+        return {"accessToken": jwt, "refreshToken": "r" * 40, "user": {"id": 2, "name": "kevin"}}
+
+    srv = Recorder(app)
+    try:
+        rec = run(f"{srv.base}/login", client, browser, credentials=("k@yast.test", "Pw-tok"))
+    finally:
+        srv.srv.shutdown()
+    blocking = " ".join(rec.blocking)
+    assert "session_token_in_response: accessToken, refreshToken" in blocking, rec.blocking
+    text = repr(rec) + "\n".join(record.summary(rec)) + record.render(record.to_descriptor(rec), rec)
+    assert jwt not in text and "r" * 40 not in text
