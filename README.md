@@ -6,7 +6,7 @@ Portail SSO à injection de credentials côté serveur, pour les applications we
 
 L'utilisateur s'authentifie une fois auprès du fournisseur d'identité de son organisation (OIDC : Entra ID, Keycloak, Okta…). Sesame rejoue ensuite, côté serveur, la connexion à chaque application avec des identifiants lus dans un coffre de secrets (OpenBao, Vault…). **Aucun mot de passe applicatif ni cookie de session applicatif n'atteint le navigateur.**
 
-> État : MVP. Connexion OIDC, page « Mes applications », rejeu du login, injection de session et détection d'expiration fonctionnent de bout en bout sur l'appli factice. L'UI d'administration gère le registre des comptes et les identifiants applicatifs. L'embarquement fournit `sesame-onboard` : vérification d'un descripteur avec un compte de test et test de santé des formulaires de login.
+> État : MVP. Connexion OIDC, page « Mes applications », rejeu du login (formulaire HTML ou page construite en JavaScript), injection de session et détection d'expiration fonctionnent de bout en bout sur l'appli factice. Un mode « remise » (handoff), facultatif, couvre les applis qui gardent leur session dans le navigateur. L'UI d'administration gère les applis (fichiers Git ou base, rechargées à chaud), le registre des comptes, les identifiants applicatifs et le diagnostic des rejeux en échec. L'embarquement fournit `sesame-onboard` : recorder (analyse d'une page de login, avec compte de test facultatif, aussi appelable depuis l'administration), vérification d'un descripteur et test de santé des formulaires de login.
 
 ## Documentation
 
@@ -30,9 +30,9 @@ make up
 | `crates/sesame-core` | Cœur Rust : modèle des descripteurs, interfaces des briques externes, types secrets, audit |
 | `crates/sesame-portal` | Portail d'authentification (Rust) |
 | `crates/sesame-proxy` | Moteur de proxy (Rust) |
-| `crates/sesame-store-postgres` | Magasin de sessions et registre des comptes PostgreSQL |
+| `crates/sesame-store-postgres` | Magasin de sessions, registre des comptes, descripteurs en base et diagnostics (PostgreSQL) |
 | `crates/sesame-secrets-openbao` | Coffre OpenBao / Vault |
-| `onboarding/` | Embarquement : `sesame-onboard` (vérification, empreinte, test de santé) |
+| `onboarding/` | Embarquement : `sesame-onboard` (recorder, vérification, empreinte, test de santé) et service `sesame-recorder` |
 | `admin/` | UI web d'administration (Python, FastAPI) |
 | `schemas/` | Schéma JSON du descripteur d'appli |
 | `descriptors/` | Descripteurs d'applis (YAML versionné) |
