@@ -259,9 +259,11 @@ def create_app(
             AuditEvent.of("descriptor_recorded", "success", admin, correlation_id=cid, reason=reason)
         )
         if result.yaml is None:
-            msg = "Aucun formulaire de login exploitable détecté."
+            msg = "Aucun formulaire de login exploitable détecté : voir la cause ci-dessous."
             request.session["flash"] = {"kind": "error", "text": msg}
-            return render(request, "app_new.html", admin=admin, recorder_enabled=True, notes=result.notes)
+            seen = [s for s in result.summary if not s.startswith(("BLOQUANT", "avertissement"))]
+            notes = [*result.notes, *(f"constat : {s}" for s in seen)]
+            return render(request, "app_new.html", admin=admin, recorder_enabled=True, notes=notes)
         return editor(request, admin, text=result.yaml, notes=result.notes)
 
     @app.post("/apps/new")
