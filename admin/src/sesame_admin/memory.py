@@ -27,6 +27,8 @@ class MemoryAccountStore:
         self.accounts: dict[tuple[str, str], Account] = {}
         # Sessions applicatives ouvertes simulées : (appli, utilisateur) -> nombre.
         self.app_sessions: dict[tuple[str, str], int] = {}
+        # Personnes déjà connectées au portail (simulées dans les tests).
+        self.portal_users: set[str] = set()
 
     async def list_accounts(self, app_id: str) -> list[Account]:
         return sorted((a for a in self.accounts.values() if a.app_id == app_id), key=lambda a: a.user_key)
@@ -67,6 +69,10 @@ class MemoryAccountStore:
             if query.lower() in a.user_key.lower():
                 counts.setdefault(a.user_key, Counter())[a.status] += 1
         return [(u, dict(counts[u])) for u in sorted(counts)[:limit]]
+
+    async def known_users(self, limit: int) -> list[str]:
+        keys = {u for _, u in self.accounts} | self.portal_users
+        return sorted(keys)[:limit]
 
     async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:
         return self.app_sessions.pop((app_id, user_key), 0)

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sesame_admin.audit import MemoryAuditSink
 from sesame_admin.auth import AuthError
-from sesame_admin.ports import Unavailable
+from sesame_admin.ports import Account, Unavailable
 from sesame_admin.web import create_app
 from starlette.responses import RedirectResponse
 
@@ -485,3 +485,17 @@ def test_analyze_hidden_when_recorder_disabled(ctx):
     token = csrf(client, "/apps/new")
     r = client.post("/apps/analyze", data={"csrf": token, "login_url": "https://crm.interne/login"})
     assert r.status_code == 404
+
+
+def test_provision_form_suggests_known_users(ctx):
+    client, service, _, _ = ctx
+    # alice a un compte (registre en mémoire, écriture directe) ; bob s'est connecté au portail.
+    acc = Account("fake-app", "alice", "active", None, None, None)
+    service.accounts.accounts[("fake-app", "alice")] = acc
+    service.accounts.portal_users.add("bob")
+    login(client)
+    page = client.get("/apps/fake-app").text
+    assert '<datalist id="known-users">' in page
+    assert '<option value="alice">' in page and '<option value="bob">' in page
+    # Le champ pointe vers la liste et l'aide rappelle la clé exacte.
+    assert 'list="known-users"' in page and "exactement" in page
