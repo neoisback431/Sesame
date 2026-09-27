@@ -17,6 +17,7 @@ capture = ["playwright>=1.47"]
 
 [project.scripts]
 sesame-onboard = "sesame_onboarding.cli:main"
+sesame-recorder = "sesame_onboarding.server:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "flask>=3.0", "playwright>=1.47"]

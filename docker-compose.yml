@@ -104,6 +104,9 @@ services:
       SESAME_OPENBAO_ROLE_ID: dev-admin-role-id
       SESAME_OPENBAO_SECRET_ID: dev-admin-secret-id
       SESAME_CA_FILE: /etc/sesame/ca.crt
+      # Service recorder interne, pour le bouton « Analyser une page de login ».
+      SESAME_RECORDER_URL: http://recorder:8090
+      SESAME_RECORDER_TOKEN: dev-recorder-token
     volumes:
       - ./descriptors:/etc/sesame/descriptors:ro
       - ./schemas/app-descriptor.schema.json:/etc/sesame/app-descriptor.schema.json:ro
@@ -189,13 +192,22 @@ services:
       - ./schemas/app-descriptor.schema.json:/etc/sesame/app-descriptor.schema.json:ro
     depends_on: [fake-app]
 
-  # Recorder : analyse d'une page de login, sans identifiant (make record URL=…).
+  # Recorder : service HTTP interne d'analyse d'une page de login (sans identifiant).
+  # Appelé par l'admin ; jamais exposé via Nginx. Aussi utilisable en one-shot :
+  # make record URL=… (remplace l'entrypoint par la CLI).
   recorder:
     build: { context: ./onboarding, dockerfile: recorder.Dockerfile }
-    profiles: [tools]
+    environment:
+      SESAME_RECORDER_LISTEN: 0.0.0.0:8090
+      # Jeton de dev partagé avec l'admin (à remplacer hors dev).
+      SESAME_RECORDER_TOKEN: dev-recorder-token
+      SESAME_RECORDER_SCHEMA: /etc/sesame/app-descriptor.schema.json
+      # Accepte le certificat de dev des applis exposées via Nginx.
+      SESAME_CA_FILE: /etc/sesame/ca.crt
     volumes:
       - ./schemas/app-descriptor.schema.json:/etc/sesame/app-descriptor.schema.json:ro
-    depends_on: [fake-app]
+      - ./deploy/nginx/certs/ca.crt:/etc/sesame/ca.crt:ro
+    restart: on-failure
 
   fake-app:
     build: ./dev/fake-app
