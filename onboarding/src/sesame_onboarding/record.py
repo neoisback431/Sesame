@@ -899,6 +899,7 @@ def to_descriptor(
     users: list[str] | None = None,
     session_cookie: str | None = None,
     apps_domain: str | None = None,
+    handoff: bool = False,
 ) -> Draft:
     todo: list[str] = []
     host = urlsplit(rec.base_url).hostname or "appli"
@@ -933,7 +934,10 @@ def to_descriptor(
     observed = rec.login if rec.login and rec.login.logged_in and rec.login.session_cookies else None
     if not cookie and observed:
         cookie = observed.session_cookies[0]
-    if not cookie:
+    # En handoff avec session par jeton (aucun cookie), le cookie reste vide : la session
+    # est remise via local_storage. Sinon, on propose un cookie (ou un repère à renseigner).
+    token_handoff = handoff and not cookie and bool(rec.session_token_keys)
+    if not cookie and not token_handoff:
         candidates = rec.session_cookie_candidates
         cookie = candidates[0] if len(candidates) == 1 else "SESSION_COOKIE_A_RENSEIGNER"
         todo.append(
@@ -1010,6 +1014,25 @@ def to_descriptor(
         login["failure"] = {"any_of": [failure]}
     login["max_attempts"] = 1
 
+    # Session : proxy (défaut) ou handoff (remise au navigateur, ADR 0020).
+    if handoff:
+        h: dict[str, Any] = {}
+        if cookie:
+            h["set_cookies"] = [cookie]
+        if rec.session_token_keys:
+            h["local_storage"] = [{"key": k, "from_response": k} for k in rec.session_token_keys]
+        if not h:
+            todo.append(
+                "spec.session.handoff : élément à remettre au navigateur non détecté "
+                "(set_cookies ou local_storage à renseigner)"
+            )
+        session: dict[str, Any] = {"mode": "handoff"}
+        if cookie:
+            session["cookies"] = [cookie]
+        session["handoff"] = h
+    else:
+        session = {"cookies": [cookie]}
+
     doc: dict[str, Any] = {
         "apiVersion": "sesame/v1",
         "kind": "AppDescriptor",
@@ -1023,7 +1046,7 @@ def to_descriptor(
                 "keys": ["username", "password"] if rec.username_field else ["password"],
             },
             "login": login,
-            "session": {"cookies": [cookie]},
+            "session": session,
             "expiry": {"any_of": _expiry_matchers(rec, base, login_path)},
             "logout": {"paths": ["^/logout$"]},
             "health": {"interval": "1h"},

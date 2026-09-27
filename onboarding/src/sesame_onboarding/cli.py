@@ -163,6 +163,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         groups=args.group,
         users=args.user,
         session_cookie=args.session_cookie,
+        handoff=args.handoff,
     )
     errors = descriptors.validate(draft.document, Path(args.schema))
     if errors:
@@ -206,6 +207,11 @@ def parser() -> argparse.ArgumentParser:
     r.add_argument("--name", help="metadata.name (défaut : titre de la page)")
     r.add_argument("--public-host", help="hôte public exposé par Sesame")
     r.add_argument("--group", action="append", help="groupe habilité (répétable)")
+    r.add_argument(
+        "--handoff",
+        action="store_true",
+        help="proposer le mode remise (handoff, ADR 0020) : session remise au navigateur",
+    )
     r.add_argument("--user", action="append", help="utilisateur habilité (répétable)")
     r.add_argument("--session-cookie", help="cookie de session de l'appli, s'il est connu")
     r.add_argument("--chromium", help="exécutable Chromium (défaut : SESAME_ONBOARD_CHROMIUM ou Playwright)")

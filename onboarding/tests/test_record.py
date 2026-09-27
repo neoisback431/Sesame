@@ -660,3 +660,52 @@ def test_token_based_session_is_reported_by_name(client, browser):
     assert "session_token_in_response: accessToken, refreshToken" in blocking, rec.blocking
     text = repr(rec) + "\n".join(record.summary(rec)) + record.render(record.to_descriptor(rec), rec)
     assert jwt not in text and "r" * 40 not in text
+
+
+def test_handoff_descriptor_for_a_token_session(client, browser):
+    """Avec handoff=True, une session par jeton produit un descripteur handoff valide,
+    local_storage sur les champs de jeton détectés, sans cookie (ADR 0020)."""
+    app = Recorder(token_session_app())
+    try:
+        rec = run(f"{app.base}/login", client, browser, credentials=("k@yast.test", "Pw-tok"))
+    finally:
+        app.srv.shutdown()
+    assert rec.session_token_keys, "jeton détecté"
+    doc = record.to_descriptor(rec, app_id="yast", handoff=True).document
+    assert descriptors.validate(doc) == [], descriptors.validate(doc)
+    session = doc["spec"]["session"]
+    assert session["mode"] == "handoff"
+    assert "cookies" not in session
+    keys = [i["key"] for i in session["handoff"]["local_storage"]]
+    assert "accessToken" in keys or "refreshToken" in keys
+    # Sans handoff : reste bloquant (proxy ne gère pas), pas de mode handoff.
+    proxy_doc = record.to_descriptor(rec, app_id="yast").document
+    assert proxy_doc["spec"]["session"].get("mode", "proxy") == "proxy"
+
+
+def token_session_app() -> Flask:
+    from flask import request
+
+    app = Flask(__name__)
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjJ9.c2lnbmF0dXJlLXlhc3Q"
+
+    @app.get("/login")
+    def page():
+        return (
+            "<html><body><form id=f><input type=email><input type=password><button>OK</button></form>"
+            "<script>document.getElementById('f').addEventListener('submit', e => { e.preventDefault();"
+            "const [m, p] = e.target.querySelectorAll('input');"
+            "fetch('/api/auth/login', {method: 'POST', headers: {'Content-Type': 'application/json'},"
+            "body: JSON.stringify({email: m.value, password: p.value})}).then(r => r.json())"
+            ".then(j => { window.token = j.accessToken; document.body.innerHTML = '<h1>OK</h1>'; }); });"
+            "</script></body></html>"
+        )
+
+    @app.post("/api/auth/login")
+    def login():
+        body = request.get_json(silent=True) or {}
+        if body.get("password") != "Pw-tok":
+            return Response('{"error":"bad"}', 401, content_type="application/json")
+        return {"accessToken": jwt, "refreshToken": "r" * 40}
+
+    return app

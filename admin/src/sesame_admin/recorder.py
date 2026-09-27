@@ -73,9 +73,11 @@ class Recorder(Protocol):
         *,
         probe_failure: bool = False,
         credentials: tuple[str, str] | None = None,
+        handoff: bool = False,
     ) -> RecordingResult:
         """``credentials`` : compte de test (connexion réelle), transmis au recorder sans être
-        conservé, journalisé ni audité (ADR 0019)."""
+        conservé, journalisé ni audité (ADR 0019). ``handoff`` : proposer le mode remise
+        (ADR 0020) plutôt que proxy."""
         ...
 
 
@@ -92,9 +94,10 @@ class HttpRecorder:
         *,
         probe_failure: bool = False,
         credentials: tuple[str, str] | None = None,
+        handoff: bool = False,
     ) -> RecordingResult:
         url = self.base_url.rstrip("/") + "/record"
-        payload: dict[str, Any] = {"login_url": login_url, "probe_failure": probe_failure}
+        payload: dict[str, Any] = {"login_url": login_url, "probe_failure": probe_failure, "handoff": handoff}
         if credentials:
             payload["username"], payload["password"] = credentials
         try:

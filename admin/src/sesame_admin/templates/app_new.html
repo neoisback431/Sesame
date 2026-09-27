@@ -19,6 +19,8 @@
       <input type="url" id="login_url" name="login_url" placeholder="https://mon-appli.interne/login" required></div>
     <div><label><input type="checkbox" name="probe_failure"> Envoyer une connexion factice pour repérer
       le message d'échec</label></div>
+    <div><label><input type="checkbox" name="handoff"> Mode <strong>handoff</strong> : remettre la session au
+      navigateur (ADR 0020) — pour les applis à jeton (localStorage) que le proxy ne peut pas rejouer</label></div>
   </div>
   <h3>Compte de test <span class="muted">(facultatif, recommandé)</span></h3>
   <p class="muted">Avec un compte de test, Sesame se connecte réellement : il observe la requête de login
