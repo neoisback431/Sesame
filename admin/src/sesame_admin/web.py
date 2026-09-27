@@ -383,6 +383,7 @@ def create_app(
         try:
             target = await service.app(app_id)
             accounts = await service.accounts.list_accounts(app_id)
+            known = await service.accounts.known_users(500)
         except NotFound:
             if app_id not in service.files and await service.descriptors.get_descriptor(app_id):
                 # En base mais écarté du catalogue : l'éditeur permet de le corriger.
@@ -390,7 +391,7 @@ def create_app(
             return error(request, 404, "Application inconnue", "Aucun descripteur ne porte cet identifiant.")
         except Unavailable:
             return error(request, 503, "Service indisponible", "La base de données est injoignable.")
-        return render(request, "app.html", admin=admin, app=target, accounts=accounts)
+        return render(request, "app.html", admin=admin, app=target, accounts=accounts, known_users=known)
 
     async def act(request: Request, app_id: str, operation) -> Response:
         cid = correlation_id(request)

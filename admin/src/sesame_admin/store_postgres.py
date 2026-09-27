@@ -119,6 +119,16 @@ class PostgresAccountStore:
             out.setdefault(r["app_id"], {})[r["status"]] = r["n"]
         return out
 
+    async def known_users(self, limit: int) -> list[str]:
+        # Titulaires d'un compte + personnes déjà connectées au portail (même base).
+        rows = await (await self.pool()).fetch(
+            """SELECT user_key FROM app_accounts
+               UNION SELECT user_key FROM portal_sessions
+               ORDER BY user_key LIMIT $1""",
+            limit,
+        )
+        return [r["user_key"] for r in rows]
+
     async def list_user_accounts(self, user_key: str) -> list[Account]:
         rows = await (await self.pool()).fetch(
             f"SELECT {_COLUMNS} FROM app_accounts WHERE user_key = $1 ORDER BY app_id",  # noqa: S608 (colonnes constantes)

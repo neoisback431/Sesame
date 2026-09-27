@@ -54,8 +54,16 @@
     Réenregistrer un compte existant remplace ses identifiants et le réactive.</p>
   <form method="post" action="/apps/{{ app.id }}/accounts" autocomplete="off">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label for="user_key">Utilisateur Sesame (clé : claim configuré, ex. <code>sub</code>)</label>
-    <input type="text" id="user_key" name="user_key" required>
+    <label for="user_key">Utilisateur Sesame</label>
+    <input type="text" id="user_key" name="user_key" list="known-users" autocomplete="off"
+      placeholder="commencez à taper un utilisateur connu" required>
+    <datalist id="known-users">
+      {% for u in known_users %}<option value="{{ u }}">{% endfor %}
+    </datalist>
+    <p class="muted">La valeur doit être <strong>exactement</strong> la clé d'identité de l'utilisateur
+      (le claim OIDC configuré, ex. <code>sub</code> ou <code>preferred_username</code>) — sinon le compte
+      n'est rattaché à personne. La liste propose les utilisateurs déjà connus (déjà connectés au portail ou
+      titulaires d'un compte) ; une nouvelle clé reste saisissable.</p>
     {% for key in app.credential_keys %}
     <label for="cred_{{ key }}">{{ key }}</label>
     <input type="password" id="cred_{{ key }}" name="cred_{{ key }}" required autocomplete="new-password">
