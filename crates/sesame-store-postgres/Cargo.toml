@@ -1,0 +1,24 @@
+[package]
+name = "sesame-store-postgres"
+description = "Implémentation PostgreSQL du magasin de sessions et du registre des comptes Sesame."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+sesame-core.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+sesame-core = { workspace = true, features = ["contract"] }
+base64.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

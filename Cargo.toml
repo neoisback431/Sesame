@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/sesame-core", "crates/sesame-portal", "crates/sesame-proxy"]
+members = [
+    "crates/sesame-core",
+    "crates/sesame-portal",
+    "crates/sesame-proxy",
+    "crates/sesame-store-postgres",
+    "crates/sesame-secrets-openbao",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +17,22 @@ repository = "https://github.com/neoisback431/Sesame"
 
 [workspace.dependencies]
 sesame-core = { path = "crates/sesame-core" }
+sesame-store-postgres = { path = "crates/sesame-store-postgres" }
+sesame-secrets-openbao = { path = "crates/sesame-secrets-openbao" }
+aes-gcm = "0.10"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+cookie = "0.18"
+openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls", "timing-resistant-secret-traits"] }
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+scraper = "0.24"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "migrate", "macros", "chrono"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+zeroize = "1"
+futures-util = "0.3"
 async-trait = "0.1"
 axum = "0.8"
 regex = "1"

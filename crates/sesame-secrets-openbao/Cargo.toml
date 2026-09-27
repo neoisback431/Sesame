@@ -1,0 +1,26 @@
+[package]
+name = "sesame-secrets-openbao"
+description = "Implémentation OpenBao / Vault (KV v2, AppRole) du coffre de secrets Sesame."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+sesame-core.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

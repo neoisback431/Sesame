@@ -8,7 +8,14 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+aes-gcm.workspace = true
 async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+rand.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+zeroize.workspace = true
 regex.workspace = true
 secrecy.workspace = true
 serde.workspace = true
@@ -17,6 +24,10 @@ serde_yaml.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[features]
+# Expose les tests de contrat aux crates d'implémentation.
+contract = []
 
 [dev-dependencies]
 tokio.workspace = true

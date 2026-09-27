@@ -37,7 +37,10 @@ pub trait SecretStore: Send + Sync {
     async fn get_credential(&self, app_id: &str, user_key: &str) -> PortResult<Credential>;
 }
 
-/// Session portail, identifiée par un jeton opaque porté par le cookie du portail.
+/// Session portail.
+///
+/// `id` est l'empreinte (`crypto::hash_token`) du jeton opaque porté par le
+/// cookie du portail : le jeton lui-même n'est jamais stocké.
 #[derive(Debug, Clone)]
 pub struct PortalSession {
     pub id: String,
@@ -47,8 +50,9 @@ pub struct PortalSession {
 }
 
 /// Session applicative rattachée à une session portail.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AppSession {
+    /// Empreinte du jeton de session portail.
     pub portal_session_id: String,
     pub app_id: String,
     pub cookies: Vec<AppCookie>,

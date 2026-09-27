@@ -20,3 +20,41 @@ pub struct UserIdentity {
     /// Groupes issus des claims, utilisés pour les habilitations.
     pub groups: Vec<String>,
 }
+
+/// Vérifie qu'une clé utilisateur peut servir de segment de chemin (coffre, logs).
+///
+/// Refuse tout ce qui permettrait de sortir du chemin prévu (`/`, `..`) ou de
+/// polluer les journaux (caractères de contrôle).
+pub fn validate_user_key(key: &str) -> Result<(), String> {
+    let ok = !key.is_empty()
+        && key.len() <= 256
+        && key != "."
+        && key != ".."
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '.' | '_' | '-' | '+'));
+    if ok {
+        Ok(())
+    } else {
+        Err("clé utilisateur invalide (caractères autorisés : A-Z a-z 0-9 @ . _ - +)".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_user_key;
+
+    #[test]
+    fn user_keys() {
+        for ok in [
+            "alice",
+            "a.martin@example.org",
+            "0f8c6e3a-1b2c-4d5e-8f90-123456789abc",
+        ] {
+            assert!(validate_user_key(ok).is_ok(), "{ok}");
+        }
+        for bad in ["", ".", "..", "a/b", "../x", "a b", "a\nb", "é"] {
+            assert!(validate_user_key(bad).is_err(), "{bad:?}");
+        }
+    }
+}

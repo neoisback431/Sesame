@@ -46,6 +46,21 @@ pub struct AppCookie {
     pub value: SecretString,
 }
 
+impl AppCookie {
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            value: SecretString::from(value.into()),
+        }
+    }
+}
+
+impl Clone for AppCookie {
+    fn clone(&self) -> Self {
+        Self::new(self.name.clone(), self.value.expose_secret())
+    }
+}
+
 impl fmt::Debug for AppCookie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AppCookie")
