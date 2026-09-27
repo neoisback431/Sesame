@@ -4,7 +4,17 @@
 <p><a href="/">← Applications</a></p>
 <h1>{{ app.name }}</h1>
 <p class="muted">{{ app.description or "" }} — <code>{{ app.id }}</code>, révision {{ app.revision }}, <code>{{ app.public_host }}</code>
-  {% if app.editable %}<span class="tag db">base</span>{% else %}<span class="tag">Git</span>{% endif %}</p>
+  {% if app.editable %}<span class="tag db">base</span>{% else %}<span class="tag">Git</span>{% endif %}
+  {% if app.session_mode == "handoff" %}<span class="tag">mode handoff</span>{% endif %}</p>
+{% if app.session_mode == "handoff" %}
+<div class="card" id="handoff-notice">
+  <strong>Mode « remise » (handoff) actif.</strong>
+  <p>Sesame rejoue la connexion côté serveur puis <strong>remet la session au navigateur</strong>, qui joint
+    ensuite l'appli directement. Contreparties (ADR 0020) : l'élément de session est visible et copiable par
+    l'utilisateur ; la déconnexion et la désactivation ne sont pas immédiates ; pas de reconnexion automatique ;
+    l'audit se limite à la connexion. Réservé aux applis où le proxy est impossible et où ce risque est accepté.</p>
+</div>
+{% endif %}
 {% if app.editable %}
 <p>
   <a class="button" href="/apps/{{ app.id }}/descriptor">Modifier le descripteur</a>

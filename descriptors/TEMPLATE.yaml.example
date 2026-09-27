@@ -51,7 +51,13 @@ spec:
       any_of:
         - body_contains: "Identifiants invalides"
   session:
+    # mode: proxy                             # défaut ; handoff = remise au navigateur (ADR 0020)
     cookies: [SESSIONID]                      # cookies de session à capturer
+    # handoff:                                # requis si mode: handoff
+    #   set_cookies: [SESSIONID]              # cookies posés sur le navigateur
+    #   local_storage:                        # ou valeurs écrites dans le stockage local
+    #     - key: refreshToken
+    #       from_response: refreshToken       # champ de la réponse JSON au login
   expiry:                                     # session applicative expirée
     any_of:
       - status: [302, 303]

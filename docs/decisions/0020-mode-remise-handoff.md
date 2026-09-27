@@ -1,7 +1,7 @@
 # 0020 — Mode « remise » (handoff) : exception aux principes 1 et 3
 
 Date : 2026-09-28
-Statut : accepté (validé par l'exploitant le 2026-09-28)
+Statut : accepté (validé le 2026-09-28) ; implémenté (session.mode, proxy handoff, recorder, admin)
 
 ## Contexte
 
