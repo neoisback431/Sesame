@@ -47,7 +47,7 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 |---|---|
 | `nginx` | TLS, routage par nom d'hôte. Porte des alias réseau pour que les conteneurs joignent l'IdP et le portail par les mêmes URLs que le navigateur, donc avec le même `issuer` OIDC. |
 | `portal` | Portail : connexion OIDC, session, page « Mes applications ». Redémarre tant que Nginx n'est pas prêt (discovery OIDC). |
-| `proxy` | Moteur de proxy : rejeu du login, injection de session, expiration. |
+| `proxy` | Moteur de proxy : rejeu du login, injection de session (ou remise en mode handoff), expiration. Diagnostic des rejeux activé (`SESAME_REPLAY_DEBUG=true`). |
 | `postgres` | Magasin de sessions et registre des comptes (migrations appliquées au démarrage du portail et du proxy) |
 | `db-seed` | Déclare le compte d'alice sur l'appli factice dans le registre des comptes (raccourci de dev) |
 | `admin` | UI d'administration (Python) : registre des comptes et identifiants applicatifs |
@@ -64,9 +64,10 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 3. Avec `bob` / `bob`, aucune tuile n'apparaît et l'accès direct à l'appli est refusé.
 4. `docker compose restart fake-app` fait perdre ses sessions à l'appli. Rechargez la page : Sesame rejoue le login sans que vous le voyiez.
 5. Avec `carol` / `carol`, aucune tuile : elle est habilitée mais n'a pas de compte. Dans https://admin.sesame.localhost:8443 (`admin` / `admin`), ouvrez « Appli factice » et enregistrez `carol` avec `cdupont` / `dev-cdupont-app-password`. Rechargez le portail de carol : la tuile apparaît.
-6. Dans l'administration, « Nouvelle application » crée une appli sans redémarrage : par exemple `fake-app-bis`, hôte public `fake-app-bis.sesame.localhost:8443`, URL `http://fake-app:8000`, groupe `fake-app-users`, sélecteur `form#login-form`, champ CSRF `csrf_token`, cookie `FAKEAPPSESSID`. Après un compte enregistré pour `alice`, la tuile apparaît dans son portail sous une dizaine de secondes (`SESAME_DESCRIPTORS_RELOAD`).
-7. Dans « Nouvelle application », le bouton **« Analyser une page de login »** avec `http://fake-app:8000/login` interroge le service recorder et pré-remplit l'éditeur avec un descripteur proposé (à relire, notamment le cookie de session). En ligne de commande : `make record URL=http://fake-app:8000/login ARGS="--id fake-app --group fake-app-users --probe-failure"`.
-8. `docker compose logs proxy admin | grep audit` montre les événements d'audit (lecture du coffre, rejeu, expiration, actions d'administration).
+6. Dans l'administration, « Nouvelle application » crée une appli sans redémarrage : par exemple `fake-app-bis`, hôte public `fake-app-bis.sesame.localhost:8443`, URL `http://fake-app:8000`, groupe `fake-app-users` (facultatif : sans groupe, le compte suffit), sélecteur `form#login-form`, champ CSRF `csrf_token`, cookie `FAKEAPPSESSID`. Après un compte enregistré pour `alice`, la tuile apparaît dans son portail sous une dizaine de secondes (`SESAME_DESCRIPTORS_RELOAD`).
+7. Dans « Nouvelle application », le bouton **« Analyser une page de login »** avec `http://fake-app:8000/login` interroge le service recorder et pré-remplit l'éditeur avec un descripteur proposé (à relire, notamment le cookie de session). Avec le compte de test `amartin` / `dev-amartin-app-password`, le recorder se connecte réellement et propose un descripteur complet (cookie de session et succès observés). La case « Mode handoff » rédige un descripteur en mode remise (ADR 0020). En ligne de commande : `make record URL=http://fake-app:8000/login ARGS="--id fake-app --probe-failure"` (ajouter `--test-account` pour le compte de test, `--handoff` pour le mode remise).
+8. Enregistrez pour carol un mot de passe erroné : à son clic, le rejeu échoue (page neutre, compte `failed`). Dans l'administration, « Voir la réponse de l'appli » sur la ligne du compte montre la réponse de l'appli, identifiants et cookies masqués (ADR 0018).
+9. `docker compose logs proxy admin | grep audit` montre les événements d'audit (lecture du coffre, rejeu, expiration, actions d'administration).
 
 ## Commandes
 
