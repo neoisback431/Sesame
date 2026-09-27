@@ -37,7 +37,7 @@ Le cœur (portail, proxy, rejeu, audit) ne dépend d'aucun fournisseur précis. 
 | Brique | Interface | Implémentation de référence | Autres implémentations visées |
 |---|---|---|---|
 | Fournisseur d'identité | `IdentityProvider` : OIDC générique (discovery, `issuer`, `client_id`, mapping configurable des claims `sub` / `email` / `groups`) | Entra ID (simple configuration OIDC) | Keycloak, Authentik, Dex, Okta, Google ; Keycloak ou Dex en dev |
-| Coffre de secrets | `SecretStore` : `get_credential(app, user)`, sans exposer de concept propre au coffre | HashiCorp Vault (KV v2, AppRole) | OpenBao, AWS Secrets Manager, Azure Key Vault, fichier chiffré (dev uniquement) |
+| Coffre de secrets | `SecretStore` : `get_credential(app, user)`, sans exposer de concept propre au coffre | Vault / OpenBao (KV v2, AppRole ; même client) | AWS Secrets Manager, Azure Key Vault, fichier chiffré (dev uniquement) |
 | Magasin de sessions | `SessionStore` | PostgreSQL | En mémoire (tests) |
 | Journal d'audit | `AuditSink` | Fichier JSON / stdout | PostgreSQL, syslog, SIEM |
 | Observabilité | OpenTelemetry (OTLP) + logs JSON | Collecteur OTel | Datadog, Prometheus/Grafana, etc. via OTLP |
@@ -69,7 +69,7 @@ Règles :
 
 ### 3. Coffre de secrets
 
-- Derrière l'interface `SecretStore` ; implémentation de référence : HashiCorp Vault.
+- Derrière l'interface `SecretStore` ; implémentation de référence : Vault / OpenBao (API identique ; OpenBao en dev).
 - Identifiants par couple (appli, utilisateur) (voir Décisions).
 - Seul le moteur de proxy dispose d'un droit de lecture. Il s'authentifie auprès du coffre par un mécanisme machine (AppRole pour Vault, rôle IAM pour AWS, etc.).
 
@@ -115,8 +115,9 @@ Règles :
 | Modèle des credentials | **Par utilisateur** : un compte par couple (appli, utilisateur) dans le coffre | Tranché |
 | Interface d'administration | **UI web dès le départ** (Python) ; authentifiée via le fournisseur d'identité, réservée à un groupe d'administrateurs, actions tracées dans l'audit | Tranché |
 | Briques externes | **Découplées** : interfaces + implémentations interchangeables (voir section dédiée) | Tranché |
-| Licence open source | Apache-2.0, MIT, AGPL-3.0… | À trancher |
-| Langue du projet public | Docs en français ou en anglais | À trancher |
+| Licence open source | MIT ou Apache-2.0 (permissive ; Apache-2.0 ajoute une clause explicite sur les brevets) | À trancher |
+| Langue du projet | **Français** pour l'instant (docs, commentaires de conception) ; passage à l'anglais à réévaluer avant publication | Tranché |
+| Coffre en dev | **OpenBao** (fork open source de Vault, même API) ; le code reste compatible Vault | Tranché |
 
 Les décisions ont été prises le 2026-09-27. Consigner leur justification dans `docs/decisions/` (ADR). Toute nouvelle décision structurante est posée en question avant d'être codée, puis ajoutée à ce tableau.
 
@@ -125,7 +126,7 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 1. Proposer la structure du dépôt (un dossier par bloc, dossier `descriptors/`, `deploy/`, `docs/`).
 2. Rédiger `docs/architecture.md` et un schéma Mermaid des flux.
 3. Définir le schéma du descripteur d'appli.
-4. Mettre en place un `docker-compose.yml` de dev : Nginx, portail, proxy, Vault (mode dev), PostgreSQL, un fournisseur OIDC local (Keycloak ou Dex), et une appli factice avec un formulaire de login + CSRF pour les tests.
+4. Mettre en place un `docker-compose.yml` de dev : Nginx, portail, proxy, OpenBao (mode dev), PostgreSQL, un fournisseur OIDC local (Keycloak ou Dex), et une appli factice avec un formulaire de login + CSRF pour les tests.
 5. Implémenter un MVP bout en bout sur l'appli factice : login OIDC (fournisseur local en dev), rejeu, injection de session.
 6. Pipeline GitLab CI minimal : lint, tests, build des images.
 
