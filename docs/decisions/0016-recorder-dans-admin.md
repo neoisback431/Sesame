@@ -1,7 +1,6 @@
-# 0016 — Recorder appelé depuis l'administration
+# 0016. Recorder appelé depuis l'administration
 
-Date : 2026-09-27
-Statut : accepté
+**Statut** : acceptée (2026-09-27). Complète [0015](0015-recorder.md).
 
 ## Contexte
 

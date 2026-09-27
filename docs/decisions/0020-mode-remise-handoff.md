@@ -1,7 +1,6 @@
-# 0020 — Mode « remise » (handoff) : exception aux principes 1 et 3
+# 0020. Mode « remise » (handoff) : exception aux principes 1 et 3
 
-Date : 2026-09-28
-Statut : accepté (validé le 2026-09-28) ; implémenté (session.mode, proxy handoff, recorder, admin)
+**Statut** : acceptée (2026-09-28), implémentée. Révisée le même jour : modèle transparent, sans chemin dédié.
 
 ## Contexte
 
@@ -37,7 +36,7 @@ Sesame :
 
 Aux **requêtes suivantes** (marqueur présent), Sesame **relaie l'appli de façon
 transparente** : le navigateur porte lui-même la session ; ses cookies (le cookie du
-portail retiré) et son en-tête `Authorization` sont relayés, les `Set-Cookie` de l'appli
+portail et le marqueur retirés) et son en-tête `Authorization` sont relayés, les `Set-Cookie` de l'appli
 lui reviennent, et Sesame n'injecte ni ne rejoue rien. À l'expiration du marqueur, la
 prochaine arrivée redéclenche une remise (nouveau rejeu).
 
@@ -54,16 +53,22 @@ lui). Seul l'élément de session est remis.
 
 - **Exception au principe 3** et, pour les jetons, à la règle « jamais de jeton vers le
   navigateur » : l'élément remis est visible et copiable par l'utilisateur.
-- Déconnexion portail et désactivation d'un compte **non immédiates** : la session reste
-  valable jusqu'à son expiration côté appli, sauf si le descripteur déclare une
-  déconnexion que Sesame appelle.
-- Reconnexion automatique à l'expiration du marqueur (nouvelle remise), mais pas en cours
-  de session côté appli.
+- Déconnexion du portail : le relais exige toujours la session portail, l'accès via
+  Sesame est donc coupé aussitôt ; mais la session remise reste valable **côté appli**
+  jusqu'à son expiration (Sesame ne la conserve pas et ne l'y ferme pas), ce qui compte
+  si l'appli est joignable sans passer par Sesame.
+- Désactivation d'un compte **non immédiate** : le compte n'est vérifié qu'à la remise ;
+  le relais continue jusqu'à l'expiration du marqueur.
+- Reconnexion automatique : à l'expiration du marqueur, et quand une navigation relayée
+  correspond aux règles `spec.expiry` (audit `app_session_expired`, puis nouvelle remise).
+  Une requête d'API expirée en cours de page n'est pas reprise : l'appli la gère.
 - Audit limité à la connexion (lecture du coffre, rejeu, remise) : les requêtes relayées
   ensuite ne sont pas auditées appel par appel.
 - Sesame reste dans le flux (relais transparent) : le prix de la transparence sur un seul
   hôte. Les mises à niveau WebSocket ne sont pas gérées par le relais actuel.
 - Réservé aux applis où le proxy est impossible **et** où l'exploitant accepte ce risque ;
   en contexte PCI-DSS, à justifier appli par appli (hors périmètre des données de carte).
-- L'admin affiche le mode de chaque appli ; le recorder ne propose `handoff` que comme
-  suggestion, jamais par défaut.
+- L'admin affiche le mode de chaque appli ; le mode se choisit dans le formulaire guidé.
+  Le recorder reste en mode proxy par défaut et signale une session par jeton comme
+  bloquante ; il ne rédige un descripteur handoff que si on le lui demande (case
+  « Mode handoff » de l'admin, `sesame-onboard record --handoff`).

@@ -1,7 +1,6 @@
-# 0017 — Le compte suffit : `spec.access` facultatif
+# 0017. Le compte suffit : `spec.access` facultatif
 
-Date : 2026-09-28
-Statut : accepté (remplace en partie l'exigence d'habilitation de l'ADR 0009)
+**Statut** : acceptée (2026-09-28). Remplace en partie [0009](0009-parcours-utilisateur.md) (habilitation exigée en plus du compte).
 
 ## Contexte
 
@@ -41,5 +40,5 @@ Le formulaire guidé n'impose plus de groupe : laissé vide, il omet `access`.
   révision, audit `descriptor_updated`). Le message de provisionnement le rappelle aussi.
 - Portée : schéma (`access` retiré des champs requis, plus d'`anyOf`), Rust
   (`Spec.access` défaut, `Access::allows` vrai si vide, contrôle retiré de `validate`),
-  Python (`descriptors.py` : `allows`, `app_from_doc`, formulaire guidé), portail et proxy
+  Python (`descriptors.py` : `access_open`, `app_from_doc`, formulaire guidé), portail et proxy
   inchangés dans leur logique (ils appellent `allows`).

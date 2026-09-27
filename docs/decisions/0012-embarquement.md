@@ -1,6 +1,6 @@
 # 0012. Embarquement : outil en ligne de commande, vérification sans JavaScript
 
-**Statut** : acceptée (2026-09-27). Complétée par [0015](0015-recorder.md) (recorder).
+**Statut** : acceptée (2026-09-27). Complétée par [0015](0015-recorder.md) (recorder) et [0019](0019-recorder-compte-de-test.md) (compte de test, pages de login construites en JavaScript rejouables avec `login.use_form: false`).
 
 ## Contexte
 

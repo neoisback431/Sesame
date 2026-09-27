@@ -241,7 +241,7 @@ sequenceDiagram
 - **Marqueur** `__sesame_handoff` (`HttpOnly`, durée `session.max_ttl`) : tant qu'il est présent, Sesame relaie sans rien injecter ni rejouer. Le cookie du portail et le marqueur sont retirés avant le relais.
 - **Reprise** : si une navigation relayée correspond aux règles `spec.expiry`, Sesame émet `app_session_expired` et refait une remise (nouveau rejeu). À l'expiration du marqueur, la prochaine arrivée en refait une aussi.
 - **Mot de passe** : jamais remis ; seul l'élément de session déclaré (`set_cookies`, `local_storage`) quitte le serveur.
-- **Contreparties** : élément de session visible du navigateur, déconnexion du portail et désactivation d'un compte non immédiates, audit limité à la connexion.
+- **Contreparties** : élément de session visible du navigateur ; la déconnexion du portail coupe l'accès via Sesame mais pas la session côté appli ; la désactivation d'un compte ne prend effet qu'à l'expiration du marqueur ; audit limité à la connexion.
 
 ## Magasin de sessions (PostgreSQL)
 
