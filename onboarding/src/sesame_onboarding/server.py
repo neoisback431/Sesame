@@ -61,6 +61,10 @@ def analyze(cfg: Config, playwright: Any, browser: Any, body: dict[str, Any]) ->
     login_url = body.get("login_url")
     if not isinstance(login_url, str) or not login_url:
         return {"error": "login_url requis"}
+    username, password = body.pop("username", None), body.pop("password", None)
+    credentials = None
+    if isinstance(username, str) and isinstance(password, str) and password:
+        credentials = (username, password)
     verify = _verify_context(cfg)
     with httpx.Client(follow_redirects=False, timeout=cfg.timeout, verify=verify, trust_env=False) as client:
         rec = record.record(
@@ -72,7 +76,9 @@ def analyze(cfg: Config, playwright: Any, browser: Any, body: dict[str, Any]) ->
             probe_failure=bool(body.get("probe_failure")),
             timeout=cfg.timeout,
             ignore_https_errors=cfg.insecure,
+            credentials=credentials,
         )
+    credentials = username = password = None  # noqa: F841 (références effacées)
     result: dict[str, Any] = {
         "summary": record.summary(rec),
         "warnings": list(rec.warnings),

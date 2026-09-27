@@ -122,6 +122,11 @@ def cmd_record(args: argparse.Namespace) -> int:
             "sera envoyée à l'appli",
             file=sys.stderr,
         )
+    credentials = None
+    if args.test_account:
+        creds = _credentials(["username", "password"])
+        credentials = (creds.pop("username"), creds.pop("password"))
+        print("compte de test : une connexion réelle sera effectuée sur l'appli", file=sys.stderr)
     try:
         with sync_playwright() as p, _client(args) as client:
             browser = p.chromium.launch(executable_path=_chromium(args.chromium))
@@ -135,9 +140,11 @@ def cmd_record(args: argparse.Namespace) -> int:
                     probe_failure=args.probe_failure,
                     timeout=args.timeout,
                     ignore_https_errors=args.insecure,
+                    credentials=credentials,
                 )
             finally:
                 browser.close()
+                credentials = None
     except PlaywrightError as e:
         print(f"navigateur : {str(e).splitlines()[0][:200]}", file=sys.stderr)
         return 1
@@ -188,6 +195,12 @@ def parser() -> argparse.ArgumentParser:
         "--probe-failure",
         action="store_true",
         help="envoyer une connexion factice pour observer la réponse d'échec",
+    )
+    r.add_argument(
+        "--test-account",
+        action="store_true",
+        help="connexion réelle avec un compte de test (SESAME_ONBOARD_USERNAME / "
+        "SESAME_ONBOARD_PASSWORD, sinon saisie masquée) : cookie de session, succès, jetons",
     )
     r.add_argument("--id", help="metadata.id")
     r.add_argument("--name", help="metadata.name (défaut : titre de la page)")

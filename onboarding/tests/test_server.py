@@ -57,3 +57,25 @@ def test_bad_json_and_unknown_route(base):
 
 def test_analyze_requires_login_url():
     assert server.analyze(Cfg(), None, None, {})["error"] == "login_url requis"
+
+
+def test_analyze_passes_the_test_account_without_echoing_it(monkeypatch):
+    import json
+
+    from sesame_onboarding import record
+
+    seen = {}
+
+    def fake_record(url, client, browser, **kw):
+        seen.update(kw)
+        return record.Recording(login_url=url, base_url="http://x/", form_url="/login")
+
+    monkeypatch.setattr(record, "record", fake_record)
+    cfg = type("C", (), {"token": "t", "insecure": False, "ca_file": None, "timeout": 5.0})()
+    body = {"login_url": "http://x/login", "username": "testeur", "password": "Pw-secret-42"}
+    result = server.analyze(cfg, None, None, body)
+    assert seen["credentials"] == ("testeur", "Pw-secret-42")
+    assert "Pw-secret-42" not in json.dumps(result) and "password" not in body
+    # Sans mot de passe : aucune connexion réelle.
+    server.analyze(cfg, None, None, {"login_url": "http://x/login", "username": "testeur"})
+    assert seen["credentials"] is None
