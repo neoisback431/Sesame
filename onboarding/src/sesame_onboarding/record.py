@@ -156,6 +156,7 @@ class Recording:
     failure: FailureObservation | None = None
     login: LoginObservation | None = None
     form_index: int = 0
+    session_token_keys: list[str] = field(default_factory=list)  # session par jeton (handoff)
     use_form: bool = True  # False : formulaire absent du HTML servi (construit en JavaScript)
     sent_username_key: str | None = None
     sent_password_key: str | None = None
@@ -778,9 +779,12 @@ def observe_login(
             rec.warnings.append("test_login_still_on_login_page (identifiants du compte de test ?)")
         elif not rec.login.session_cookies:
             if token_keys:
+                rec.session_token_keys = token_keys
                 rec.blocking.append(
                     "session_token_in_response: " + ", ".join(token_keys) + " (session par jeton renvoyé "
-                    "dans la réponse et envoyé en Authorization par le JavaScript : non gérée)"
+                    "dans la réponse et envoyé en Authorization par le JavaScript : le proxy ne peut pas "
+                    "la rejouer). Mode handoff possible (ADR 0020, à activer par l'administrateur) : "
+                    "spec.session.mode: handoff avec local_storage sur " + ", ".join(token_keys)
                 )
             else:
                 rec.blocking.append("no_session_cookie_after_login (session hors cookies : non gérée)")

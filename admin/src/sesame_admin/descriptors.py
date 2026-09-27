@@ -45,6 +45,7 @@ class App:
     groups: tuple[str, ...]
     users: tuple[str, ...]
     credential_keys: tuple[str, ...]
+    session_mode: str  # "proxy" | "handoff" (ADR 0020)
     revision: int
     source: str  # YAML affiché tel quel (ne contient aucun secret)
     origin: str = "file"  # "file" (Git, lecture seule) ou "db" (créé dans l'administration)
@@ -239,6 +240,7 @@ def app_from_doc(
         groups=tuple(spec.get("access", {}).get("groups", [])),
         users=tuple(spec.get("access", {}).get("users", [])),
         credential_keys=tuple(spec["credentials"]["keys"]),
+        session_mode=spec.get("session", {}).get("mode", "proxy"),
         revision=meta["revision"],
         source=source,
         origin=origin,

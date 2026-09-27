@@ -67,6 +67,31 @@ csrf:
 
 Le recorder avec compte de test (ADR 0019) détecte ce cas et génère ce bloc.
 
+## Session (`spec.session`)
+
+- `mode` : `proxy` (défaut) — Sesame relaie chaque requête, la session reste côté serveur ; ou `handoff` (ADR 0020) — Sesame rejoue le login puis remet la session au navigateur, qui joint l'appli directement.
+- `cookies` : cookies de session à capturer (requis en mode proxy, réinjectés à chaque requête).
+- `max_ttl`, `idle_ttl` : durées de vie côté Sesame (mode proxy).
+
+### Mode handoff (`spec.session.handoff`)
+
+Réservé aux applis où le proxy est impossible (WebSockets, SPA qui lisent leurs cookies ou gardent un jeton dans le navigateur) **et** où l'exception aux principes 1 et 3 est acceptée (élément de session visible du navigateur ; déconnexion et désactivation non immédiates ; pas de reconnexion automatique ; audit limité à la connexion). La tuile du portail mène à `/__sesame/handoff` ; l'appli est ensuite jointe directement.
+
+- `set_cookies` : noms, parmi `session.cookies`, des cookies capturés à poser sur le navigateur (`Set-Cookie`).
+- `local_storage` : valeurs écrites dans le stockage local, lues dans la réponse JSON au login (`key`, `from_response` = chemin pointé).
+- `redirect_status` : code de la redirection vers `start_path` après la remise (302 ou 303, défaut 303).
+
+```yaml
+session:
+  mode: handoff
+  handoff:
+    local_storage:
+      - key: refreshToken
+        from_response: refreshToken   # réponse du login : {"refreshToken": "…"}
+```
+
+Le mot de passe applicatif ne quitte jamais le serveur. Le recorder signale une session par jeton et suggère ce mode, sans l'activer par défaut.
+
 ## Conditions (`success`, `failure`, `expiry`)
 
 Une condition vaut si **toutes** ses propriétés sont vraies. Un ensemble `any_of` vaut si **au moins une** de ses conditions vaut.
