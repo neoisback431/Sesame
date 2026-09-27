@@ -71,10 +71,15 @@ test:postgres-python:
     SESAME_TEST_DATABASE_URL: postgres://postgres:test@postgres:5432/postgres
   script: [cd admin && uv run --group dev pytest -q tests/test_store_contract.py]
 
+# Suite complète, navigateur compris : image Playwright de même version que uv.lock
+# et recorder.Dockerfile.
 test:python:
-  extends: .python
+  image: mcr.microsoft.com/playwright/python:v1.63.0-noble
   stage: test
-  script: [make test-python]
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq make >/dev/null
+    - pip install -q --break-system-packages uv
+  script: [make test-python-full]
 
 build:images:
   stage: build

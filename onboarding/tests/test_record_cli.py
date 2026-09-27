@@ -10,6 +10,8 @@ from .test_record import DUMMY_PASSWORD, DUMMY_USER, Recorder, chromium_path, cr
 
 pytest.importorskip("playwright.sync_api")
 
+pytestmark = pytest.mark.browser
+
 
 @pytest.fixture
 def fake(monkeypatch):
