@@ -13,7 +13,7 @@ SECRET = "Sup3r-Secret-Value"
 def test_descriptors_are_loaded_read_only(apps):
     app = apps["fake-app"]
     assert app.credential_keys == ("username", "password")
-    assert app.allows("x", ("fake-app-users",)) and not app.allows("x", ("autre",))
+    assert (app.groups, app.access_open) == (("fake-app-users",), False)
     assert "apiVersion: sesame/v1" in app.source
 
 
