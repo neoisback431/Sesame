@@ -189,7 +189,9 @@ def test_admin_provisions_an_account_then_user_gets_in(browser: Browser):
 
 def test_app_created_in_admin_is_served_without_restart(browser: Browser):
     """Appli créée dans l'UI (formulaire guidé + éditeur), servie par le proxy et affichée
-    par le portail après rechargement à chaud, sans redémarrer aucun service."""
+    par le portail après rechargement à chaud, sans redémarrer aucun service.
+
+    Sans habilitation (aucun groupe) : le compte actif suffit à autoriser l'accès."""
     admin = login(browser, "admin", start=f"{ADMIN}login")
     admin.get_by_role("link", name="Nouvelle application").click()
     for field, value in {
@@ -197,7 +199,7 @@ def test_app_created_in_admin_is_served_without_restart(browser: Browser):
         "name": "Appli factice bis",
         "public_host": "fake-app-bis.sesame.localhost:8443",
         "base_url": "http://fake-app:8000",
-        "groups": "fake-app-users",
+        # Pas de groupe : l'habilitation repose sur le seul compte actif.
         "form_selector": "form#login-form",
         "csrf_field": "csrf_token",
         "session_cookie": "FAKEAPPSESSID",

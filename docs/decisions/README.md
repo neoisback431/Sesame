@@ -20,3 +20,4 @@ Une fiche par décision structurante : contexte, décision, conséquences. Une d
 | [0014](0014-applis-en-base.md) | Applis en base, créées dans l'administration (remplace en partie 0011) | 2026-09-27 |
 | [0015](0015-recorder.md) | Recorder : analyse d'une page de login sans identifiant | 2026-09-27 |
 | [0016](0016-recorder-dans-admin.md) | Recorder appelé depuis l'administration | 2026-09-27 |
+| [0017](0017-habilitation-par-compte.md) | Le compte suffit : `spec.access` facultatif | 2026-09-28 |

@@ -61,7 +61,7 @@ Règles :
 - Authentification OIDC auprès d'un fournisseur d'identité configurable (Entra ID dans le déploiement de référence).
 - Émet et valide la session portail (cookie sécurisé, `HttpOnly`, `Secure`, `SameSite`).
 - Résout les habilitations : quel utilisateur / groupe (issu des claims) accède à quelle appli.
-- Affiche la page « Mes applications » : applis pour lesquelles l'utilisateur est habilité **et** a un compte actif dans le registre des comptes. N'accède jamais au coffre.
+- Affiche la page « Mes applications » : applis pour lesquelles l'utilisateur a un compte actif dans le registre **et** (si le descripteur définit `spec.access`) y est habilité. `spec.access` est facultatif : sans lui, le compte suffit (ADR 0017). N'accède jamais au coffre.
 
 ### 2. Moteur de proxy (plan de données)
 
@@ -100,7 +100,7 @@ Règles :
 ## Flux nominal
 
 1. L'utilisateur se connecte au portail en SSO (redirection OIDC vers le fournisseur d'identité → retour avec session portail).
-2. Le portail affiche « Mes applications » (habilité + compte actif dans le registre).
+2. Le portail affiche « Mes applications » (compte actif dans le registre, et habilitation `spec.access` si définie — facultative, ADR 0017).
 3. Clic sur une tuile → adresse de l'appli **exposée par Sesame** (jamais l'adresse réelle). L'accès direct par favori / lien profond fonctionne aussi.
 4. Le moteur de proxy cherche une session applicative dans le magasin. Absente ou expirée → vérification habilitation + compte `active` → lecture du credential dans le coffre → rejeu du login selon le descripteur → stockage du cookie applicatif. Échec → page d'erreur neutre + compte `failed`.
 5. La requête est relayée à l'appli avec le cookie applicatif injecté ; la réponse revient au navigateur sans aucun secret.
@@ -128,6 +128,7 @@ Session expirée sur un `POST` : rejeu puis `303` vers la page d'origine (soumis
 | Routage | **Une appli par nom d'hôte**, cookie portail sur le domaine parent (retiré par le proxy avant relais) | Tranché |
 | Parcours utilisateur | **Page « Mes applications »** dans le portail ; rejeu à l'arrivée sur l'appli, dans le proxy | Tranché |
 | Registre des comptes | **Table PostgreSQL** sans secret (`AccountRegistry`), source : UI d'admin | Tranché |
+| Habilitation | **Le compte suffit** : `spec.access` facultatif (absent/vide ⇒ tout utilisateur avec un compte actif) ; présent ⇒ restreint en plus par groupes/`users` (ADR 0017) | Tranché |
 | UI d'admin | **FastAPI + Jinja2** (rendu serveur) ; AppRole admin en écriture sans lecture | Tranché |
 | Emplacement des descripteurs | **Fichiers Git** (lecture seule) **et base** (créés / modifiés dans l'admin, historisés, rechargés à chaud) ; fichiers prioritaires en cas de conflit d'`id` ou d'hôte (ADR 0014) | Tranché |
 | Déconnexion fournisseur | **RP-Initiated Logout** optionnel (`SESAME_OIDC_LOGOUT`) : `client_id` + `post_logout_redirect_uri`, **sans `id_token_hint`** (l'ID token n'est pas conservé) | Tranché |
