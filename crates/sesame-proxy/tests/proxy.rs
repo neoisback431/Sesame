@@ -341,8 +341,9 @@ async fn handoff_mode_hands_the_cookie_to_the_browser() {
     assert!(rejected.is_empty(), "{rejected:?}");
     b.engine.set_apps(apps);
 
-    // Chemin de remise : rejeu côté serveur, cookie posé au navigateur, redirection.
-    let r = b.get_raw(sesame_core::descriptor::HANDOFF_PATH).await;
+    // Première arrivée (pas de marqueur) : rejeu côté serveur, cookie + marqueur posés au
+    // navigateur, redirection transparente vers l'URL demandée.
+    let r = b.get_raw("/dashboard").await;
     assert_eq!(r.status, StatusCode::SEE_OTHER);
     assert!(r
         .headers
@@ -357,15 +358,37 @@ async fn handoff_mode_hands_the_cookie_to_the_browser() {
         .iter()
         .filter_map(|v| v.to_str().ok().map(str::to_owned))
         .collect();
+    let appsess = set
+        .iter()
+        .find_map(|c| {
+            c.strip_prefix("APPSESS=")
+                .map(|v| v.split(';').next().unwrap().to_owned())
+        })
+        .expect("cookie applicatif remis");
+    assert!(appsess.starts_with("sess-"));
     assert!(
         set.iter()
-            .any(|c| c.starts_with("APPSESS=sess-") && c.contains("Secure")),
+            .any(|c| c.starts_with("__sesame_handoff=1") && c.contains("HttpOnly")),
         "{set:?}"
     );
     assert!(b.actions().contains(&AuditAction::SessionHandoff));
 
-    // Les autres chemins d'une appli handoff ne sont pas servis par le proxy.
-    assert_eq!(b.get("/dashboard").await.status, StatusCode::NOT_FOUND);
+    // Requête suivante (marqueur + cookie applicatif portés par le navigateur) : relais
+    // transparent, aucun nouveau rejeu.
+    let logins_before = b.mock.logins.load(Ordering::SeqCst);
+    let req = b
+        .request("GET", "/")
+        .header("cookie", format!("__sesame_handoff=1; APPSESS={appsess}"))
+        .body(Body::empty())
+        .unwrap();
+    let r = b.send_raw(req).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.body.contains("Bonjour amartin"), "{}", r.body);
+    assert_eq!(
+        b.mock.logins.load(Ordering::SeqCst),
+        logins_before,
+        "pas de rejeu au relais"
+    );
 }
 
 #[tokio::test]

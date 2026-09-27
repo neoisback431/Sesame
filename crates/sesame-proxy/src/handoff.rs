@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Mode « remise » (handoff, ADR 0020) : après le rejeu côté serveur, Sesame remet au
-//! navigateur l'élément de session (cookie et/ou valeurs de stockage local) puis le
-//! redirige vers la page d'arrivée. L'appli est ensuite jointe directement.
+//! Mode « remise » (handoff, ADR 0020) : totalement transparent, sans chemin dédié. À la
+//! première arrivée sur l'appli, après le rejeu côté serveur, Sesame remet au navigateur
+//! l'élément de session (cookie et/ou valeurs de stockage local) et un marqueur, puis le
+//! redirige vers l'URL demandée. Les requêtes suivantes (marqueur présent) sont relayées
+//! sans nouveau rejeu, le navigateur portant lui-même la session.
 //!
 //! Exception assumée aux principes 1 et 3 : l'élément remis est visible du navigateur.
 //! Le mot de passe applicatif, lui, ne quitte jamais le serveur.
