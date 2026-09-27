@@ -661,6 +661,19 @@ fn handoff_done(headers: &HeaderMap) -> bool {
     cookies::find(cookies, HANDOFF_MARKER).is_some()
 }
 
+/// La requête est-elle une navigation de premier niveau (barre d'adresse, clic sur un lien) ?
+/// `Sec-Fetch-Mode: navigate` le dit ; à défaut (vieux navigateur), on retombe sur un `Accept`
+/// qui demande du HTML. Les sous-ressources (`cors`, `no-cors`, images, fetch) ne le sont pas.
+fn is_navigation(headers: &HeaderMap) -> bool {
+    match headers.get("sec-fetch-mode").and_then(|v| v.to_str().ok()) {
+        Some(mode) => mode.eq_ignore_ascii_case("navigate"),
+        None => headers
+            .get(header::ACCEPT)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|a| a.contains("text/html")),
+    }
+}
+
 fn redirect(status: StatusCode, to: &str) -> Response {
     let mut resp = status.into_response();
     if let Ok(v) = HeaderValue::from_str(to) {
@@ -699,7 +712,18 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
 
     let session = match p.portal_session(req.headers()).await {
         Ok(Some(s)) => s,
-        Ok(None) => return p.login_redirect(&app, &path_and_query),
+        // Rediriger vers le login n'a de sens que pour une navigation. Une sous-ressource
+        // (manifest, image, fetch/XHR) recevrait une redirection cross-origin que le
+        // navigateur bloque en CORS : on répond 401, sans redirection.
+        Ok(None) if is_navigation(req.headers()) => return p.login_redirect(&app, &path_and_query),
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::CACHE_CONTROL, "no-store")],
+                "authentication required",
+            )
+                .into_response()
+        }
         Err(()) => return p.unavailable(&cid),
     };
     let ctx = Ctx {

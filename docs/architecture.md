@@ -125,7 +125,7 @@ sequenceDiagram
     U->>X: GET https://compta.sesame.example/factures
     X->>DB: session portail ?
     DB-->>X: absente
-    X-->>U: 302 vers le portail (return_to)
+    X-->>U: 302 vers le portail (return_to) sur une navigation ; 401 sinon
     U->>P: GET /auth/login?return_to=…
     P-->>U: 302 vers le fournisseur (code + PKCE + state + nonce)
     U->>I: authentification
@@ -184,6 +184,7 @@ sequenceDiagram
 Règles :
 
 - Seules les requêtes idempotentes (`GET`, `HEAD`, `OPTIONS`) sont répétées automatiquement. Pour un `POST` expiré, Sesame rejoue le login puis redirige l'utilisateur (`303`) vers la page d'origine (`Referer` s'il désigne la même appli, sinon la racine de l'appli). La soumission est perdue, ce qui évite toute double soumission. Un message l'explique à l'utilisateur.
+- **Requête non authentifiée** : seule une **navigation** de premier niveau (`Sec-Fetch-Mode: navigate`, ou `Accept: text/html` à défaut) est redirigée vers le login du portail. Une sous-ressource (manifest, image, `fetch`/XHR) reçoit un `401`, jamais une redirection cross-origin que le navigateur bloquerait en CORS.
 - **Un seul rejeu à la fois** par couple (session portail, appli). Les requêtes concurrentes attendent le résultat.
 - **Protection contre le verrouillage de compte** : au plus `login.max_attempts` rejeux consécutifs. Après un échec (règle `login.failure` ou absence de `login.success`), le couple (appli, utilisateur) passe en attente avec un délai croissant et une page d'erreur neutre s'affiche. Cette page ne contient jamais le contenu de la réponse de l'appli.
 
