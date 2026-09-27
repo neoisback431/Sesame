@@ -46,11 +46,59 @@ flowchart LR
 | Composant | Rôle | Accès aux secrets applicatifs |
 |---|---|---|
 | Nginx | Terminaison TLS, routage par nom d'hôte | Aucun |
-| Portail | OIDC, session portail, habilitations, déconnexion | Aucun |
+| Portail | OIDC, session portail, page « Mes applications », déconnexion | Aucun |
 | Moteur de proxy | Relais, rejeu du login, injection de session, détection d'expiration | **Seul lecteur du coffre** |
 | Magasin de sessions | Session portail → sessions applicatives (cookies chiffrés) | Cookies applicatifs (chiffrés) |
-| UI d'administration | Applis, descripteurs, habilitations, comptes associés | Écriture seule, sans relecture (voir plus bas) |
+| UI d'administration | Applis, descripteurs, habilitations, registre des comptes | Écriture seule, sans relecture (voir plus bas) |
 | Module d'embarquement | Capture du formulaire, génération de descripteur, test de santé | Compte de test fourni ponctuellement |
+
+## Parcours utilisateur
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Utilisateur
+    participant P as Portail
+    participant I as Fournisseur d'identité
+    participant X as Moteur de proxy
+    participant A as Appli (via Sesame)
+
+    U->>P: https://sesame.example
+    P->>I: SSO (si pas de session portail)
+    I-->>P: identité + groupes
+    P-->>U: page « Mes applications » (tuiles)
+    U->>X: clic sur une tuile : https://compta.sesame.example/
+    Note over X: pas de session applicative : rejeu du login (1 à 2 s)
+    X->>A: rejeu puis requête relayée
+    A-->>U: appli affichée, utilisateur déjà connecté
+```
+
+1. L'utilisateur se connecte au portail en SSO.
+2. Le portail affiche la page **« Mes applications »** : une tuile par appli pour laquelle l'utilisateur est **habilité** (groupes / utilisateurs du descripteur) **et** possède un **compte actif** dans le registre des comptes. Les applis sans compte sont masquées.
+3. Un clic sur une tuile ouvre l'adresse de l'appli **exposée par Sesame** (`compta.sesame.example`), jamais son adresse réelle : tout le trafic passe par le proxy, et les cookies applicatifs restent côté serveur.
+4. Le proxy constate l'absence de session applicative et rejoue le login à ce moment-là. C'est le même mécanisme que pour une session expirée, donc un seul chemin de code.
+5. L'utilisateur arrive dans l'appli, déjà connecté.
+
+Compléments :
+
+- **Accès direct** : un favori ou un lien profond (`https://compta.sesame.example/factures/42`) fonctionne aussi. SSO si nécessaire, rejeu, puis la page demandée.
+- **Échec du rejeu** : le proxy affiche une page d'erreur neutre (identifiant de corrélation, lien de retour au portail) et passe le compte à l'état `failed` dans le registre. La tuile le signale jusqu'à ce qu'un administrateur corrige le compte.
+- **Retour au portail** : par son adresse, ou via le lien des pages d'erreur. Sesame n'injecte pas de bandeau dans les pages des applis, ce serait fragile et risqué.
+- **Déconnexion** : se déconnecter du portail détruit la session portail et toutes les sessions applicatives. Fermer aussi la session chez le fournisseur d'identité (RP-initiated logout) est une option de configuration, désactivée par défaut.
+
+## Registre des comptes
+
+Le portail doit savoir quelles applis afficher sans accéder au coffre : seul le proxy le lit. Un **registre des comptes**, dans PostgreSQL, indique pour chaque couple (appli, utilisateur) qu'un compte applicatif existe, avec son état. Il ne contient **aucun secret**.
+
+| État | Sens | Tuile | Rejeu |
+|---|---|---|---|
+| `active` | Compte provisionné | Affichée | Autorisé |
+| `failed` | Dernier rejeu en échec (identifiants refusés, formulaire changé…) | Affichée, signalée | Bloqué jusqu'à correction |
+| `disabled` | Désactivé par un administrateur | Masquée | Bloqué |
+
+- **Source** : l'UI d'admin. Elle écrit le secret dans le coffre (sans pouvoir le relire) et crée ou met à jour l'entrée du registre dans la même opération.
+- **Proxy** : avant de lire le coffre, il vérifie l'habilitation et l'état `active` du compte. Sinon, il refuse sans lire le coffre et émet `access_denied`. Après un rejeu, il met à jour `last_login_at` ou passe le compte à `failed`.
+- Le registre et le coffre peuvent diverger (secret supprimé à la main, par exemple). La lecture du coffre en échec passe alors le compte à `failed`.
 
 ## Routage : une appli par nom d'hôte
 
@@ -58,7 +106,7 @@ Chaque appli protégée est exposée sous son propre nom d'hôte (`spec.public.h
 
 Ce choix évite de réécrire les chemins (`/app1/...`). Les applis anciennes cassent souvent sous un préfixe (liens absolus, cookies `Path=/`, JavaScript). La réécriture se limite aux URLs absolues internes (`http://app-interne:8000/...`) dans `Location` et, si le descripteur le demande, dans le corps HTML.
 
-Le portail vit sur le domaine parent (`sesame.example`). Son cookie est posé pour ce domaine et reçu par tous les sous-domaines.
+Le portail vit sur le domaine parent (`sesame.example`). Son cookie est posé pour ce domaine et reçu par tous les sous-domaines. Le proxy le retire avant de relayer une requête et capture tous les `Set-Cookie` des applis (voir [ADR 0008](decisions/0008-routage-par-nom-d-hote.md)).
 
 ## Flux nominal
 
@@ -135,7 +183,7 @@ sequenceDiagram
 
 Règles :
 
-- Seules les requêtes idempotentes (`GET`, `HEAD`, `OPTIONS`) sont répétées automatiquement. Pour un `POST` expiré, Sesame rejoue le login puis redirige l'utilisateur (`303`) vers la page d'origine. La soumission est perdue : c'est un point d'UX à affiner.
+- Seules les requêtes idempotentes (`GET`, `HEAD`, `OPTIONS`) sont répétées automatiquement. Pour un `POST` expiré, Sesame rejoue le login puis redirige l'utilisateur (`303`) vers la page d'origine (`Referer` s'il désigne la même appli, sinon la racine de l'appli). La soumission est perdue, ce qui évite toute double soumission. Un message l'explique à l'utilisateur.
 - **Un seul rejeu à la fois** par couple (session portail, appli). Les requêtes concurrentes attendent le résultat.
 - **Protection contre le verrouillage de compte** : au plus `login.max_attempts` rejeux consécutifs. Après un échec (règle `login.failure` ou absence de `login.success`), le couple (appli, utilisateur) passe en attente avec un délai croissant et une page d'erreur neutre s'affiche. Cette page ne contient jamais le contenu de la réponse de l'appli.
 
@@ -164,6 +212,18 @@ CREATE TABLE app_sessions (
     last_used_at   timestamptz NOT NULL,
     expires_at     timestamptz NOT NULL,
     PRIMARY KEY (portal_session, app_id)
+);
+
+-- Registre des comptes : aucun secret (voir « Registre des comptes »).
+CREATE TABLE app_accounts (
+    app_id        text        NOT NULL,
+    user_key      text        NOT NULL,
+    status        text        NOT NULL CHECK (status IN ('active', 'failed', 'disabled')),
+    status_reason text,                   -- code court, jamais un contenu de réponse
+    created_at    timestamptz NOT NULL,
+    updated_at    timestamptz NOT NULL,
+    last_login_at timestamptz,
+    PRIMARY KEY (app_id, user_key)
 );
 
 CREATE INDEX ON portal_sessions (expires_at);
@@ -199,7 +259,8 @@ Chaque lecture de secret et chaque rejeu produit un événement, succès ou éch
 | Action | Émis par | Quand |
 |---|---|---|
 | `portal_login` / `portal_logout` | Portail | Session portail créée / détruite |
-| `access_denied` | Proxy | Utilisateur non habilité pour l'appli |
+| `access_denied` | Proxy | Utilisateur non habilité, ou compte absent / inactif dans le registre |
+| `account_status_changed` | Proxy, UI d'admin | Changement d'état d'un compte du registre (`active`, `failed`, `disabled`) |
 | `secret_read` | Proxy | Lecture du coffre (succès ou échec) |
 | `login_replay` | Proxy | Rejeu du login (succès, échec, abandon) |
 | `app_session_expired` | Proxy | Expiration détectée |

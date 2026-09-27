@@ -61,6 +61,7 @@ Règles :
 - Authentification OIDC auprès d'un fournisseur d'identité configurable (Entra ID dans le déploiement de référence).
 - Émet et valide la session portail (cookie sécurisé, `HttpOnly`, `Secure`, `SameSite`).
 - Résout les habilitations : quel utilisateur / groupe (issu des claims) accède à quelle appli.
+- Affiche la page « Mes applications » : applis pour lesquelles l'utilisateur est habilité **et** a un compte actif dans le registre des comptes. N'accède jamais au coffre.
 
 ### 2. Moteur de proxy (plan de données)
 
@@ -81,6 +82,7 @@ Règles :
 - Table de correspondance : session portail → sessions applicatives (cookies par appli).
 - TTL, invalidation à la déconnexion du portail, purge des sessions expirées.
 - Implémentation : PostgreSQL (voir Décisions).
+- Contient aussi le **registre des comptes** (`app_accounts` : appli, utilisateur, état `active` / `failed` / `disabled`, sans aucun secret), alimenté par l'UI d'admin et mis à jour par le proxy après chaque rejeu.
 
 ### 5. Module d'embarquement
 
@@ -92,16 +94,18 @@ Règles :
 
 ### Fonctions transverses
 
-- **Administration** : gestion des applis, descripteurs, habilitations, comptes associés.
+- **Administration** : gestion des applis, descripteurs, habilitations, registre des comptes (écriture du secret dans le coffre et de l'entrée du registre dans la même opération).
 - **Observabilité** : logs structurés JSON, métriques et traces via OpenTelemetry (exploitables notamment par Datadog), journal d'audit dédié.
 
 ## Flux nominal
 
-1. L'utilisateur accède à une appli protégée via le portail.
-2. Pas de session portail → redirection OIDC vers le fournisseur d'identité → retour avec session portail.
-3. Le moteur de proxy cherche une session applicative dans le magasin.
-4. Absente ou expirée → lecture du credential dans le coffre → rejeu du login selon le descripteur → stockage du cookie applicatif.
+1. L'utilisateur se connecte au portail en SSO (redirection OIDC vers le fournisseur d'identité → retour avec session portail).
+2. Le portail affiche « Mes applications » (habilité + compte actif dans le registre).
+3. Clic sur une tuile → adresse de l'appli **exposée par Sesame** (jamais l'adresse réelle). L'accès direct par favori / lien profond fonctionne aussi.
+4. Le moteur de proxy cherche une session applicative dans le magasin. Absente ou expirée → vérification habilitation + compte `active` → lecture du credential dans le coffre → rejeu du login selon le descripteur → stockage du cookie applicatif. Échec → page d'erreur neutre + compte `failed`.
 5. La requête est relayée à l'appli avec le cookie applicatif injecté ; la réponse revient au navigateur sans aucun secret.
+
+Session expirée sur un `POST` : rejeu puis `303` vers la page d'origine (soumission perdue, pas de double soumission). Déconnexion du portail : toutes les sessions applicatives détruites ; déconnexion chez le fournisseur d'identité en option (désactivée par défaut). Aucun bandeau injecté dans les applis.
 
 ## Environnement et outillage
 
@@ -121,6 +125,9 @@ Règles :
 | Licence open source | **Apache-2.0** (`LICENSE`, `NOTICE`) | Tranché |
 | Langue du projet | **Français** pour l'instant (docs, commentaires de conception) ; passage à l'anglais à réévaluer avant publication | Tranché |
 | Coffre en dev | **OpenBao** (fork open source de Vault, même API) ; le code reste compatible Vault | Tranché |
+| Routage | **Une appli par nom d'hôte**, cookie portail sur le domaine parent (retiré par le proxy avant relais) | Tranché |
+| Parcours utilisateur | **Page « Mes applications »** dans le portail ; rejeu à l'arrivée sur l'appli, dans le proxy | Tranché |
+| Registre des comptes | **Table PostgreSQL** sans secret (`AccountRegistry`), source : UI d'admin | Tranché |
 
 Les décisions ont été prises le 2026-09-27. Consigner leur justification dans `docs/decisions/` (ADR). Toute nouvelle décision structurante est posée en question avant d'être codée, puis ajoutée à ce tableau.
 
@@ -132,14 +139,14 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 2. Rédiger `docs/architecture.md` et un schéma Mermaid des flux.
 3. Définir le schéma du descripteur d'appli.
 4. Mettre en place un `docker-compose.yml` de dev : Nginx, portail, proxy, OpenBao (mode dev), PostgreSQL, un fournisseur OIDC local (Keycloak ou Dex), et une appli factice avec un formulaire de login + CSRF pour les tests.
-5. Implémenter un MVP bout en bout sur l'appli factice : login OIDC (fournisseur local en dev), rejeu, injection de session.
+5. Implémenter un MVP bout en bout sur l'appli factice : login OIDC (fournisseur local en dev), page « Mes applications », registre des comptes, rejeu, injection de session.
 6. Pipeline GitLab CI minimal : lint, tests, build des images.
 
 ## Structure du dépôt
 
 | Dossier | Contenu |
 |---|---|
-| `crates/sesame-core` | Cœur Rust sans dépendance fournisseur : modèle des descripteurs (`descriptor.rs`), interfaces `SecretStore` / `SessionStore` / `AuditSink` (`ports.rs`), types secrets (`secret.rs`), identité, audit, logs |
+| `crates/sesame-core` | Cœur Rust sans dépendance fournisseur : modèle des descripteurs (`descriptor.rs`), interfaces `SecretStore` / `SessionStore` / `AccountRegistry` / `AuditSink` (`ports.rs`), types secrets (`secret.rs`), identité, audit, logs |
 | `crates/sesame-portal`, `crates/sesame-proxy` | Binaires Rust (squelettes : `/healthz`) |
 | `onboarding/`, `admin/` | Paquets Python (squelettes) |
 | `schemas/app-descriptor.schema.json` | Schéma du descripteur : **fait foi**, contrat entre Rust et Python |

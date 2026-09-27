@@ -13,6 +13,7 @@ pub enum AuditAction {
     LoginReplay,
     AppSessionExpired,
     AppLogout,
+    AccountStatusChanged,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

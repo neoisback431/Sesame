@@ -12,3 +12,5 @@ Une fiche par décision structurante : contexte, décision, conséquences. Une d
 | [0006](0006-licence-apache-2.md) | Licence Apache-2.0 | 2026-09-27 |
 | [0007](0007-openbao-en-dev.md) | OpenBao en dev | 2026-09-27 |
 | [0008](0008-routage-par-nom-d-hote.md) | Une appli par nom d'hôte | 2026-09-27 |
+| [0009](0009-parcours-utilisateur.md) | Parcours utilisateur : « Mes applications », rejeu à l'arrivée | 2026-09-27 |
+| [0010](0010-registre-des-comptes.md) | Registre des comptes dans PostgreSQL | 2026-09-27 |
