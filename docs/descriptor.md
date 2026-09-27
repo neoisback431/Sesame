@@ -32,6 +32,19 @@ fields:
   remember: { value: "on" }             # constante non sensible
 ```
 
+**Page de login construite en JavaScript** (React, Vue… : le formulaire n'existe pas dans le HTML servi, champs parfois sans attribut `name`) : `use_form: false`. Le proxy lit quand même la page de login (cookies, jetons `meta` / `cookie` / `regex`, appel `endpoint`), puis envoie directement la requête vers `action` (obligatoire), avec les champs déclarés dans `fields` ; `form_selector` et `include_hidden_inputs` sont ignorés. Le recorder détecte ce cas et lit les noms réellement envoyés dans la requête observée.
+
+```yaml
+login:
+  form_url: /login
+  use_form: false
+  action: /api/auth/login
+  encoding: json
+  fields:
+    email: { from_secret: username }
+    password: { from_secret: password }
+```
+
 Avec `include_hidden_inputs: true` (valeur par défaut), tous les `input type=hidden` du formulaire sont renvoyés tels quels. Les jetons CSRF se déclarent dans `csrf` quand ils viennent d'ailleurs ou doivent être renvoyés autrement :
 
 | `source` | Lecture | Renvoi par défaut |
