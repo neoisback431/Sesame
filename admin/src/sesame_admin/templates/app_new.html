@@ -39,7 +39,8 @@
   </div>
   <h2>Adresses</h2>
   <div class="grid">
-    <div><label for="public_host">Hôte public (exposé par Sesame, ex. <code>crm.sesame.example</code>)</label>
+    <div><label for="public_host">Hôte public exposé par Sesame, résolu (DNS) vers le frontal Nginx
+      (ex. <code>crm.sesame.localhost:8443</code> en dev)</label>
       <input type="text" id="public_host" name="public_host" required></div>
     <div><label for="base_url">URL de l'appli jointe par le proxy (ex. <code>http://crm.interne:8080</code>)</label>
       <input type="text" id="base_url" name="base_url" required></div>
