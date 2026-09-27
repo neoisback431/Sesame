@@ -3,13 +3,9 @@
 # de dev publiques : ne jamais les réutiliser ailleurs.
 #
 # Prérequis : make dev-certs   (certificat TLS auto-signé pour *.sesame.localhost)
-# Entrée    : https://fake-app.sesame.localhost:8443
+# Entrée    : https://sesame.localhost:8443  (page « Mes applications »)
 
 name: sesame
-
-x-dev-ca: &dev-ca
-  # CA de dev, pour que les services fassent confiance au frontal Nginx.
-  - ./deploy/nginx/certs/ca.crt:/etc/sesame/ca.crt:ro
 
 services:
   nginx:
@@ -34,6 +30,7 @@ services:
       SESAME_PORTAL_LISTEN: 0.0.0.0:8080
       SESAME_PUBLIC_URL: https://sesame.localhost:8443
       SESAME_COOKIE_DOMAIN: sesame.localhost
+      SESAME_DESCRIPTORS_DIR: /etc/sesame/descriptors
       SESAME_OIDC_ISSUER: https://idp.sesame.localhost:8443/realms/sesame
       SESAME_OIDC_CLIENT_ID: sesame-portal
       SESAME_OIDC_CLIENT_SECRET: dev-portal-client-secret
@@ -41,11 +38,18 @@ services:
       SESAME_OIDC_USER_KEY_CLAIM: preferred_username
       SESAME_OIDC_GROUPS_CLAIM: groups
       SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
-      SSL_CERT_FILE: /etc/sesame/ca.crt
+      # Clé de dev (base64, 32 octets) : chiffre l'état OIDC temporaire.
+      SESAME_PORTAL_STATE_KEY: c2VzYW1lLWRldi1wb3J0YWwtc3RhdGUta2V5LTAwMDE=
+      SESAME_CA_FILE: /etc/sesame/ca.crt
       RUST_LOG: info
-    volumes: *dev-ca
+    volumes:
+      - ./descriptors:/etc/sesame/descriptors:ro
+      - ./deploy/nginx/certs/ca.crt:/etc/sesame/ca.crt:ro
     depends_on:
       postgres: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+    # La discovery OIDC passe par Nginx, qui peut démarrer après le portail.
+    restart: on-failure
 
   proxy:
     build:
@@ -56,14 +60,17 @@ services:
       SESAME_PROXY_LISTEN: 0.0.0.0:8081
       SESAME_DESCRIPTORS_DIR: /etc/sesame/descriptors
       SESAME_PORTAL_URL: https://sesame.localhost:8443
+      SESAME_COOKIE_DOMAIN: sesame.localhost
       SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
+      # Clé de dev (base64, 32 octets) : chiffre les cookies applicatifs au repos.
+      SESAME_SESSION_ENCRYPTION_KEY: c2VzYW1lLWRldi1hcHAtc2Vzc2lvbi1rZXktMDAwMDE=
       SESAME_SECRET_STORE: openbao
       SESAME_OPENBAO_ADDR: http://openbao:8200
       SESAME_OPENBAO_MOUNT: secret
       SESAME_OPENBAO_PATH_PREFIX: sesame/apps
       SESAME_OPENBAO_ROLE_ID: dev-proxy-role-id
       SESAME_OPENBAO_SECRET_ID: dev-proxy-secret-id
-      SSL_CERT_FILE: /etc/sesame/ca.crt
+      SESAME_CA_FILE: /etc/sesame/ca.crt
       RUST_LOG: info
     volumes:
       - ./descriptors:/etc/sesame/descriptors:ro
@@ -71,6 +78,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       openbao-seed: { condition: service_completed_successfully }
+    restart: on-failure
 
   postgres:
     image: postgres:17-alpine
@@ -83,6 +91,17 @@ services:
       test: ["CMD-SHELL", "pg_isready -U sesame -d sesame"]
       interval: 2s
       retries: 30
+
+  # Registre des comptes de dev (en production : l'UI d'administration).
+  db-seed:
+    image: postgres:17-alpine
+    environment:
+      PGPASSWORD: dev-db-password
+    volumes: [./dev/postgres/seed.sh:/seed.sh:ro]
+    entrypoint: ["sh", "/seed.sh"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
 
   openbao:
     image: openbao/openbao:2.4.1
@@ -113,8 +132,16 @@ services:
       KC_HOSTNAME: https://idp.sesame.localhost:8443
       KC_PROXY_HEADERS: xforwarded
       KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
     volumes:
       - ./dev/keycloak/sesame-realm.json:/opt/keycloak/data/import/sesame-realm.json:ro
+    healthcheck:
+      # Pas de curl dans l'image : requête HTTP brute sur le port de management.
+      test:
+        - CMD-SHELL
+        - "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"
+      interval: 5s
+      retries: 60
 
   fake-app:
     build: ./dev/fake-app

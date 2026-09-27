@@ -1,0 +1,13 @@
+[project]
+name = "sesame-e2e"
+version = "0.1.0"
+description = "Tests bout en bout de Sesame sur l'environnement Docker Compose de dev."
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8", "playwright>=1.47"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]

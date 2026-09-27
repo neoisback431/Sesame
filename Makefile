@@ -5,12 +5,14 @@ CERTS := deploy/nginx/certs
 # onboarding et admin rejoindront la liste avec leurs premiers tests.
 PY_PROJECTS := dev/fake-app
 
-.PHONY: help dev-certs up down logs test test-rust test-python lint lint-rust lint-python validate-descriptors images deny
+.PHONY: help dev-certs up down logs test test-rust test-python test-postgres e2e lint lint-rust lint-python validate-descriptors images deny
 
 help:
 	@echo "dev-certs             certificat TLS de dev pour *.sesame.localhost"
 	@echo "up / down / logs      environnement Docker Compose de dev"
 	@echo "test                  tests Rust et Python"
+	@echo "test-postgres         tests de contrat sur une base PostgreSQL jetable (Docker)"
+	@echo "e2e                   tests bout en bout Playwright (après make up)"
 	@echo "lint                  fmt, clippy, ruff, validation des descripteurs"
 	@echo "images                construit les images Docker"
 
@@ -45,6 +47,17 @@ test-rust:
 
 test-python:
 	@for p in $(PY_PROJECTS); do echo "== $$p"; (cd $$p && uv run --group dev pytest -q) || exit 1; done
+
+# Tests de contrat du magasin PostgreSQL sur une base jetable.
+test-postgres:
+	docker run -d --rm --name sesame-pgtest -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:17-alpine >/dev/null
+	@until docker exec sesame-pgtest pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	SESAME_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres \
+	  cargo test -p sesame-store-postgres --locked; status=$$?; docker stop sesame-pgtest >/dev/null; exit $$status
+
+# Parcours complets dans un vrai navigateur, sur l'environnement lancé par make up.
+e2e:
+	cd tests/e2e && uv run --group dev playwright install chromium && uv run --group dev pytest -q
 
 lint: lint-rust lint-python validate-descriptors
 

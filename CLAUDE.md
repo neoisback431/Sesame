@@ -133,7 +133,7 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 
 ## Première étape attendue (initialisation)
 
-Étapes 1 à 4 faites ; étape 6 amorcée (`.gitlab-ci.yml`). Prochaine : 5, le MVP bout en bout.
+Étapes 1 à 5 faites (MVP validé de bout en bout par `make e2e`) ; étape 6 en place (`.gitlab-ci.yml`, non exécutée faute de GitLab). Prochaines pistes : UI d'administration, module d'embarquement, OpenTelemetry, déconnexion chez le fournisseur d'identité.
 
 1. Proposer la structure du dépôt (un dossier par bloc, dossier `descriptors/`, `deploy/`, `docs/`).
 2. Rédiger `docs/architecture.md` et un schéma Mermaid des flux.
@@ -146,21 +146,29 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 
 | Dossier | Contenu |
 |---|---|
-| `crates/sesame-core` | Cœur Rust sans dépendance fournisseur : modèle des descripteurs (`descriptor.rs`), interfaces `SecretStore` / `SessionStore` / `AccountRegistry` / `AuditSink` (`ports.rs`), types secrets (`secret.rs`), identité, audit, logs |
-| `crates/sesame-portal`, `crates/sesame-proxy` | Binaires Rust (squelettes : `/healthz`) |
+| `crates/sesame-core` | Cœur Rust sans dépendance fournisseur : modèle des descripteurs (`descriptor.rs`), interfaces `SecretStore` / `SessionStore` / `AccountRegistry` / `AuditSink` (`ports.rs`), types secrets (`secret.rs`), chiffrement / jetons (`crypto.rs`), implémentations en mémoire (`memory.rs`), tests de contrat (`contract.rs`, feature `contract`), identité, audit, config |
+| `crates/sesame-portal` | Portail : OIDC (`oidc.rs`), page « Mes applications » (`catalog.rs`), session portail, `return_to` sûr |
+| `crates/sesame-proxy` | Moteur de proxy : rejeu (`replay.rs`), formulaire / CSRF (`form.rs`), jar serveur (`jar.rs`), conditions (`matcher.rs`), réécriture (`rewrite.rs`), relais (`lib.rs`) |
+| `crates/sesame-store-postgres` | `SessionStore` + `AccountRegistry` sur PostgreSQL, migrations dans `migrations/` |
+| `crates/sesame-secrets-openbao` | `SecretStore` OpenBao / Vault (AppRole, KV v2), API HTTP sans SDK |
 | `onboarding/`, `admin/` | Paquets Python (squelettes) |
 | `schemas/app-descriptor.schema.json` | Schéma du descripteur : **fait foi**, contrat entre Rust et Python |
 | `descriptors/` | Descripteurs YAML (`fake-app.yaml` = exemple de référence, utilisé par les tests Rust) |
-| `dev/` | Appli factice (Flask), realm Keycloak, seed OpenBao |
+| `dev/` | Appli factice (Flask), realm Keycloak, seed OpenBao, seed du registre des comptes |
+| `tests/e2e/` | Parcours bout en bout Playwright sur le compose de dev |
 | `deploy/` | `nginx/nginx.conf`, `docker/rust.Dockerfile` (`--build-arg BIN=…`) |
-| `docs/` | `architecture.md`, `descriptor.md`, `dev.md`, `decisions/` (ADR) |
+| `docs/` | `architecture.md`, `descriptor.md`, `configuration.md` (variables d'environnement), `dev.md`, `decisions/` (ADR) |
 
 Toute modification du schéma du descripteur se reporte dans `descriptor.rs`, `docs/descriptor.md` et `descriptors/fake-app.yaml`.
+Toute nouvelle variable d'environnement se documente dans `docs/configuration.md`.
+Tests du proxy : banc commun dans `crates/sesame-proxy/tests/common/` (appli simulée + implémentations en mémoire) ; les tests de non-fuite des logs vivent dans un binaire de test séparé (`no_leak.rs`).
 
 ## Commandes
 
 ```sh
 make test                  # cargo test + pytest (dev/fake-app)
+make test-postgres         # tests de contrat PostgreSQL sur une base jetable (Docker)
+make e2e                   # parcours bout en bout Playwright (après make up)
 make lint                  # cargo fmt --check, clippy -D warnings, ruff, validation des descripteurs
 make validate-descriptors  # uv run scripts/validate_descriptors.py
 make deny                  # licences des dépendances Rust (cargo-deny)

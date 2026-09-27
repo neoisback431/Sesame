@@ -84,7 +84,7 @@ Compléments :
 - **Accès direct** : un favori ou un lien profond (`https://compta.sesame.example/factures/42`) fonctionne aussi. SSO si nécessaire, rejeu, puis la page demandée.
 - **Échec du rejeu** : le proxy affiche une page d'erreur neutre (identifiant de corrélation, lien de retour au portail) et passe le compte à l'état `failed` dans le registre. La tuile le signale jusqu'à ce qu'un administrateur corrige le compte.
 - **Retour au portail** : par son adresse, ou via le lien des pages d'erreur. Sesame n'injecte pas de bandeau dans les pages des applis, ce serait fragile et risqué.
-- **Déconnexion** : se déconnecter du portail détruit la session portail et toutes les sessions applicatives. Fermer aussi la session chez le fournisseur d'identité (RP-initiated logout) est une option de configuration, désactivée par défaut.
+- **Déconnexion** : se déconnecter du portail détruit la session portail et toutes les sessions applicatives. Fermer aussi la session chez le fournisseur d'identité (RP-initiated logout) sera une option de configuration, désactivée par défaut (pas encore implémentée).
 
 ## Registre des comptes
 
@@ -189,51 +189,18 @@ Règles :
 
 ## Magasin de sessions (PostgreSQL)
 
-Schéma indicatif, finalisé avec le MVP :
+Schéma : [`crates/sesame-store-postgres/migrations/`](../crates/sesame-store-postgres/migrations/). Les migrations sont appliquées au démarrage du portail et du proxy (verrou consultatif, sûr en parallèle).
 
-```sql
-CREATE TABLE portal_sessions (
-    id_hash      bytea PRIMARY KEY,      -- SHA-256 du jeton du cookie, jamais le jeton lui-même
-    issuer       text        NOT NULL,
-    subject      text        NOT NULL,
-    user_key     text        NOT NULL,
-    display_name text,
-    groups       text[]      NOT NULL DEFAULT '{}',
-    created_at   timestamptz NOT NULL,
-    last_seen_at timestamptz NOT NULL,
-    expires_at   timestamptz NOT NULL
-);
-
-CREATE TABLE app_sessions (
-    portal_session bytea NOT NULL REFERENCES portal_sessions(id_hash) ON DELETE CASCADE,
-    app_id         text  NOT NULL,
-    cookies        bytea NOT NULL,       -- jar de cookies chiffré (AES-256-GCM)
-    created_at     timestamptz NOT NULL,
-    last_used_at   timestamptz NOT NULL,
-    expires_at     timestamptz NOT NULL,
-    PRIMARY KEY (portal_session, app_id)
-);
-
--- Registre des comptes : aucun secret (voir « Registre des comptes »).
-CREATE TABLE app_accounts (
-    app_id        text        NOT NULL,
-    user_key      text        NOT NULL,
-    status        text        NOT NULL CHECK (status IN ('active', 'failed', 'disabled')),
-    status_reason text,                   -- code court, jamais un contenu de réponse
-    created_at    timestamptz NOT NULL,
-    updated_at    timestamptz NOT NULL,
-    last_login_at timestamptz,
-    PRIMARY KEY (app_id, user_key)
-);
-
-CREATE INDEX ON portal_sessions (expires_at);
-CREATE INDEX ON app_sessions (expires_at);
-```
+| Table | Contenu |
+|---|---|
+| `portal_sessions` | Empreinte SHA-256 du jeton du cookie (jamais le jeton), identité, groupes, échéance |
+| `app_sessions` | Jar de cookies applicatifs **chiffré** (AES-256-GCM, lié par AAD au couple session / appli), dates, échéance ; `ON DELETE CASCADE` depuis la session portail |
+| `app_accounts` | Registre des comptes (voir plus haut), sans secret |
 
 - **Jeton portail** : 256 bits aléatoires dans le cookie. La base n'en stocke que le hash, si bien qu'une fuite de la base ne permet pas de voler des sessions.
 - **Cookies applicatifs chiffrés au repos**, avec une clé fournie par configuration. Un fournisseur de clé (KMS, coffre) sera branché derrière une interface.
 - **Déconnexion du portail** : suppression de la session portail, puis `ON DELETE CASCADE` sur les sessions applicatives.
-- **Purge** : tâche périodique `DELETE … WHERE expires_at < now()`. PostgreSQL n'a pas de TTL natif.
+- **Purge** : le proxy supprime toutes les 5 minutes les sessions dont `expires_at` est passé. PostgreSQL n'a pas de TTL natif.
 - **Durées de vie** : la session applicative expire au plus tôt des trois échéances `session.max_ttl`, `session.idle_ttl` et fin de la session portail.
 
 ## Coffre de secrets
@@ -271,6 +238,8 @@ Champs : horodatage UTC, action, résultat, acteur (`issuer` + `subject`), appli
 ## Fournisseur d'identité
 
 - OIDC générique : discovery (`/.well-known/openid-configuration`), flux *authorization code* avec PKCE, vérification de `state`, `nonce`, `iss`, `aud` et de la signature.
+- L'état de la connexion en cours (`state`, `nonce`, vérificateur PKCE, `return_to`) voyage dans un cookie chiffré (AES-256-GCM, 10 minutes, `Path=/auth`) : le portail reste sans état et peut être répliqué.
+- `return_to` n'accepte que le portail et les hôtes publics déclarés dans les descripteurs, avec le même schéma : pas de redirection ouverte.
 - Mapping de claims configurable : `user_key` (défaut `sub`), `groups` (défaut `groups`), libellé (`email`, `name`). Un claim `groups` absent vaut « aucun groupe ».
 - Particularités d'Entra ID gérées par configuration : `oid` comme clé, identifiants de groupes (GUID) dans le claim `groups`, *groups overage* au-delà de 200 groupes. Ce dernier cas relève d'un module optionnel, hors du cœur.
 - En dev : Keycloak (realm `sesame`, voir `dev/keycloak/`).

@@ -43,6 +43,17 @@ test:rust:
   stage: test
   script: [make test-rust]
 
+test:postgres:
+  extends: .rust
+  stage: test
+  services:
+    - name: postgres:17-alpine
+      alias: postgres
+  variables:
+    POSTGRES_PASSWORD: test
+    SESAME_TEST_DATABASE_URL: postgres://postgres:test@postgres:5432/postgres
+  script: [cargo test -p sesame-store-postgres --locked]
+
 test:python:
   extends: .python
   stage: test
