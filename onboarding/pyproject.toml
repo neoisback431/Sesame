@@ -1,11 +1,32 @@
 [project]
 name = "sesame-onboarding"
 version = "0.1.0"
-description = "Module d'embarquement Sesame : capture d'un formulaire de login (Playwright) et génération de descripteur."
+description = "Module d'embarquement Sesame : capture d'un formulaire de login, génération et vérification de descripteur, test de santé."
 license = "Apache-2.0"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "pyyaml>=6",
+    "jsonschema>=4.21",
+]
+
+[project.optional-dependencies]
+# Navigateur headless : nécessaire à la capture uniquement (pas au test de santé).
+capture = ["playwright>=1.47"]
+
+[project.scripts]
+sesame-onboard = "sesame_onboarding.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "flask>=3.0", "playwright>=1.47"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sesame_onboarding"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
