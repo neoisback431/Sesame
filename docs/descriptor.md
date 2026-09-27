@@ -10,7 +10,7 @@ Exemple complet : [`descriptors/fake-app.yaml`](../descriptors/fake-app.yaml). G
 
 | Section | Rôle |
 |---|---|
-| `metadata` | `id` stable (clé du coffre, des sessions et de l'audit), nom, `revision` incrémentée à chaque modification validée, responsable |
+| `metadata` | `id` stable (clé du coffre, des sessions et de l'audit), nom, `revision` incrémentée à chaque modification validée (tenue par Sesame pour les descripteurs en base), responsable |
 | `spec.upstream` | URL interne de l'appli, TLS, délai, en-tête `Host` éventuel |
 | `spec.public.host` | Nom d'hôte public sous lequel Sesame expose l'appli (une appli par hôte) |
 | `spec.access` | Habilitations : `groups` et / ou `users` (valeurs issues des claims OIDC) |
@@ -53,9 +53,15 @@ Une condition vaut si **toutes** ses propriétés sont vraies. Un ensemble `any_
 
 `failure` est évalué avant `success`. Ces conditions portent sur la réponse au POST de login, avant de suivre les redirections.
 
+## Fichiers Git ou base
+
+Un descripteur vit soit dans un fichier YAML de `descriptors/` (relu par merge request, lecture seule dans l'administration), soit en base, créé et modifié dans l'administration (formulaire guidé puis éditeur YAML, historique des révisions). Voir [ADR 0014](decisions/0014-applis-en-base.md). Le portail et le proxy fusionnent les deux sources : fichiers d'abord, puis base ; un descripteur en base dont l'`id` ou l'hôte public est déjà pris est écarté.
+
 ## Contrôles
 
 - `make validate-descriptors` vérifie les fichiers contre le schéma JSON et l'unicité des `id`.
-- Au démarrage, le moteur de proxy refait ces contrôles et en ajoute d'autres : regex compilables, `from_secret` correspondant à une clé de `credentials.keys`, etc. Un descripteur invalide empêche le démarrage.
+- Au démarrage, le moteur de proxy refait ces contrôles et en ajoute d'autres : regex compilables, `from_secret` correspondant à une clé de `credentials.keys`, etc. Un fichier invalide empêche le démarrage ; un descripteur en base invalide est écarté et journalisé, sans interrompre le service.
+- L'éditeur de l'administration applique le schéma et ces mêmes contrôles avant d'enregistrer. Les regex doivent rester dans la syntaxe commune à Python et à la crate `regex` : pas de références arrière ni d'assertions de voisinage.
+- Pour un descripteur en base, `sesame-onboard verify` s'utilise sur une copie du YAML de l'éditeur enregistrée dans un fichier. `sesame-onboard health` ne couvre pour l'instant que les fichiers.
 - `sesame-onboard verify <descripteur>` rejoue le login avec un compte de test, avec les règles du proxy (HTML brut, sans JavaScript), et indique la cause d'un échec.
 - `sesame-onboard fingerprint <descripteur>` calcule l'empreinte à reporter dans `spec.health.form_fingerprint` ; `sesame-onboard health` la surveille ensuite.

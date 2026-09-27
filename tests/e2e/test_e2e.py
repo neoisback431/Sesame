@@ -3,7 +3,8 @@
 
 Navigateur réel (Playwright) : SSO Keycloak, page « Mes applications », rejeu
 du login de l'appli factice, expiration, habilitations, déconnexion,
-administration (enregistrement d'un compte, désactivation, suppression),
+administration (enregistrement d'un compte, désactivation, suppression, création
+d'une appli servie sans redémarrage),
 absence de fuite de secrets (navigateur et logs des conteneurs).
 
 Variables : ``SESAME_E2E_CHROMIUM`` (chemin d'un Chromium déjà installé).
@@ -22,6 +23,7 @@ from playwright.sync_api import Browser, Page, expect, sync_playwright
 ROOT = Path(__file__).resolve().parents[2]
 PORTAL = "https://sesame.localhost:8443/"
 APP = "https://fake-app.sesame.localhost:8443/"
+APP_BIS = "https://fake-app-bis.sesame.localhost:8443/"  # appli créée dans l'administration
 ADMIN = "https://admin.sesame.localhost:8443/"
 APP_PASSWORD = "dev-amartin-app-password"  # valeur de dev, voir dev/openbao/seed.sh
 CAROL_APP_PASSWORD = "dev-cdupont-app-password"  # compte de carol dans l'appli factice
@@ -185,6 +187,65 @@ def test_admin_provisions_an_account_then_user_gets_in(browser: Browser):
     admin.context.close()
 
 
+def test_app_created_in_admin_is_served_without_restart(browser: Browser):
+    """Appli créée dans l'UI (formulaire guidé + éditeur), servie par le proxy et affichée
+    par le portail après rechargement à chaud, sans redémarrer aucun service."""
+    admin = login(browser, "admin", start=f"{ADMIN}login")
+    admin.get_by_role("link", name="Nouvelle application").click()
+    for field, value in {
+        "id": "fake-app-bis",
+        "name": "Appli factice bis",
+        "public_host": "fake-app-bis.sesame.localhost:8443",
+        "base_url": "http://fake-app:8000",
+        "groups": "fake-app-users",
+        "form_selector": "form#login-form",
+        "csrf_field": "csrf_token",
+        "session_cookie": "FAKEAPPSESSID",
+        "failure_text": "Identifiants invalides",
+    }.items():
+        admin.fill(f"#{field}", value)
+    admin.get_by_role("button", name="Continuer vers l'éditeur").click()
+    admin.get_by_role("button", name="Vérifier").click()
+    expect(admin.get_by_role("status")).to_contain_text("Descripteur valide")
+    admin.get_by_role("button", name="Créer l'application").click()
+    expect(admin.get_by_role("status")).to_contain_text("créée")
+    admin.fill("#user_key", "alice")
+    admin.fill("#cred_username", "amartin")
+    admin.fill("#cred_password", APP_PASSWORD)
+    admin.get_by_role("button", name="Enregistrer").click()
+    expect(admin.get_by_role("status")).to_contain_text("enregistré et activé")
+
+    alice = login(browser, "alice")
+    tile = alice.get_by_role("link", name=re.compile("Appli factice bis"))
+    for _ in range(30):  # SESAME_DESCRIPTORS_RELOAD : 10 s par défaut
+        if tile.count():
+            break
+        alice.wait_for_timeout(1000)
+        alice.reload()
+    expect(tile).to_have_attribute("href", APP_BIS)
+    tile.click()
+    expect(alice.locator("h1")).to_have_text("Bonjour amartin")
+    assert "FAKEAPPSESSID" not in browser_cookie_names(alice)
+
+    # Suppression : refusée tant qu'il reste un compte, puis l'appli n'est plus servie.
+    admin.once("dialog", lambda d: d.accept())
+    admin.locator("tr", has_text="alice").get_by_role("button", name="Supprimer").click()
+    expect(admin.get_by_role("status")).to_contain_text("supprimé")
+    admin.once("dialog", lambda d: d.accept())
+    admin.get_by_role("button", name="Supprimer l'application").click()
+    expect(admin.get_by_role("status")).to_contain_text("supprimée")
+    status = 0
+    for _ in range(30):
+        resp = alice.goto(APP_BIS)
+        status = resp.status if resp else 0
+        if status == 404:
+            break
+        alice.wait_for_timeout(1000)
+    assert status == 404
+    alice.context.close()
+    admin.context.close()
+
+
 def test_audit_trail_and_no_secret_in_logs():
     logs = compose("logs", "--no-color", "portal", "proxy", "admin", "nginx")
     assert APP_PASSWORD not in logs and CAROL_APP_PASSWORD not in logs
@@ -200,6 +261,8 @@ def test_audit_trail_and_no_secret_in_logs():
         "credential_written",
         "credential_deleted",
         "account_status_changed",
+        "descriptor_created",
+        "descriptor_deleted",
     ):
         assert any(f'"action":"{action}"' in line for line in audit), action
     # Cookies applicatifs chiffrés au repos : pas de valeur en clair dans la base.

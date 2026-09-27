@@ -13,7 +13,8 @@ Durées au format `30s`, `15m`, `8h`. Clés de chiffrement : 32 octets aléatoir
 | `SESAME_COOKIE_NAME` | `sesame_session` | Nom du cookie de session portail |
 | `SESAME_COOKIE_DOMAIN` | aucun | Domaine parent du cookie, pour que les sous-domaines des applis le reçoivent, ex. `sesame.example` |
 | `SESAME_SESSION_TTL` | `8h` | Durée de vie d'une session portail |
-| `SESAME_DESCRIPTORS_DIR` | `descriptors` | Dossier des descripteurs d'applis |
+| `SESAME_DESCRIPTORS_DIR` | `descriptors` | Dossier des descripteurs en fichiers (Git, chargés au démarrage ; un fichier invalide empêche le démarrage). Absent : aucun descripteur en fichier |
+| `SESAME_DESCRIPTORS_RELOAD` | `10s` | Intervalle de vérification des descripteurs en base (créés dans l'administration). Le catalogue n'est rechargé que s'il a changé ; une appli créée, modifiée ou supprimée est prise en compte sans redémarrage |
 | `SESAME_DATABASE_URL` 🔒 | requis | Connexion PostgreSQL |
 | `SESAME_PORTAL_STATE_KEY` 🔒 | requis | Clé chiffrant l'état OIDC temporaire |
 | `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre le fournisseur d'identité |
@@ -35,7 +36,8 @@ URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_PUBLI
 | `SESAME_PORTAL_URL` | requis | URL publique du portail (redirections de connexion, liens de retour) |
 | `SESAME_COOKIE_NAME` | `sesame_session` | Identique au portail |
 | `SESAME_COOKIE_DOMAIN` | aucun | Identique au portail |
-| `SESAME_DESCRIPTORS_DIR` | `descriptors` | Dossier des descripteurs d'applis |
+| `SESAME_DESCRIPTORS_DIR` | `descriptors` | Identique au portail |
+| `SESAME_DESCRIPTORS_RELOAD` | `10s` | Identique au portail |
 | `SESAME_DATABASE_URL` 🔒 | requis | Connexion PostgreSQL |
 | `SESAME_SESSION_ENCRYPTION_KEY` 🔒 | requis | Clé chiffrant les cookies applicatifs au repos |
 | `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre les applis et le coffre |
@@ -57,9 +59,9 @@ URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_PUBLI
 | `SESAME_ADMIN_SESSION_KEY` 🔒 | requis | Clé de signature du cookie de session (longue chaîne aléatoire) |
 | `SESAME_ADMIN_SESSION_TTL_SECS` | `3600` | Durée de la session d'administration |
 | `SESAME_ADMIN_GROUP` | `sesame-admins` | Groupe (claim) requis pour accéder à l'UI |
-| `SESAME_DESCRIPTORS_DIR` | `descriptors` | Dossier des descripteurs (lecture seule) |
-| `SESAME_SCHEMA_FILE` | `schemas/app-descriptor.schema.json` | Schéma JSON des descripteurs |
-| `SESAME_DATABASE_URL` 🔒 | requis | Connexion PostgreSQL (registre des comptes) |
+| `SESAME_DESCRIPTORS_DIR` | `descriptors` | Dossier des descripteurs en fichiers, affichés en lecture seule |
+| `SESAME_SCHEMA_FILE` | `schemas/app-descriptor.schema.json` | Schéma JSON contre lequel sont validés les descripteurs saisis dans l'éditeur |
+| `SESAME_DATABASE_URL` 🔒 | requis | Connexion PostgreSQL (registre des comptes, descripteurs en base) |
 | `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre le fournisseur d'identité et le coffre |
 | `SESAME_OIDC_ISSUER`, `SESAME_OIDC_CLIENT_ID`, `SESAME_OIDC_CLIENT_SECRET` 🔒, `SESAME_OIDC_SCOPES`, `SESAME_OIDC_USER_KEY_CLAIM`, `SESAME_OIDC_GROUPS_CLAIM` | comme le portail | Client OIDC **dédié** à l'administration |
 | `SESAME_OPENBAO_ADDR`, `SESAME_OPENBAO_MOUNT`, `SESAME_OPENBAO_PATH_PREFIX`, `SESAME_OPENBAO_NAMESPACE` | comme le proxy | Coffre |

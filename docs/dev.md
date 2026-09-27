@@ -25,7 +25,7 @@ Le certificat est signé par une CA de dev, `deploy/nginx/certs/ca.crt`. Importe
 Les navigateurs résolvent `*.localhost` vers la boucle locale. Pour les outils en ligne de commande sous Linux, ajoutez si besoin dans `/etc/hosts` :
 
 ```
-127.0.0.1 sesame.localhost idp.sesame.localhost fake-app.sesame.localhost admin.sesame.localhost
+127.0.0.1 sesame.localhost idp.sesame.localhost fake-app.sesame.localhost admin.sesame.localhost fake-app-bis.sesame.localhost
 ```
 
 ## Comptes de dev
@@ -63,7 +63,8 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 3. Avec `bob` / `bob`, aucune tuile n'apparaît et l'accès direct à l'appli est refusé.
 4. `docker compose restart fake-app` fait perdre ses sessions à l'appli. Rechargez la page : Sesame rejoue le login sans que vous le voyiez.
 5. Avec `carol` / `carol`, aucune tuile : elle est habilitée mais n'a pas de compte. Dans https://admin.sesame.localhost:8443 (`admin` / `admin`), ouvrez « Appli factice » et enregistrez `carol` avec `cdupont` / `dev-cdupont-app-password`. Rechargez le portail de carol : la tuile apparaît.
-6. `docker compose logs proxy admin | grep audit` montre les événements d'audit (lecture du coffre, rejeu, expiration, actions d'administration).
+6. Dans l'administration, « Nouvelle application » crée une appli sans redémarrage : par exemple `fake-app-bis`, hôte public `fake-app-bis.sesame.localhost:8443`, URL `http://fake-app:8000`, groupe `fake-app-users`, sélecteur `form#login-form`, champ CSRF `csrf_token`, cookie `FAKEAPPSESSID`. Après un compte enregistré pour `alice`, la tuile apparaît dans son portail sous une dizaine de secondes (`SESAME_DESCRIPTORS_RELOAD`).
+7. `docker compose logs proxy admin | grep audit` montre les événements d'audit (lecture du coffre, rejeu, expiration, actions d'administration).
 
 ## Commandes
 

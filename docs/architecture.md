@@ -230,6 +230,7 @@ Chaque lecture de secret et chaque rejeu produit un événement, succès ou éch
 | `account_status_changed` | Proxy, UI d'admin | Changement d'état d'un compte du registre (`active`, `failed`, `disabled`) |
 | `admin_login` | UI d'admin | Connexion d'un administrateur |
 | `credential_written` / `credential_deleted` | UI d'admin | Écriture ou suppression d'identifiants dans le coffre |
+| `descriptor_created` / `descriptor_updated` / `descriptor_deleted` | UI d'admin | Création, modification ou suppression d'un descripteur en base (`reason` : `revision:<n>` en succès, cause en échec) |
 | `secret_read` | Proxy | Lecture du coffre (succès ou échec) |
 | `login_replay` | Proxy | Rejeu du login (succès, échec, abandon) |
 | `app_session_expired` | Proxy | Expiration détectée |
@@ -252,19 +253,39 @@ Application Python (FastAPI, pages rendues côté serveur) sur son propre nom d'
 
 | Écran / action | Effet |
 |---|---|
-| Applications | Liste des descripteurs (lecture seule) avec le nombre de comptes par état |
+| Applications | Liste des applis (fichiers Git et base) avec le nombre de comptes par état, et les descripteurs en base écartés du catalogue (à corriger) |
 | Appli → comptes | Registre des comptes de l'appli : état, raison d'un échec, dernière connexion |
 | Enregistrer un compte | Identifiants écrits dans le coffre, **puis** compte `active` dans le registre. Réenregistrer remplace les identifiants et réactive un compte `failed` |
 | Désactiver / réactiver | Change l'état dans le registre (`failed` reste réservé au proxy). La désactivation **révoque les sessions applicatives ouvertes** de l'utilisateur sur l'appli : l'accès est coupé immédiatement |
 | Supprimer | Supprime les identifiants du coffre (toutes versions) puis l'entrée du registre, et révoque les sessions ouvertes |
 | Utilisateurs | Recherche d'un utilisateur et liste de tous ses comptes, toutes applis confondues, avec les mêmes actions |
 | Tout désactiver | Départ ou suspension : désactive tous les comptes de l'utilisateur, y compris ceux d'applis dont le descripteur a été retiré, et révoque leurs sessions |
-| Ajouter une application | Hors de l'UI : descripteur Git (gabarit, `sesame-onboard verify`, merge request), marche à suivre rappelée dans l'UI |
+| Nouvelle application | Formulaire guidé qui produit un premier jet, puis éditeur YAML : « Vérifier » (schéma et contrôles du proxy, sans enregistrer) et « Créer ». L'appli est en base ; portail et proxy la chargent sans redémarrage |
+| Modifier le descripteur | Éditeur YAML, applis en base uniquement. Refusé si la révision a changé depuis l'ouverture (deux administrateurs ne s'écrasent pas). L'`id` ne change pas |
+| Historique des révisions | Chaque création, modification ou suppression : date, auteur, document |
+| Supprimer l'application | Applis en base uniquement, et seulement sans compte restant : les identifiants resteraient sinon dans le coffre sans apparaître nulle part |
+| Applis décrites par un fichier | Lecture seule : modification par merge request, rechargées au redémarrage |
 
 - **Accès** : OIDC auprès du même fournisseur d'identité, avec un client dédié. Membres du groupe d'administrateurs uniquement (`SESAME_ADMIN_GROUP`) ; les autres reçoivent `access_denied`.
 - **Coffre** : AppRole de l'admin avec une policy d'écriture sans lecture. Un identifiant saisi ne peut jamais être relu, ni dans l'UI ni par l'API du coffre.
 - **Protections web** : jeton CSRF sur chaque action, cookie de session signé (`HttpOnly`, `Secure`, `SameSite=Lax`, 1 h) régénéré à la connexion, redirection après connexion limitée aux chemins locaux.
-- **Audit** : `admin_login`, `credential_written`, `credential_deleted`, `account_status_changed`, `access_denied`, avec l'administrateur comme acteur et le compte visé dans `target_user`.
+- **Audit** : `admin_login`, `credential_written`, `credential_deleted`, `account_status_changed`, `access_denied`, `descriptor_created`, `descriptor_updated`, `descriptor_deleted`, avec l'administrateur comme acteur et le compte visé dans `target_user`.
+
+### Catalogue des applis : fichiers et base
+
+Voir [ADR 0014](decisions/0014-applis-en-base.md).
+
+```mermaid
+flowchart LR
+    G[descriptors/*.yaml<br/>Git, lecture seule] -- au démarrage --> C
+    A[UI d'admin] -- "création, modification, suppression<br/>(révision attendue)" --> T[(app_descriptors<br/>+ app_descriptor_history)]
+    T -- "version = dernier id de l'historique<br/>vérifiée toutes les SESAME_DESCRIPTORS_RELOAD" --> C[Catalogue<br/>portail et proxy]
+```
+
+- **Fusion** : fichiers d'abord, puis base dans l'ordre des identifiants. Un descripteur en base invalide, ou dont l'`id` ou l'hôte public est déjà pris, est écarté et journalisé ; le service continue. L'administration applique les mêmes règles et affiche les descripteurs écartés.
+- **Rechargement à chaud** : le portail et le proxy relisent le catalogue seulement quand la version (dernier identifiant de l'historique) change, et l'échangent sans interrompre les requêtes en cours.
+- **Concurrence** : chaque écriture indique la révision qu'elle remplace ; une révision périmée est refusée. Un index unique empêche deux descripteurs en base de partager un hôte public.
+- **Aucun secret** : un descripteur ne référence les identifiants que par nom de clé (`credentials.keys`).
 
 ## Module d'embarquement
 
@@ -275,7 +296,7 @@ Le moteur de proxy rejoue le login **sans exécuter de JavaScript** : il lit le 
 1. Un administrateur rédige le descripteur à partir de [`descriptors/TEMPLATE.yaml.example`](../descriptors/TEMPLATE.yaml.example) : champs du formulaire, jetons CSRF, conditions de succès, cookie de session, expiration.
 2. `sesame-onboard verify <descripteur>` rejoue le login avec un compte de test, avec les mêmes règles que le proxy (champs cachés, CSRF, conditions, cookie de session). Le résultat indique la cause d'un échec, par exemple `login_form_not_found_in_raw_html` pour un formulaire construit en JavaScript, ou `csrf_token_not_found`, `login_rejected`, `session_cookie_missing`.
 3. `sesame-onboard fingerprint <descripteur>` calcule l'empreinte de la structure du formulaire (action, méthode, champs, sans les valeurs), à reporter dans `spec.health.form_fingerprint`.
-4. Un humain relit le descripteur, qui est fusionné par merge request.
+4. Un humain relit le descripteur, qui est fusionné par merge request, ou l'enregistre dans l'éditeur de l'administration.
 5. `sesame-onboard health <dossier>` tourne en tâche périodique (cron, CI, service `health` du compose). Il recalcule l'empreinte **sans identifiants** et sort en erreur si le formulaire a changé (`changed`), a disparu (`form_missing`) ou si l'appli est injoignable (`unreachable`).
 
 Les identifiants du compte de test sont lus dans l'environnement (`SESAME_ONBOARD_<CLÉ>`) ou saisis en masqué. Ils ne sont jamais écrits dans un fichier, dans la sortie ni dans les logs.
@@ -297,7 +318,7 @@ Les identifiants du compte de test sont lus dans l'environnement (`SESAME_ONBOAR
 | Fuite de secret via logs / erreurs | Types secrets non affichables, tests de non-fuite, pages d'erreur génériques |
 | Appli compromise qui pose des cookies sur le domaine parent | Tous les `Set-Cookie` sont capturés par le proxy et n'atteignent jamais le navigateur |
 | Verrouillage de compte par rejeux en boucle | `max_attempts`, attente à délai croissant, alerte |
-| Élévation via l'UI d'admin | Groupe d'administrateurs dédié, audit de chaque action, écriture sans relecture des secrets |
+| Élévation via l'UI d'admin | Groupe d'administrateurs dédié, audit de chaque action (y compris les descripteurs : un administrateur peut changer l'hôte ou l'URL amont d'une appli), écriture sans relecture des secrets, historique des révisions |
 | Accès direct aux applis sans passer par Sesame | Hors de Sesame : filtrage réseau recommandé (seul le proxy joint les applis) |
 
 ## Environnement de dev

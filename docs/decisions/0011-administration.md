@@ -1,6 +1,6 @@
 # 0011. UI d'administration : descripteurs en Git, FastAPI
 
-**Statut** : acceptée (2026-09-27)
+**Statut** : acceptée (2026-09-27). Remplacée en partie par [0014](0014-applis-en-base.md) : les descripteurs peuvent aussi être créés en base depuis l'administration.
 
 ## Contexte
 
