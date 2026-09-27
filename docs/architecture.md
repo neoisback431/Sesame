@@ -329,6 +329,7 @@ sequenceDiagram
 - Pendant l'analyse, aucune requête d'écriture ne sort de l'origine de l'appli ; une seule soumission au plus.
 - Blocages signalés (code de sortie 1) : formulaire absent du HTML brut, page de login hors de l'appli (SSO), captcha, login en plusieurs étapes, soumission non observée. Avertissements : login soumis par JavaScript, champs ajoutés à la soumission, encodage non pris en charge.
 - Non observable sans identifiants : le cookie de session et la réponse de succès. Ils sont marqués « à confirmer » ; `sesame-onboard verify` avec un compte de test les valide.
+- Avec un **compte de test** (admin ou `--test-account`, ADR 0019), le recorder se connecte réellement : requête de login (formulaire ou JavaScript), source de chaque jeton (cookie, meta, champ caché, script), réponse et cookie de session sont observés, et le descripteur proposé est complet.
 
 Hors périmètre initial : login en plusieurs étapes, captcha, MFA applicatif, enregistrement d'une connexion réelle.
 

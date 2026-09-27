@@ -40,22 +40,41 @@ class RecordingResult:
 
 
 class Recorder(Protocol):
-    async def analyze(self, login_url: str, *, probe_failure: bool = False) -> RecordingResult: ...
+    async def analyze(
+        self,
+        login_url: str,
+        *,
+        probe_failure: bool = False,
+        credentials: tuple[str, str] | None = None,
+    ) -> RecordingResult:
+        """``credentials`` : compte de test (connexion réelle), transmis au recorder sans être
+        conservé, journalisé ni audité (ADR 0019)."""
+        ...
 
 
 @dataclass
 class HttpRecorder:
     base_url: str
     token: str = field(repr=False)
-    timeout: float = 30.0
+    # Analyse + connexion réelle éventuelle : deux passages dans le navigateur.
+    timeout: float = 90.0
 
-    async def analyze(self, login_url: str, *, probe_failure: bool = False) -> RecordingResult:
+    async def analyze(
+        self,
+        login_url: str,
+        *,
+        probe_failure: bool = False,
+        credentials: tuple[str, str] | None = None,
+    ) -> RecordingResult:
         url = self.base_url.rstrip("/") + "/record"
+        payload: dict[str, Any] = {"login_url": login_url, "probe_failure": probe_failure}
+        if credentials:
+            payload["username"], payload["password"] = credentials
         try:
             async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
                 resp = await client.post(
                     url,
-                    json={"login_url": login_url, "probe_failure": probe_failure},
+                    json=payload,
                     headers={"Authorization": f"Bearer {self.token}"},
                 )
         except httpx.HTTPError as e:
