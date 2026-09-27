@@ -75,11 +75,11 @@ Le recorder avec compte de test (ADR 0019) détecte ce cas et génère ce bloc.
 
 ### Mode handoff (`spec.session.handoff`)
 
-Réservé aux applis où le proxy est impossible (SPA qui lisent leurs cookies ou gardent un jeton dans le navigateur) **et** où l'exception aux principes 1 et 3 est acceptée (élément de session visible du navigateur ; déconnexion et désactivation non immédiates ; audit limité à la connexion). **Totalement transparent, sans chemin dédié** : à la première arrivée, Sesame rejoue le login, remet la session (cookie et/ou stockage local) et un marqueur, puis redirige vers l'URL demandée ; ensuite il relaie l'appli sans nouveau rejeu, le navigateur portant la session (ses cookies et son en-tête `Authorization` sont relayés).
+Réservé aux applis où le proxy est impossible (SPA qui lisent leurs cookies ou gardent un jeton dans le navigateur) **et** où l'exception aux principes 1 et 3 est acceptée (élément de session visible du navigateur ; déconnexion du portail coupant l'accès via Sesame mais pas la session côté appli ; désactivation effective à l'expiration du marqueur ; audit limité à la connexion). **Totalement transparent, sans chemin dédié** : à la première arrivée, Sesame rejoue le login, remet la session (cookie et/ou stockage local) et un marqueur, puis redirige vers l'URL demandée ; ensuite il relaie l'appli sans nouveau rejeu, le navigateur portant la session (ses cookies, hors ceux de Sesame, et son en-tête `Authorization` sont relayés). Une navigation qui correspond aux règles `expiry` déclenche une nouvelle remise.
 
 - `set_cookies` : noms, parmi `session.cookies`, des cookies capturés à poser sur le navigateur (`Set-Cookie`).
 - `local_storage` : valeurs écrites dans le stockage local, lues dans la réponse JSON au login (`key`, `from_response` = chemin pointé).
-- `redirect_status` : code de la redirection vers `start_path` après la remise (302 ou 303, défaut 303).
+- `redirect_status` : code de la redirection vers l'URL demandée après une remise par cookies seuls (302 ou 303, défaut 303). Avec `local_storage`, une page de remise écrit les valeurs puis redirige elle-même.
 
 ```yaml
 session:
