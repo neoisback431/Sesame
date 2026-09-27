@@ -62,7 +62,6 @@ class App:
         return not self.groups and not self.users
 
 
-
 @dataclass(frozen=True)
 class Rejected:
     """Descripteur en base écarté du catalogue (le portail et le proxy l'ignorent aussi)."""
