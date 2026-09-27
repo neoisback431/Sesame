@@ -495,7 +495,12 @@ def to_descriptor(
 ) -> Draft:
     todo: list[str] = []
     host = urlsplit(rec.base_url).hostname or "appli"
-    app_id = app_id or _slug(host.split(".")[0])
+    # metadata.id doit être en minuscules-tirets (schéma) : on normalise l'identifiant
+    # fourni comme celui déduit de l'hôte, pour ne jamais proposer un descripteur invalide.
+    requested_id = app_id or host.split(".")[0]
+    app_id = _slug(requested_id)
+    if app_id != requested_id:
+        todo.append(f"metadata.id normalisé en « {app_id} » (minuscules et tirets requis)")
     if not public_host:
         public_host = f"{app_id}.sesame.example"
         todo.append("spec.public.host : hôte public exposé par Sesame")
