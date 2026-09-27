@@ -26,11 +26,6 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
         include_bytes!("../assets/logo-64.png"),
     ),
     (
-        "logo-256.webp",
-        "image/webp",
-        include_bytes!("../assets/logo-256.webp"),
-    ),
-    (
         "favicon-32.png",
         "image/png",
         include_bytes!("../assets/favicon-32.png"),
