@@ -519,3 +519,30 @@ def test_test_account_handles_a_token_obtained_from_an_api(client, browser):
     finally:
         app.srv.shutdown()
     assert "api-tok-" not in repr(rec) + record.render(draft, rec) + "\n".join(record.summary(rec))
+
+
+def test_login_form_rendered_late_by_javascript_is_found(client, browser):
+    """Formulaire inséré par le JavaScript après le chargement (SPA lente) : attendu, pas manqué."""
+    app = Flask(__name__)
+
+    @app.get("/login")
+    def page():
+        return (
+            "<html><body><div id=root>Chargement…</div><script>setTimeout(() => {"
+            "document.getElementById('root').innerHTML = '<form id=late action=/login method=post>"
+            "<input name=user><input type=password name=pw><button>OK</button></form>'; }, 1500);"
+            "</script></body></html>"
+        )
+
+    @app.post("/login")
+    def submit():
+        return Response("", 401)
+
+    srv = Recorder(app)
+    try:
+        rec = run(f"{srv.base}/login", client, browser)
+    finally:
+        srv.srv.shutdown()
+    assert (rec.form_selector, rec.password_field) == ("form#late", "pw")
+    assert "login_form_not_found" not in rec.blocking
+    assert "login_form_not_found_in_raw_html" in rec.blocking + rec.warnings
