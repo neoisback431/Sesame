@@ -9,10 +9,26 @@ repository.workspace = true
 
 [dependencies]
 sesame-core.workspace = true
+sesame-store-postgres.workspace = true
+sesame-secrets-openbao.workspace = true
 axum.workspace = true
+bytes.workspace = true
+cookie.workspace = true
+futures-util.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+scraper.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

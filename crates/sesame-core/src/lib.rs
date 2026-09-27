@@ -7,8 +7,10 @@
 //! qui transportent des secrets sans jamais les afficher.
 
 pub mod audit;
+pub mod config;
 #[cfg(any(test, feature = "contract"))]
 pub mod contract;
+pub mod cookies;
 pub mod crypto;
 pub mod descriptor;
 pub mod html;

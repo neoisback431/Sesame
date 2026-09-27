@@ -1,6 +1,6 @@
 [package]
 name = "sesame-portal"
-description = "Portail d'authentification Sesame : OIDC, session portail, habilitations."
+description = "Portail d'authentification Sesame : OIDC, session portail, page « Mes applications »."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,10 +9,18 @@ repository.workspace = true
 
 [dependencies]
 sesame-core.workspace = true
+sesame-store-postgres.workspace = true
 axum.workspace = true
+base64.workspace = true
+openidconnect.workspace = true
+reqwest.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

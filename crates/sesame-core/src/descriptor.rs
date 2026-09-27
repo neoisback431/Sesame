@@ -402,6 +402,41 @@ impl AppDescriptor {
     }
 }
 
+/// Charge tous les `*.yaml` / `*.yml` d'un dossier. Un descripteur invalide,
+/// un `metadata.id` ou un `public.host` en double font échouer le chargement.
+pub fn load_dir(dir: &Path) -> Result<Vec<AppDescriptor>, DescriptorError> {
+    let io = |source| DescriptorError::Io {
+        path: dir.display().to_string(),
+        source,
+    };
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .map_err(io)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|ext| ext == "yaml" || ext == "yml"))
+        .collect();
+    paths.sort();
+    let descriptors = paths
+        .iter()
+        .map(|p| AppDescriptor::from_file(p))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut seen = std::collections::HashSet::new();
+    for d in &descriptors {
+        if !seen.insert(("id", d.metadata.id.as_str())) {
+            return Err(DescriptorError::Invalid(format!(
+                "metadata.id en double : {}",
+                d.metadata.id
+            )));
+        }
+        if !seen.insert(("host", d.spec.public.host.as_str())) {
+            return Err(DescriptorError::Invalid(format!(
+                "public.host en double : {}",
+                d.spec.public.host
+            )));
+        }
+    }
+    Ok(descriptors)
+}
+
 fn compile(pattern: &str) -> Result<Regex, String> {
     Regex::new(pattern).map_err(|e| format!("regex « {pattern} » : {e}"))
 }
