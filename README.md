@@ -4,7 +4,7 @@ Portail SSO à injection de credentials côté serveur, pour les applications we
 
 L'utilisateur s'authentifie une fois auprès du fournisseur d'identité de son organisation (OIDC : Entra ID, Keycloak, Okta…). Sesame rejoue ensuite, côté serveur, la connexion à chaque application avec des identifiants lus dans un coffre de secrets (OpenBao, Vault…). **Aucun mot de passe applicatif ni cookie de session applicatif n'atteint le navigateur.**
 
-> État : MVP. Connexion OIDC, page « Mes applications », rejeu du login, injection de session et détection d'expiration fonctionnent de bout en bout sur l'appli factice. L'UI d'administration et le module d'embarquement restent à faire.
+> État : MVP. Connexion OIDC, page « Mes applications », rejeu du login, injection de session et détection d'expiration fonctionnent de bout en bout sur l'appli factice. L'UI d'administration gère le registre des comptes et les identifiants applicatifs. Le module d'embarquement reste à faire.
 
 ## Documentation
 
@@ -31,7 +31,7 @@ make up
 | `crates/sesame-store-postgres` | Magasin de sessions et registre des comptes PostgreSQL |
 | `crates/sesame-secrets-openbao` | Coffre OpenBao / Vault |
 | `onboarding/` | Module d'embarquement (Python, Playwright) |
-| `admin/` | UI web d'administration (Python) |
+| `admin/` | UI web d'administration (Python, FastAPI) |
 | `schemas/` | Schéma JSON du descripteur d'appli |
 | `descriptors/` | Descripteurs d'applis (YAML versionné) |
 | `deploy/` | Nginx, Dockerfiles |

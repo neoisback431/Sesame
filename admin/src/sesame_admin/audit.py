@@ -46,7 +46,7 @@ class StdoutAuditSink:
         self._lock = threading.Lock()
 
     async def record(self, event: AuditEvent) -> None:
-        line = json.dumps({"log_type": "audit", **asdict(event)}, ensure_ascii=False)
+        line = json.dumps({"log_type": "audit", **asdict(event)}, ensure_ascii=False, separators=(",", ":"))
         with self._lock:
             sys.stdout.write(line + "\n")
             sys.stdout.flush()

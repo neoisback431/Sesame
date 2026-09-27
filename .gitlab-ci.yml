@@ -31,7 +31,12 @@ lint:licenses:
   stage: lint
   script:
     - cargo install --locked cargo-deny
-    - make deny
+    - cargo deny check licenses
+
+lint:licenses-python:
+  extends: .python
+  stage: lint
+  script: [make deny-python]
 
 lint:python:
   extends: .python
@@ -53,6 +58,18 @@ test:postgres:
     POSTGRES_PASSWORD: test
     SESAME_TEST_DATABASE_URL: postgres://postgres:test@postgres:5432/postgres
   script: [cargo test -p sesame-store-postgres --locked]
+
+# Même suite de contrat côté Python (schéma créé depuis les migrations si absent).
+test:postgres-python:
+  extends: .python
+  stage: test
+  services:
+    - name: postgres:17-alpine
+      alias: postgres
+  variables:
+    POSTGRES_PASSWORD: test
+    SESAME_TEST_DATABASE_URL: postgres://postgres:test@postgres:5432/postgres
+  script: [cd admin && uv run --group dev pytest -q tests/test_store_contract.py]
 
 test:python:
   extends: .python

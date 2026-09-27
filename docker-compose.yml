@@ -3,7 +3,8 @@
 # de dev publiques : ne jamais les réutiliser ailleurs.
 #
 # Prérequis : make dev-certs   (certificat TLS auto-signé pour *.sesame.localhost)
-# Entrée    : https://sesame.localhost:8443  (page « Mes applications »)
+# Entrées   : https://sesame.localhost:8443        (page « Mes applications »)
+#             https://admin.sesame.localhost:8443  (administration)
 
 name: sesame
 
@@ -19,7 +20,7 @@ services:
         # Les services joignent le portail et l'IdP par les mêmes URLs que le
         # navigateur : l'issuer OIDC est identique des deux côtés.
         aliases: [sesame.localhost, idp.sesame.localhost, fake-app.sesame.localhost]
-    depends_on: [portal, proxy, keycloak]
+    depends_on: [portal, proxy, admin, keycloak]
 
   portal:
     build:
@@ -80,6 +81,35 @@ services:
       openbao-seed: { condition: service_completed_successfully }
     restart: on-failure
 
+  admin:
+    build: ./admin
+    environment:
+      SESAME_ADMIN_LISTEN: 0.0.0.0:8000
+      SESAME_ADMIN_PUBLIC_URL: https://admin.sesame.localhost:8443
+      # Clé de dev : signe le cookie de session de l'administration.
+      SESAME_ADMIN_SESSION_KEY: dev-admin-session-key-not-for-production
+      SESAME_ADMIN_GROUP: sesame-admins
+      SESAME_DESCRIPTORS_DIR: /etc/sesame/descriptors
+      SESAME_SCHEMA_FILE: /etc/sesame/app-descriptor.schema.json
+      SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
+      SESAME_OIDC_ISSUER: https://idp.sesame.localhost:8443/realms/sesame
+      SESAME_OIDC_CLIENT_ID: sesame-admin
+      SESAME_OIDC_CLIENT_SECRET: dev-admin-client-secret
+      SESAME_OIDC_USER_KEY_CLAIM: preferred_username
+      SESAME_OIDC_GROUPS_CLAIM: groups
+      SESAME_OPENBAO_ADDR: http://openbao:8200
+      SESAME_OPENBAO_ROLE_ID: dev-admin-role-id
+      SESAME_OPENBAO_SECRET_ID: dev-admin-secret-id
+      SESAME_CA_FILE: /etc/sesame/ca.crt
+    volumes:
+      - ./descriptors:/etc/sesame/descriptors:ro
+      - ./schemas/app-descriptor.schema.json:/etc/sesame/app-descriptor.schema.json:ro
+      - ./deploy/nginx/certs/ca.crt:/etc/sesame/ca.crt:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+      openbao-seed: { condition: service_completed_successfully }
+    restart: on-failure
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -119,6 +149,8 @@ services:
       BAO_TOKEN: dev-root-token
       PROXY_ROLE_ID: dev-proxy-role-id
       PROXY_SECRET_ID: dev-proxy-secret-id
+      ADMIN_ROLE_ID: dev-admin-role-id
+      ADMIN_SECRET_ID: dev-admin-secret-id
     volumes: [./dev/openbao:/seed:ro]
     depends_on: [openbao]
     restart: "no"
@@ -146,7 +178,7 @@ services:
   fake-app:
     build: ./dev/fake-app
     environment:
-      FAKE_APP_USERS: amartin:dev-amartin-app-password
+      FAKE_APP_USERS: amartin:dev-amartin-app-password,cdupont:dev-cdupont-app-password
       FAKE_APP_SESSION_TTL: "300"
       FAKE_APP_INTERNAL_URL: http://fake-app:8000
     # Pas de port publié : l'appli n'est joignable que via le proxy.

@@ -16,6 +16,7 @@ make up          # génère le certificat de dev puis lance docker compose
 |---|---|
 | https://sesame.localhost:8443 | Portail : page « Mes applications » |
 | https://fake-app.sesame.localhost:8443 | Appli factice, via le moteur de proxy |
+| https://admin.sesame.localhost:8443 | Administration (compte `admin`) |
 | https://idp.sesame.localhost:8443 | Keycloak (admin de la console : `kcadmin` / `kcadmin`) |
 | http://127.0.0.1:8200 | OpenBao (jeton root de dev : `dev-root-token`) |
 
@@ -24,7 +25,7 @@ Le certificat est signé par une CA de dev, `deploy/nginx/certs/ca.crt`. Importe
 Les navigateurs résolvent `*.localhost` vers la boucle locale. Pour les outils en ligne de commande sous Linux, ajoutez si besoin dans `/etc/hosts` :
 
 ```
-127.0.0.1 sesame.localhost idp.sesame.localhost fake-app.sesame.localhost
+127.0.0.1 sesame.localhost idp.sesame.localhost fake-app.sesame.localhost admin.sesame.localhost
 ```
 
 ## Comptes de dev
@@ -35,7 +36,8 @@ Toutes les valeurs ci-dessous sont publiques et réservées au dev.
 |---|---|---|---|
 | `alice` | `alice` | `fake-app-users` | `amartin` / `dev-amartin-app-password` |
 | `bob` | `bob` | aucun (accès refusé à l'appli factice) | aucun |
-| `admin` | `admin` | `sesame-admins` | aucun |
+| `carol` | `carol` | `fake-app-users` | aucun au départ : à enregistrer dans l'admin avec `cdupont` / `dev-cdupont-app-password` |
+| `admin` | `admin` | `sesame-admins` (accès à l'administration) | aucun |
 
 Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le connaît pas : seul le proxy le lit dans le coffre (`secret/sesame/apps/fake-app/users/alice`).
 
@@ -47,8 +49,9 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 | `portal` | Portail : connexion OIDC, session, page « Mes applications ». Redémarre tant que Nginx n'est pas prêt (discovery OIDC). |
 | `proxy` | Moteur de proxy : rejeu du login, injection de session, expiration. |
 | `postgres` | Magasin de sessions et registre des comptes (migrations appliquées au démarrage du portail et du proxy) |
-| `db-seed` | Déclare le compte d'alice sur l'appli factice dans le registre des comptes |
-| `openbao` + `openbao-seed` | Coffre en mode dev. Le seed crée l'AppRole du proxy (lecture seule) et les identifiants de test. |
+| `db-seed` | Déclare le compte d'alice sur l'appli factice dans le registre des comptes (raccourci de dev) |
+| `admin` | UI d'administration (Python) : registre des comptes et identifiants applicatifs |
+| `openbao` + `openbao-seed` | Coffre en mode dev. Le seed (idempotent) crée l'AppRole du proxy (lecture seule), celui de l'admin (écriture sans lecture) et les identifiants de test. |
 | `keycloak` | Fournisseur OIDC de dev, realm importé depuis `dev/keycloak/sesame-realm.json` |
 | `fake-app` | Appli cible : formulaire de login, jeton CSRF à usage unique, champ caché, session serveur de 5 min. Aucun port publié. |
 
@@ -58,16 +61,17 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 2. La page « Mes applications » affiche « Appli factice ». Cliquez dessus : vous arrivez connecté en tant qu'`amartin`, sans avoir saisi ce compte.
 3. Avec `bob` / `bob`, aucune tuile n'apparaît et l'accès direct à l'appli est refusé.
 4. `docker compose restart fake-app` fait perdre ses sessions à l'appli. Rechargez la page : Sesame rejoue le login sans que vous le voyiez.
-5. `docker compose logs proxy | grep audit` montre les événements d'audit (lecture du coffre, rejeu, expiration).
+5. Avec `carol` / `carol`, aucune tuile : elle est habilitée mais n'a pas de compte. Dans https://admin.sesame.localhost:8443 (`admin` / `admin`), ouvrez « Appli factice » et enregistrez `carol` avec `cdupont` / `dev-cdupont-app-password`. Rechargez le portail de carol : la tuile apparaît.
+6. `docker compose logs proxy admin | grep audit` montre les événements d'audit (lecture du coffre, rejeu, expiration, actions d'administration).
 
 ## Commandes
 
 ```sh
-make test                  # tests Rust + Python
+make test                  # tests Rust + Python (appli factice, admin)
 make test-postgres         # tests de contrat du magasin sur une base PostgreSQL jetable
 make e2e                   # parcours bout en bout Playwright (après make up)
 make lint                  # fmt, clippy, ruff, validation des descripteurs
 make validate-descriptors
-make deny                  # licences des dépendances Rust (nécessite cargo-deny)
+make deny                  # licences des dépendances Rust (cargo-deny) et Python
 make down
 ```

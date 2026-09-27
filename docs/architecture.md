@@ -228,12 +228,14 @@ Chaque lecture de secret et chaque rejeu produit un événement, succès ou éch
 | `portal_login` / `portal_logout` | Portail | Session portail créée / détruite |
 | `access_denied` | Proxy | Utilisateur non habilité, ou compte absent / inactif dans le registre |
 | `account_status_changed` | Proxy, UI d'admin | Changement d'état d'un compte du registre (`active`, `failed`, `disabled`) |
+| `admin_login` | UI d'admin | Connexion d'un administrateur |
+| `credential_written` / `credential_deleted` | UI d'admin | Écriture ou suppression d'identifiants dans le coffre |
 | `secret_read` | Proxy | Lecture du coffre (succès ou échec) |
 | `login_replay` | Proxy | Rejeu du login (succès, échec, abandon) |
 | `app_session_expired` | Proxy | Expiration détectée |
 | `app_logout` | Proxy | Chemin de déconnexion de l'appli appelé |
 
-Champs : horodatage UTC, action, résultat, acteur (`issuer` + `subject`), appli, identifiant de corrélation, raison courte. Jamais de secret, de cookie ni de contenu de réponse.
+Champs : horodatage UTC, action, résultat, acteur (`issuer` + `subject`), appli, compte visé (`target_user`, pour les actions d'administration), identifiant de corrélation, raison courte. Jamais de secret, de cookie ni de contenu de réponse.
 
 ## Fournisseur d'identité
 
@@ -243,6 +245,23 @@ Champs : horodatage UTC, action, résultat, acteur (`issuer` + `subject`), appli
 - Mapping de claims configurable : `user_key` (défaut `sub`), `groups` (défaut `groups`), libellé (`email`, `name`). Un claim `groups` absent vaut « aucun groupe ».
 - Particularités d'Entra ID gérées par configuration : `oid` comme clé, identifiants de groupes (GUID) dans le claim `groups`, *groups overage* au-delà de 200 groupes. Ce dernier cas relève d'un module optionnel, hors du cœur.
 - En dev : Keycloak (realm `sesame`, voir `dev/keycloak/`).
+
+## UI d'administration
+
+Application Python (FastAPI, pages rendues côté serveur) sur son propre nom d'hôte (`admin.sesame.example`). Voir [ADR 0011](decisions/0011-administration.md).
+
+| Écran / action | Effet |
+|---|---|
+| Applications | Liste des descripteurs (lecture seule) avec le nombre de comptes par état |
+| Appli → comptes | Registre des comptes de l'appli : état, raison d'un échec, dernière connexion |
+| Enregistrer un compte | Identifiants écrits dans le coffre, **puis** compte `active` dans le registre. Réenregistrer remplace les identifiants et réactive un compte `failed` |
+| Désactiver / réactiver | Change l'état dans le registre (`failed` reste réservé au proxy) |
+| Supprimer | Supprime les identifiants du coffre (toutes versions) puis l'entrée du registre |
+
+- **Accès** : OIDC auprès du même fournisseur d'identité, avec un client dédié. Membres du groupe d'administrateurs uniquement (`SESAME_ADMIN_GROUP`) ; les autres reçoivent `access_denied`.
+- **Coffre** : AppRole de l'admin avec une policy d'écriture sans lecture. Un identifiant saisi ne peut jamais être relu, ni dans l'UI ni par l'API du coffre.
+- **Protections web** : jeton CSRF sur chaque action, cookie de session signé (`HttpOnly`, `Secure`, `SameSite=Lax`, 1 h) régénéré à la connexion, redirection après connexion limitée aux chemins locaux.
+- **Audit** : `admin_login`, `credential_written`, `credential_deleted`, `account_status_changed`, `access_denied`, avec l'administrateur comme acteur et le compte visé dans `target_user`.
 
 ## Module d'embarquement
 

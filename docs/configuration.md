@@ -47,6 +47,25 @@ URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_PUBLI
 | `SESAME_OPENBAO_SECRET_ID` 🔒 | requis | Secret de l'AppRole |
 | `SESAME_OPENBAO_NAMESPACE` | aucun | Espace de noms, le cas échéant |
 
+## UI d'administration (`sesame-admin`)
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `SESAME_ADMIN_LISTEN` | `0.0.0.0:8000` | Adresse d'écoute |
+| `SESAME_ADMIN_PUBLIC_URL` | requis | URL publique, ex. `https://admin.sesame.example` |
+| `SESAME_ADMIN_SESSION_KEY` 🔒 | requis | Clé de signature du cookie de session (longue chaîne aléatoire) |
+| `SESAME_ADMIN_SESSION_TTL_SECS` | `3600` | Durée de la session d'administration |
+| `SESAME_ADMIN_GROUP` | `sesame-admins` | Groupe (claim) requis pour accéder à l'UI |
+| `SESAME_DESCRIPTORS_DIR` | `descriptors` | Dossier des descripteurs (lecture seule) |
+| `SESAME_SCHEMA_FILE` | `schemas/app-descriptor.schema.json` | Schéma JSON des descripteurs |
+| `SESAME_DATABASE_URL` 🔒 | requis | Connexion PostgreSQL (registre des comptes) |
+| `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre le fournisseur d'identité et le coffre |
+| `SESAME_OIDC_ISSUER`, `SESAME_OIDC_CLIENT_ID`, `SESAME_OIDC_CLIENT_SECRET` 🔒, `SESAME_OIDC_SCOPES`, `SESAME_OIDC_USER_KEY_CLAIM`, `SESAME_OIDC_GROUPS_CLAIM` | comme le portail | Client OIDC **dédié** à l'administration |
+| `SESAME_OPENBAO_ADDR`, `SESAME_OPENBAO_MOUNT`, `SESAME_OPENBAO_PATH_PREFIX`, `SESAME_OPENBAO_NAMESPACE` | comme le proxy | Coffre |
+| `SESAME_OPENBAO_ROLE_ID`, `SESAME_OPENBAO_SECRET_ID` 🔒 | requis | AppRole **de l'admin** (écriture sans lecture) |
+
+URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_ADMIN_PUBLIC_URL>/auth/callback`.
+
 ## Commun
 
 | Variable | Défaut | Rôle |

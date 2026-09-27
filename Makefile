@@ -2,10 +2,10 @@
 # Point d'entrée unique pour les développeurs et la CI (les fichiers CI restent minces).
 
 CERTS := deploy/nginx/certs
-# onboarding et admin rejoindront la liste avec leurs premiers tests.
-PY_PROJECTS := dev/fake-app
+# onboarding rejoindra la liste avec ses premiers tests.
+PY_PROJECTS := dev/fake-app admin
 
-.PHONY: help dev-certs up down logs test test-rust test-python test-postgres e2e lint lint-rust lint-python validate-descriptors images deny
+.PHONY: help dev-certs up down logs test test-rust test-python test-postgres e2e lint lint-rust lint-python validate-descriptors images deny deny-python
 
 help:
 	@echo "dev-certs             certificat TLS de dev pour *.sesame.localhost"
@@ -14,6 +14,7 @@ help:
 	@echo "test-postgres         tests de contrat sur une base PostgreSQL jetable (Docker)"
 	@echo "e2e                   tests bout en bout Playwright (après make up)"
 	@echo "lint                  fmt, clippy, ruff, validation des descripteurs"
+	@echo "deny                  licences des dépendances (Rust et Python)"
 	@echo "images                construit les images Docker"
 
 $(CERTS)/sesame.crt:
@@ -52,8 +53,10 @@ test-python:
 test-postgres:
 	docker run -d --rm --name sesame-pgtest -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:17-alpine >/dev/null
 	@until docker exec sesame-pgtest pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
-	SESAME_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres \
-	  cargo test -p sesame-store-postgres --locked; status=$$?; docker stop sesame-pgtest >/dev/null; exit $$status
+	export SESAME_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres; \
+	  cargo test -p sesame-store-postgres --locked \
+	  && (cd admin && uv run --group dev pytest -q tests/test_store_contract.py); \
+	  status=$$?; docker stop sesame-pgtest >/dev/null; exit $$status
 
 # Parcours complets dans un vrai navigateur, sur l'environnement lancé par make up.
 e2e:
@@ -72,8 +75,12 @@ lint-python:
 validate-descriptors:
 	uv run -q scripts/validate_descriptors.py
 
-deny:
+deny: deny-python
 	cargo deny check licenses
+
+deny-python:
+	@for p in $(PY_PROJECTS); do echo "== $$p"; \
+	  (cd $$p && uv run -q --with pip-licenses python $(CURDIR)/scripts/check_python_licenses.py) || exit 1; done
 
 images:
 	docker compose build

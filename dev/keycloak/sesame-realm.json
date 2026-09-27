@@ -6,8 +6,12 @@
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "groups": [
-    { "name": "fake-app-users" },
-    { "name": "sesame-admins" }
+    {
+      "name": "fake-app-users"
+    },
+    {
+      "name": "sesame-admins"
+    }
   ],
   "clients": [
     {
@@ -22,11 +26,52 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
-      "redirectUris": ["https://sesame.localhost:8443/auth/callback"],
-      "webOrigins": ["https://sesame.localhost:8443"],
+      "redirectUris": [
+        "https://sesame.localhost:8443/auth/callback"
+      ],
+      "webOrigins": [
+        "https://sesame.localhost:8443"
+      ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "https://sesame.localhost:8443/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "sesame-admin",
+      "name": "Administration Sesame",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-admin-client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://admin.sesame.localhost:8443/auth/callback"
+      ],
+      "webOrigins": [
+        "https://admin.sesame.localhost:8443"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://admin.sesame.localhost:8443/*"
       },
       "protocolMappers": [
         {
@@ -52,8 +97,16 @@
       "lastName": "Martin",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "alice", "temporary": false }],
-      "groups": ["fake-app-users"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "fake-app-users"
+      ]
     },
     {
       "username": "bob",
@@ -62,8 +115,32 @@
       "lastName": "Durand",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "bob", "temporary": false }],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob",
+          "temporary": false
+        }
+      ],
       "groups": []
+    },
+    {
+      "username": "carol",
+      "email": "carol@example.org",
+      "firstName": "Carol",
+      "lastName": "Dupont",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "carol",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "fake-app-users"
+      ]
     },
     {
       "username": "admin",
@@ -72,8 +149,16 @@
       "lastName": "Sesame",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "admin", "temporary": false }],
-      "groups": ["sesame-admins"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "sesame-admins"
+      ]
     }
   ]
 }

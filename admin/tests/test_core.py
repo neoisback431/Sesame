@@ -113,3 +113,11 @@ async def test_disable_enable_delete(service):
     assert ("fake-app", "carol") not in service.secrets.entries
     assert await service.accounts.get_account("fake-app", "carol") is None
     assert service.audit.events[-2].action == "credential_deleted"
+
+
+async def test_stdout_audit_format_matches_rust_services(capsys):
+    from sesame_admin.audit import AuditEvent, StdoutAuditSink
+
+    await StdoutAuditSink().record(AuditEvent.of("credential_written", "success", ADMIN, app_id="fake-app"))
+    line = capsys.readouterr().out.strip()
+    assert line.startswith('{"log_type":"audit",') and '"action":"credential_written"' in line

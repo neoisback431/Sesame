@@ -2,8 +2,9 @@
 """Parcours bout en bout sur l'environnement de dev (``make up`` au préalable).
 
 Navigateur réel (Playwright) : SSO Keycloak, page « Mes applications », rejeu
-du login de l'appli factice, expiration, habilitations, déconnexion, absence
-de fuite de secrets (navigateur et logs des conteneurs).
+du login de l'appli factice, expiration, habilitations, déconnexion,
+administration (enregistrement d'un compte, désactivation, suppression),
+absence de fuite de secrets (navigateur et logs des conteneurs).
 
 Variables : ``SESAME_E2E_CHROMIUM`` (chemin d'un Chromium déjà installé).
 """
@@ -21,7 +22,9 @@ from playwright.sync_api import Browser, Page, expect, sync_playwright
 ROOT = Path(__file__).resolve().parents[2]
 PORTAL = "https://sesame.localhost:8443/"
 APP = "https://fake-app.sesame.localhost:8443/"
+ADMIN = "https://admin.sesame.localhost:8443/"
 APP_PASSWORD = "dev-amartin-app-password"  # valeur de dev, voir dev/openbao/seed.sh
+CAROL_APP_PASSWORD = "dev-cdupont-app-password"  # compte de carol dans l'appli factice
 
 
 def compose(*args: str) -> str:
@@ -121,12 +124,62 @@ def test_portal_logout_destroys_app_sessions(browser: Browser):
     page.context.close()
 
 
+def test_non_admin_is_denied_the_admin_ui(browser: Browser):
+    page = login(browser, "bob", start=f"{ADMIN}login")
+    expect(page.locator("h1")).to_have_text("Accès refusé")
+    page.context.close()
+
+
+def test_admin_provisions_an_account_then_user_gets_in(browser: Browser):
+    # carol est habilitée (groupe) mais n'a pas encore de compte : aucune tuile.
+    carol = login(browser, "carol")
+    expect(carol.get_by_text("Aucune application")).to_be_visible()
+
+    admin = login(browser, "admin", start=f"{ADMIN}login")
+    expect(admin.locator("h1")).to_have_text("Applications")
+    admin.get_by_role("link", name="Appli factice").click()
+    admin.fill("#user_key", "carol")
+    admin.fill("#cred_username", "cdupont")
+    admin.fill("#cred_password", CAROL_APP_PASSWORD)
+    admin.get_by_role("button", name="Enregistrer").click()
+    expect(admin.get_by_role("status")).to_contain_text("enregistré et activé")
+    assert CAROL_APP_PASSWORD not in admin.content()
+    expect(admin.locator("tr", has_text="carol")).to_contain_text("actif")
+
+    carol.reload()
+    carol.get_by_role("link", name=re.compile("Appli factice")).click()
+    expect(carol.locator("h1")).to_have_text("Bonjour cdupont")
+
+    # Désactivation : accès refusé sans lecture du coffre ; puis nettoyage.
+    admin.locator("tr", has_text="carol").get_by_role("button", name="Désactiver").click()
+    expect(admin.get_by_role("status")).to_contain_text("désactivé")
+    compose("restart", "fake-app")  # force un nouveau rejeu
+    carol.wait_for_timeout(3000)
+    resp = carol.goto(f"{APP}account")
+    assert resp is not None and resp.status == 403
+    admin.once("dialog", lambda d: d.accept())
+    admin.locator("tr", has_text="carol").get_by_role("button", name="Supprimer").click()
+    expect(admin.get_by_role("status")).to_contain_text("supprimé")
+    carol.context.close()
+    admin.context.close()
+
+
 def test_audit_trail_and_no_secret_in_logs():
-    logs = compose("logs", "--no-color", "portal", "proxy", "nginx")
-    assert APP_PASSWORD not in logs
+    logs = compose("logs", "--no-color", "portal", "proxy", "admin", "nginx")
+    assert APP_PASSWORD not in logs and CAROL_APP_PASSWORD not in logs
     assert "FAKEAPPSESSID=" not in logs
     audit = [line for line in logs.splitlines() if '"log_type":"audit"' in line]
-    for action in ("portal_login", "secret_read", "login_replay", "app_session_expired", "access_denied"):
+    for action in (
+        "portal_login",
+        "secret_read",
+        "login_replay",
+        "app_session_expired",
+        "access_denied",
+        "admin_login",
+        "credential_written",
+        "credential_deleted",
+        "account_status_changed",
+    ):
         assert any(f'"action":"{action}"' in line for line in audit), action
     # Cookies applicatifs chiffrés au repos : pas de valeur en clair dans la base.
     stored = sql("SELECT encode(cookies, 'escape') FROM app_sessions")

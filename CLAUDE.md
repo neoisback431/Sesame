@@ -128,12 +128,13 @@ Session expirée sur un `POST` : rejeu puis `303` vers la page d'origine (soumis
 | Routage | **Une appli par nom d'hôte**, cookie portail sur le domaine parent (retiré par le proxy avant relais) | Tranché |
 | Parcours utilisateur | **Page « Mes applications »** dans le portail ; rejeu à l'arrivée sur l'appli, dans le proxy | Tranché |
 | Registre des comptes | **Table PostgreSQL** sans secret (`AccountRegistry`), source : UI d'admin | Tranché |
+| UI d'admin | **FastAPI + Jinja2** (rendu serveur) ; descripteurs **en fichiers Git**, lecture seule dans l'UI ; AppRole admin en écriture sans lecture | Tranché |
 
 Les décisions ont été prises le 2026-09-27. Consigner leur justification dans `docs/decisions/` (ADR). Toute nouvelle décision structurante est posée en question avant d'être codée, puis ajoutée à ce tableau.
 
 ## Première étape attendue (initialisation)
 
-Étapes 1 à 5 faites (MVP validé de bout en bout par `make e2e`) ; étape 6 en place (`.gitlab-ci.yml`, non exécutée faute de GitLab). Prochaines pistes : UI d'administration, module d'embarquement, OpenTelemetry, déconnexion chez le fournisseur d'identité.
+Étapes 1 à 5 faites (MVP validé de bout en bout par `make e2e`) ; étape 6 en place (`.gitlab-ci.yml`, non exécutée faute de GitLab). UI d'administration v1 faite (registre des comptes, identifiants). Prochaines pistes : module d'embarquement, OpenTelemetry, déconnexion chez le fournisseur d'identité.
 
 1. Proposer la structure du dépôt (un dossier par bloc, dossier `descriptors/`, `deploy/`, `docs/`).
 2. Rédiger `docs/architecture.md` et un schéma Mermaid des flux.
@@ -151,7 +152,8 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 | `crates/sesame-proxy` | Moteur de proxy : rejeu (`replay.rs`), formulaire / CSRF (`form.rs`), jar serveur (`jar.rs`), conditions (`matcher.rs`), réécriture (`rewrite.rs`), relais (`lib.rs`) |
 | `crates/sesame-store-postgres` | `SessionStore` + `AccountRegistry` sur PostgreSQL, migrations dans `migrations/` |
 | `crates/sesame-secrets-openbao` | `SecretStore` OpenBao / Vault (AppRole, KV v2), API HTTP sans SDK |
-| `onboarding/`, `admin/` | Paquets Python (squelettes) |
+| `admin/` | UI d'administration (FastAPI) : `service.py` (opérations auditées), `web.py` (routes, CSRF, groupe admin), `auth.py` (OIDC Authlib), `ports.py` (`SecretWriter`, `AccountStore`), `openbao.py`, `store_postgres.py` (asyncpg), `memory.py`, `templates/` |
+| `onboarding/` | Paquet Python (squelette) |
 | `schemas/app-descriptor.schema.json` | Schéma du descripteur : **fait foi**, contrat entre Rust et Python |
 | `descriptors/` | Descripteurs YAML (`fake-app.yaml` = exemple de référence, utilisé par les tests Rust) |
 | `dev/` | Appli factice (Flask), realm Keycloak, seed OpenBao, seed du registre des comptes |
@@ -161,21 +163,22 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 
 Toute modification du schéma du descripteur se reporte dans `descriptor.rs`, `docs/descriptor.md` et `descriptors/fake-app.yaml`.
 Toute nouvelle variable d'environnement se documente dans `docs/configuration.md`.
+UI d'admin : pas de `from __future__ import annotations` dans `web.py` (FastAPI doit résoudre l'alias local `Admin`) ; le schéma de base appartient aux migrations Rust ; le format d'audit Python doit rester identique à celui des services Rust (JSON compact, `"log_type":"audit"`).
 Tests du proxy : banc commun dans `crates/sesame-proxy/tests/common/` (appli simulée + implémentations en mémoire) ; les tests de non-fuite des logs vivent dans un binaire de test séparé (`no_leak.rs`).
 
 ## Commandes
 
 ```sh
-make test                  # cargo test + pytest (dev/fake-app)
-make test-postgres         # tests de contrat PostgreSQL sur une base jetable (Docker)
+make test                  # cargo test + pytest (dev/fake-app, admin)
+make test-postgres         # tests de contrat PostgreSQL (Rust + Python) sur une base jetable (Docker)
 make e2e                   # parcours bout en bout Playwright (après make up)
 make lint                  # cargo fmt --check, clippy -D warnings, ruff, validation des descripteurs
 make validate-descriptors  # uv run scripts/validate_descriptors.py
-make deny                  # licences des dépendances Rust (cargo-deny)
+make deny                  # licences des dépendances Rust (cargo-deny) et Python (scripts/check_python_licenses.py)
 make up / make down        # environnement Docker Compose de dev (make dev-certs en préalable automatique)
 ```
 
-Environnement de dev : voir `docs/dev.md` (URLs `*.sesame.localhost:8443`, comptes `alice` / `bob` / `admin`).
+Environnement de dev : voir `docs/dev.md` (URLs `*.sesame.localhost:8443`, comptes `alice` / `bob` / `carol` / `admin`).
 
 ## Conventions de travail
 
