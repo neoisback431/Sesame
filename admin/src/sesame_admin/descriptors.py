@@ -55,8 +55,13 @@ class App:
     def editable(self) -> bool:
         return self.origin == "db"
 
+    @property
+    def access_open(self) -> bool:
+        """Aucune restriction d'habilitation : le compte actif fait foi."""
+        return not self.groups and not self.users
+
     def allows(self, user_key: str, groups: tuple[str, ...]) -> bool:
-        return user_key in self.users or any(g in self.groups for g in groups)
+        return self.access_open or user_key in self.users or any(g in self.groups for g in groups)
 
 
 @dataclass(frozen=True)
@@ -216,8 +221,8 @@ def app_from_doc(
         name=meta["name"],
         description=meta.get("description"),
         public_host=spec["public"]["host"],
-        groups=tuple(spec["access"].get("groups", [])),
-        users=tuple(spec["access"].get("users", [])),
+        groups=tuple(spec.get("access", {}).get("groups", [])),
+        users=tuple(spec.get("access", {}).get("users", [])),
         credential_keys=tuple(spec["credentials"]["keys"]),
         revision=meta["revision"],
         source=source,
@@ -321,7 +326,8 @@ def draft(form: dict[str, str]) -> dict[str, Any]:
         "spec": {
             "upstream": {"base_url": base_url},
             "public": {"host": get("public_host").lower()},
-            "access": access,
+            # access omis => tout utilisateur avec un compte actif est autorisé.
+            **({"access": access} if access else {}),
             "credentials": {"mode": "per_user", "keys": ["username", "password"]},
             "login": login,
             "session": {"cookies": [cookie]},

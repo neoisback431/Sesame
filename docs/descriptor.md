@@ -13,7 +13,7 @@ Exemple complet : [`descriptors/fake-app.yaml`](../descriptors/fake-app.yaml). G
 | `metadata` | `id` stable (clé du coffre, des sessions et de l'audit), nom, `revision` incrémentée à chaque modification validée (tenue par Sesame pour les descripteurs en base), responsable |
 | `spec.upstream` | URL interne de l'appli, TLS, délai, en-tête `Host` éventuel |
 | `spec.public.host` | Nom d'hôte public sous lequel Sesame expose l'appli (une appli par hôte) |
-| `spec.access` | Habilitations : `groups` et / ou `users` (valeurs issues des claims OIDC) |
+| `spec.access` | Habilitation **facultative** : absent ou vide, tout utilisateur avec un compte actif est autorisé ; présent, restreint en plus aux `groups` (claims OIDC) et / ou `users` |
 | `spec.credentials` | `mode: per_user` et liste des clés lues dans le coffre (`username`, `password`…) |
 | `spec.login` | Rejeu : page de login, formulaire, champs, jetons CSRF, conditions de succès et d'échec, `max_attempts` |
 | `spec.session` | Cookies de session à capturer, `max_ttl`, `idle_ttl` |
