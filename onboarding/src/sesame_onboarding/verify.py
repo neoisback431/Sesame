@@ -162,7 +162,7 @@ def verify(descriptor: dict[str, Any], credentials: dict[str, str], client: http
         result.reason = "login_rejected"
     elif not any_of(login["success"], view):
         result.reason = "login_unexpected_response"
-    elif not all(c in jar.cookies for c in spec["session"]["cookies"]):
+    elif not all(c in jar.cookies for c in spec["session"].get("cookies", [])):
         result.reason = "session_cookie_missing"
     else:
         result.ok, result.reason = True, "ok"
