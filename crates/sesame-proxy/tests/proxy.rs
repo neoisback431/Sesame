@@ -23,6 +23,7 @@ async fn redirects_to_portal_without_session() {
     let req = Request::builder()
         .uri("/account?x=1")
         .header(header::HOST, PUBLIC_HOST)
+        .header("sec-fetch-mode", "navigate")
         .body(Body::empty())
         .unwrap();
     let r = b.send(req).await;
@@ -36,6 +37,23 @@ async fn redirects_to_portal_without_session() {
         loc.contains("https%3A%2F%2Fapp.sesame.test%2Faccount%3Fx%3D1"),
         "{loc}"
     );
+    assert_eq!(b.secrets.reads(), 0);
+}
+
+#[tokio::test]
+async fn unauthenticated_subresource_gets_401_not_a_cors_breaking_redirect() {
+    // Sans session, une sous-ressource (manifest, image, fetch) ne doit pas être redirigée
+    // vers le login : la redirection cross-origin serait bloquée en CORS. On répond 401.
+    let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
+    let req = Request::builder()
+        .uri("/images/site.webmanifest")
+        .header(header::HOST, PUBLIC_HOST)
+        .header("sec-fetch-mode", "cors")
+        .body(Body::empty())
+        .unwrap();
+    let r = b.send(req).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    assert!(!r.headers.contains_key(header::LOCATION));
     assert_eq!(b.secrets.reads(), 0);
 }
 
