@@ -277,6 +277,29 @@ async fn failed_login_page_diagnostic_masks_cookie_values() {
 }
 
 #[tokio::test]
+async fn csrf_token_from_an_api_endpoint() {
+    let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
+    let mut d = descriptor(&b.internal);
+    d.spec.login.include_hidden_inputs = false;
+    // Page de login lue pour ses cookies ; jeton obtenu par l'API, comme le ferait le JavaScript.
+    let token: sesame_core::descriptor::CsrfToken = serde_json::from_value(serde_json::json!({
+        "source": "endpoint", "name": "data.token", "url": "/api/csrf-token",
+        "send_as": { "field": "csrf_token" }
+    }))
+    .unwrap();
+    d.spec.login.csrf = vec![token];
+    d.spec.login.fields.insert(
+        "lang".into(),
+        sesame_core::descriptor::FormField::Value("fr".into()),
+    );
+    let (apps, rejected) = sesame_proxy::build_apps(vec![d], None, "https");
+    assert!(rejected.is_empty(), "{rejected:?}");
+    b.engine.set_apps(apps);
+    let r = b.get("/").await;
+    assert!(r.body.contains("Bonjour amartin"), "{}", r.body);
+}
+
+#[tokio::test]
 async fn no_diagnostic_is_kept_by_default() {
     let b = bench(&["fake-app-users"], "wrong-password", true).await;
     b.get("/").await;

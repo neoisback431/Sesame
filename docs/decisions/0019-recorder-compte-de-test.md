@@ -27,7 +27,10 @@ mot de passe** (même origine uniquement ; toute autre écriture est bloquée). 
   simples envoyées, envoi ou non des champs cachés ;
 - source de chaque jeton envoyé (en-tête ou champ) : cookie, balise meta, champ caché, ou
   script de la page (expression régulière construite d'après le contexte du jeton dans le
-  HTML servi) ; jeton obtenu par un appel d'API : signalé, non géré par le proxy ;
+  HTML servi), ou **appel d'API** fait par le JavaScript avant le login : nouvelle source
+  `endpoint` du descripteur (`url` appelée en GET, même origine, avec les cookies de la
+  page de login ; jeton lu dans un champ JSON pointé ou par `pattern`), refaite par le
+  proxy et par `sesame-onboard verify` ;
 - réponse : statut, redirection, cookies posés ; cookie(s) de session ; connexion réussie
   si plus aucun champ mot de passe n'est visible.
 

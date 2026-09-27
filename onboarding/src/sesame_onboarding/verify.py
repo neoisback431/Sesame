@@ -42,6 +42,46 @@ def _csrf_value(token: dict[str, Any], html: str, jar: Jar) -> str | None:
     return m.group(1) if m and m.groups() else None
 
 
+def endpoint_value(token: dict[str, Any], body: str) -> str | None:
+    """Miroir de ``form::endpoint_value`` : ``pattern`` sur le corps, sinon champ JSON pointé."""
+    if token.get("pattern"):
+        m = re.search(token["pattern"], body)
+        return m.group(1) if m and m.groups() else None
+    try:
+        value: Any = json.loads(body)
+    except ValueError:
+        return None
+    for key in token["name"].split("."):
+        if not isinstance(value, dict) or key not in value:
+            return None
+        value = value[key]
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return str(value)
+    return value if isinstance(value, str) and value else None
+
+
+def _endpoint_token(
+    client: httpx.Client, token: dict[str, Any], base: str, page_url: str, jar: Jar
+) -> str | None | VerifyResult:
+    """Appel ``source: endpoint`` (miroir de ``replay.rs``) : même origine, cookies du jar."""
+    url = urljoin(base, token["url"])
+    if not same_origin(url, base):
+        return VerifyResult(False, "csrf_endpoint_invalid")
+    headers = {"referer": page_url, "accept": "application/json, text/plain, */*"}
+    if jar.header():
+        headers["cookie"] = jar.header()
+    try:
+        resp = client.get(url, headers=headers)
+    except httpx.HTTPError as e:
+        return VerifyResult(False, f"unreachable ({type(e).__name__})")
+    jar.apply(set_cookies(resp))
+    if not 200 <= resp.status_code < 300:
+        return VerifyResult(False, "csrf_endpoint_status", status=resp.status_code)
+    return endpoint_value(token, resp.text)
+
+
 def verify(descriptor: dict[str, Any], credentials: dict[str, str], client: httpx.Client) -> VerifyResult:
     spec = descriptor["spec"]
     login = spec["login"]
@@ -76,7 +116,12 @@ def verify(descriptor: dict[str, Any], credentials: dict[str, str], client: http
             fields[name] = spec_field["value"]
     headers = {"referer": page_url, "origin": base.rstrip("/"), **login.get("extra_headers", {})}
     for token in login.get("csrf", []):
-        value = _csrf_value(token, html, jar)
+        if token["source"] == "endpoint":
+            value = _endpoint_token(client, token, base, page_url, jar)
+            if isinstance(value, VerifyResult):
+                return value
+        else:
+            value = _csrf_value(token, html, jar)
         if value is None:
             return VerifyResult(False, "csrf_token_not_found")
         send_as = token.get("send_as", {})

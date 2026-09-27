@@ -429,3 +429,89 @@ def test_wrong_test_account_is_reported(fake, client, browser):
     assert rec.login is not None and not rec.login.logged_in
     assert any("test_login_still_on_login_page" in w for w in rec.warnings)
     assert any("spec.login.success" in t for t in record.to_descriptor(rec).todo)
+
+
+def api_token_app() -> Flask:
+    """Comme familly-chat : jeton lié à la session, obtenu par GET /api/csrf-token, envoyé en
+    en-tête x-csrf-token avec un login JSON."""
+    from flask import request
+
+    app = Flask(__name__)
+    by_session: dict[str, str] = {}
+    logged: set[str] = set()
+
+    @app.get("/login")
+    def page():
+        sid = f"pre{len(by_session)}"
+        by_session[sid] = f"api-tok-{len(by_session)}-9d2f"
+        resp = Response(
+            "<html><body><form id=f><input name=username><input type=password name=password>"
+            "<button>Connexion</button></form><script>"
+            "let tok; fetch('/api/csrf-token').then(r => r.json()).then(j => tok = j.csrfToken);"
+            "document.getElementById('f').addEventListener('submit', e => { e.preventDefault();"
+            "fetch('/api/login', {method: 'POST', headers: {'Content-Type': 'application/json',"
+            "'x-csrf-token': tok}, body: JSON.stringify({username: e.target.username.value,"
+            "password: e.target.password.value})}).then(r => { if (r.ok) location.href = '/'; });"
+            "});</script></body></html>"
+        )
+        resp.set_cookie("chat.sid", sid)
+        return resp
+
+    @app.get("/api/csrf-token")
+    def token():
+        sid = request.cookies.get("chat.sid")
+        if sid not in by_session:
+            return Response('{"error":"no session"}', 401, content_type="application/json")
+        return {"csrfToken": by_session[sid]}
+
+    @app.post("/api/login")
+    def login():
+        sid = request.cookies.get("chat.sid")
+        if sid not in by_session or request.headers.get("x-csrf-token") != by_session[sid]:
+            return Response(
+                '{"error":"Jeton de sécurité invalide, rechargez la page."}',
+                403,
+                content_type="application/json",
+            )
+        body = request.get_json(silent=True) or {}
+        if (body.get("username"), body.get("password")) != ("alice", "Pw-chat"):
+            return Response('{"error":"Identifiants invalides"}', 401, content_type="application/json")
+        logged.add(sid)
+        resp = Response('{"ok":true}', content_type="application/json")
+        resp.set_cookie("chat.sid", sid + "-auth")
+        logged.add(sid + "-auth")
+        return resp
+
+    @app.get("/")
+    def home():
+        return (
+            "chat" if request.cookies.get("chat.sid") in logged else Response("", 302, {"Location": "/login"})
+        )
+
+    return app
+
+
+def test_test_account_handles_a_token_obtained_from_an_api(client, browser):
+    from sesame_onboarding import verify
+
+    app = Recorder(api_token_app())
+    try:
+        rec = run(f"{app.base}/login", client, browser, credentials=("alice", "Pw-chat"))
+        draft = record.to_descriptor(rec, app_id="familly-chat")
+        doc = draft.document
+        assert descriptors.validate(doc) == [], descriptors.validate(doc)
+        assert doc["spec"]["login"]["csrf"] == [
+            {
+                "source": "endpoint",
+                "url": "/api/csrf-token",
+                "name": "csrfToken",
+                "send_as": {"header": "x-csrf-token"},
+            }
+        ]
+        assert not any(w.startswith("csrf_") for w in rec.warnings), rec.warnings
+        assert doc["spec"]["session"]["cookies"] == ["chat.sid"]
+        assert verify.verify(doc, {"username": "alice", "password": "Pw-chat"}, client).ok
+        assert verify.verify(doc, {"username": "alice", "password": "nope"}, client).reason != "ok"
+    finally:
+        app.srv.shutdown()
+    assert "api-tok-" not in repr(rec) + record.render(draft, rec) + "\n".join(record.summary(rec))

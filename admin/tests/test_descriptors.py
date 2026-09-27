@@ -38,6 +38,13 @@ def test_reference_descriptor_is_valid():
         ({'location_not_matches: "^/login"': 'location_not_matches: "^(?!/login)"'}, "voisinage"),
         ({'paths: ["^/logout$"]': 'paths: ["(a)\\\\1"]'}, "références arrière"),
         ({"- source: hidden_input": "- source: regex"}, "pattern"),
+        ({"- source: hidden_input": "- source: endpoint"}, "url"),
+        ({"- source: hidden_input": "- source: endpoint\n        url: api/csrf"}, "url"),
+        ({"        name: csrf_token": "        name: csrf_token\n        url: /api/csrf"}, "url"),
+        (
+            {"- source: hidden_input": "- source: endpoint\n        url: /api/csrf\n        pattern: \"(a\""},
+            "regex",
+        ),
         ({"max_ttl: 8h": "max_ttl: 99999999999999999999h"}, "durée invalide"),
         ({"cookies: [FAKEAPPSESSID]": "cookies: []"}, "cookies"),
         ({"max_attempts: 1": "max_attempts: 9"}, "max_attempts"),
@@ -47,6 +54,13 @@ def test_reference_descriptor_is_valid():
 def test_checks_mirror_the_proxy(replace, expected):
     errors = V.check(doc(**replace))
     assert errors and any(expected in e for e in errors), errors
+
+
+def test_endpoint_token_is_valid():
+    text = (DESCRIPTORS / "fake-app.yaml").read_text().replace(
+        "- source: hidden_input", "- source: endpoint\n        url: /api/csrf-token"
+    )
+    assert V.check(yaml.safe_load(text)) == []
 
 
 def test_reserved_identifier():
