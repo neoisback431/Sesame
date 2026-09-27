@@ -33,6 +33,11 @@ spec:
     csrf:                                     # champs cachés : renvoyés automatiquement ;
       - source: hidden_input                  # les déclarer ici rend leur absence bloquante
         name: csrf_token
+      # Jeton obtenu par un appel d'API avant le login (JavaScript de l'appli) :
+      # - source: endpoint
+      #   url: /api/csrf-token                # GET, même origine, cookies conservés
+      #   name: csrfToken                     # champ JSON (chemin pointé) ou pattern
+      #   send_as: { header: x-csrf-token }
     success:                                  # réponse au POST (avant redirection)
       any_of:
         - status: [302, 303]

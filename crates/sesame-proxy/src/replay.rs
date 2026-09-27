@@ -9,10 +9,10 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use reqwest::header::{CONTENT_TYPE, COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
+use reqwest::header::{ACCEPT, CONTENT_TYPE, COOKIE, HOST, LOCATION, ORIGIN, REFERER, SET_COOKIE};
 use reqwest::{Method, StatusCode};
 use sesame_core::audit::{AuditAction, AuditEvent, AuditOutcome};
-use sesame_core::descriptor::{AppDescriptor, Encoding, FormField, Method as LoginMethod};
+use sesame_core::descriptor::{AppDescriptor, CsrfSource, Encoding, FormField, Method as LoginMethod};
 use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{
     AccountRegistry, AccountStatus, AuditSink, DiagnosticStore, PortError, ReplayDiagnostic, SecretStore,
@@ -22,7 +22,7 @@ use url::Url;
 use zeroize::Zeroizing;
 
 use crate::diagnostic::{Capture, Masker};
-use crate::form::{extract_csrf, parse_form};
+use crate::form::{endpoint_value, extract_csrf, parse_form};
 use crate::jar::Jar;
 use crate::matcher::{self, ResponseView};
 
@@ -382,7 +382,43 @@ impl Replayer {
         }
         let mut csrf_headers = Vec::new();
         for token in &login.csrf {
-            let Ok(value) = extract_csrf(token, &html, &jar) else {
+            let value = if token.source == CsrfSource::Endpoint {
+                // Appel fait par le JavaScript de l'appli avant le login : même origine,
+                // cookies de la session du rejeu envoyés, cookies reçus conservés.
+                let url = token.url.as_deref().and_then(|u| base.join(u).ok());
+                let Some(url) = url.filter(|u| same_origin(u, &base)) else {
+                    return Ok(Outcome::Failure("csrf_endpoint_invalid"));
+                };
+                let resp = request(Method::GET, url.clone(), &jar)
+                    .header(REFERER, page_url.as_str())
+                    .header(ACCEPT, "application/json, text/plain, */*")
+                    .send()
+                    .await?;
+                jar.apply(set_cookies(&resp).iter().map(String::as_str));
+                let status = resp.status();
+                let endpoint_headers = masker.as_ref().map(|m| m.headers(resp.headers()));
+                let body = read_limited(resp).await?;
+                if let (Some(m), Some(headers)) = (&masker, endpoint_headers) {
+                    let (text, body_truncated) = m.body(&body);
+                    *capture = Some(Capture {
+                        step: "csrf_endpoint",
+                        method: "GET".into(),
+                        url: m.mask(url.as_str()),
+                        sent_fields: Vec::new(),
+                        status: Some(status.as_u16()),
+                        headers,
+                        body: text,
+                        body_truncated,
+                    });
+                }
+                if !status.is_success() {
+                    return Ok(Outcome::Indeterminate("csrf_endpoint_status"));
+                }
+                endpoint_value(token, &body)
+            } else {
+                extract_csrf(token, &html, &jar)
+            };
+            let Ok(value) = value else {
                 return Ok(Outcome::Failure("csrf_token_not_found"));
             };
             match (&token.send_as.header, &token.send_as.field) {

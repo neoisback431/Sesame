@@ -129,6 +129,8 @@ def _semantic_errors(doc: dict[str, Any]) -> list[str]:
                 errors.append(f"spec/login/csrf : pattern requis pour source=regex ({token['name']})")
             elif err := _regex_error(token["pattern"]):
                 errors.append(f"spec/login/csrf : {err}")
+        if token["source"] == "endpoint" and "pattern" in token and (err := _regex_error(token["pattern"])):
+            errors.append(f"spec/login/csrf : {err}")
     patterns: list[Any] = list(spec.get("logout", {}).get("paths", []))
     for where, matcher_set in (
         ("login/success", login["success"]),
