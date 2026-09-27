@@ -99,6 +99,11 @@ class AccountStore(Protocol):
         """Utilisateurs dont la clé contient ``query`` (casse ignorée), avec leurs comptes par état."""
         ...
 
+    async def known_users(self, limit: int) -> list[str]:
+        """Clés utilisateur connues, pour suggérer une valeur exacte au provisionnement :
+        titulaires d'un compte et personnes déjà connectées au portail. Triées."""
+        ...
+
 
 class DescriptorStore(Protocol):
     """Descripteurs d'applis en base (table ``app_descriptors`` et son historique).

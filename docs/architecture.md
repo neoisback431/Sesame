@@ -255,7 +255,7 @@ Application Python (FastAPI, pages rendues côté serveur) sur son propre nom d'
 |---|---|
 | Applications | Liste des applis (fichiers Git et base) avec le nombre de comptes par état, et les descripteurs en base écartés du catalogue (à corriger) |
 | Appli → comptes | Registre des comptes de l'appli : état, raison d'un échec, dernière connexion |
-| Enregistrer un compte | Identifiants écrits dans le coffre, **puis** compte `active` dans le registre. Réenregistrer remplace les identifiants et réactive un compte `failed` |
+| Enregistrer un compte | Identifiants écrits dans le coffre, **puis** compte `active` dans le registre. Réenregistrer remplace les identifiants et réactive un compte `failed`. La clé utilisateur se choisit dans une liste des utilisateurs connus (déjà connectés au portail ou titulaires d'un compte) pour éviter une clé qui ne correspond à personne |
 | Désactiver / réactiver | Change l'état dans le registre (`failed` reste réservé au proxy). La désactivation **révoque les sessions applicatives ouvertes** de l'utilisateur sur l'appli : l'accès est coupé immédiatement |
 | Supprimer | Supprime les identifiants du coffre (toutes versions) puis l'entrée du registre, et révoque les sessions ouvertes |
 | Utilisateurs | Recherche d'un utilisateur et liste de tous ses comptes, toutes applis confondues, avec les mêmes actions |

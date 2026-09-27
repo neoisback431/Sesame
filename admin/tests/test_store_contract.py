@@ -107,6 +107,21 @@ async def test_user_views_and_session_revocation_contract(store):
     assert {u for u, _ in await store.search_users(tag, 10)} == {user, other}
     assert await store.search_users("%", 10) == []  # jokers SQL échappés
 
+    # known_users : titulaires d'un compte + personnes déjà connectées au portail (sans compte).
+    ghost = f"ghost-{tag}"
+    if isinstance(store, MemoryAccountStore):
+        store.portal_users.add(ghost)
+    else:
+        await (await store.pool()).execute(
+            """INSERT INTO portal_sessions (id_hash, issuer, subject, user_key, created_at, expires_at)
+               VALUES ($1, 'https://idp.test', 'sub', $2, now(), now() + interval '1 hour')""",
+            uuid.uuid4().hex,
+            ghost,
+        )
+    known = await store.known_users(10000)
+    assert {user, other, ghost} <= set(known)
+    assert known == sorted(known) and len(known) == len(set(known))  # trié, sans doublon
+
     await seed_app_session(store, f"app-a-{tag}", user)
     await seed_app_session(store, f"app-a-{tag}", other)
     assert await store.revoke_app_sessions(f"app-a-{tag}", user) == 1
