@@ -7,6 +7,9 @@
 //! posés par l'appli sont remplacées par `***` : elles ne servent pas à corriger un
 //! descripteur.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
 use reqwest::header::{HeaderMap, SET_COOKIE};
 use zeroize::Zeroizing;
 
@@ -64,7 +67,7 @@ impl Masker {
                 out = out.replace(n.as_str(), MASK);
             }
         }
-        out
+        mask_tokens(&out)
     }
 
     /// En-têtes de réponse : secrets masqués, valeurs de `Set-Cookie` remplacées.
@@ -92,6 +95,30 @@ impl Masker {
         }
         (self.mask(&body[..end]), truncated)
     }
+}
+
+/// Jetons émis par l'appli (réponse JSON d'un login par jeton, JWT, `Bearer`, paramètres
+/// `*_token=`) : masqués aussi, ils ouvrent une session aussi sûrement qu'un cookie.
+fn mask_tokens(text: &str) -> String {
+    static PATTERNS: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|| {
+        let re = |p: &str| Regex::new(p).expect("regex statique");
+        [
+            (
+                re(r#"("[\w-]*(?i:token|secret|jwt|session|password|passwd|api_?key)[\w-]*"\s*:\s*)"[^"]*""#),
+                "${1}\"***\"",
+            ),
+            (re(r"eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]+"), MASK),
+            (re(r"(?i)(bearer\s+)[\w.~+/=-]+"), "${1}***"),
+            (re(r#"(?i)((?:access|refresh|id)?_?token=)[^&\s"']+"#), "${1}***"),
+        ]
+    });
+    let mut out = text.to_owned();
+    for (re, with) in PATTERNS.iter() {
+        if re.is_match(&out) {
+            out = re.replace_all(&out, *with).into_owned();
+        }
+    }
+    out
 }
 
 /// `name=valeur; Path=/` → `name=***; Path=/` (le nom et les attributs aident au diagnostic).
@@ -134,6 +161,28 @@ mod tests {
         assert!(out.contains(&("set-cookie".into(), "sid=***; Path=/; HttpOnly".into())));
         assert!(out.contains(&("set-cookie".into(), "lang=***".into())));
         assert!(out.contains(&("location".into(), "/login?error=***".into())));
+    }
+
+    #[test]
+    fn tokens_issued_by_the_app_are_masked() {
+        let m = Masker::new([]);
+        let body = r#"{"accessToken":"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjJ9.sig-123","refreshToken":"a3d5","user":{"id":2,"name":"kevin"},"expires_in":900}"#;
+        let out = m.mask(body);
+        assert!(!out.contains("eyJ") && !out.contains("a3d5"), "{out}");
+        assert!(out.contains(r#""accessToken":"***""#) && out.contains(r#""name":"kevin""#));
+        assert!(
+            out.contains(r#""expires_in":900"#),
+            "valeurs non sensibles conservées"
+        );
+        assert_eq!(
+            m.mask("Authorization: Bearer abc.def"),
+            "Authorization: Bearer ***"
+        );
+        assert_eq!(
+            m.mask("/cb?access_token=xyz&state=1"),
+            "/cb?access_token=***&state=1"
+        );
+        assert_eq!(m.mask("jwt eyJabcdef.eyJghijkl.zzz fin"), "jwt *** fin");
     }
 
     #[test]
