@@ -35,6 +35,10 @@ Le formulaire guidé n'impose plus de groupe : laissé vide, il omet `access`.
   **puis** vérification du compte `active` avant toute lecture du coffre.
 - Un compte erroné (mauvaise clé) donne accès à cet utilisateur-là uniquement ; le point
   de contrôle reste le provisionnement, réservé aux administrateurs et audité.
+- Les applis créées avant ce changement gardent le groupe par défaut (`<id>-users`) : la
+  page de l'appli dans l'admin signale toute restriction (« un compte ne suffit pas ») et
+  propose « Ouvrir à tous les titulaires d'un compte », qui retire `spec.access` (nouvelle
+  révision, audit `descriptor_updated`). Le message de provisionnement le rappelle aussi.
 - Portée : schéma (`access` retiré des champs requis, plus d'`anyOf`), Rust
   (`Spec.access` défaut, `Access::allows` vrai si vide, contrôle retiré de `validate`),
   Python (`descriptors.py` : `allows`, `app_from_doc`, formulaire guidé), portail et proxy
