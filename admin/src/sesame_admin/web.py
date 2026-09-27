@@ -53,6 +53,8 @@ _GUIDED = (
     "csrf_field",
     "session_cookie",
     "failure_text",
+    "session_mode",
+    "handoff_local_storage",
 )
 
 

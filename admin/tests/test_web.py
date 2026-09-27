@@ -6,6 +6,7 @@ import html
 import re
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from sesame_admin.audit import MemoryAuditSink
 from sesame_admin.auth import AuthError
@@ -660,3 +661,36 @@ def test_handoff_app_shows_the_notice(ctx):
     page = client.get("/apps/chat").text
     assert 'id="handoff-notice"' in page and "mode handoff" in page
     assert asyncio.run(service.app("chat")).session_mode == "handoff"
+
+
+def test_guided_form_handoff_local_storage(ctx):
+    """Le formulaire guidé produit un descripteur handoff (session par jeton) valide."""
+    client, service, *_ = ctx
+    login(client)
+    token = csrf(client, "/apps/new")
+    form = {
+        **GUIDED,
+        "session_cookie": "",
+        "session_mode": "handoff",
+        "handoff_local_storage": "refreshToken accessToken:data.token",
+    }
+    text = editor_text(client.post("/apps/new", data={"csrf": token, **form}).text)
+    assert "mode: handoff" in text
+    doc = service.validator.ordered(yaml.safe_load(text))
+    assert service.validator.check(doc) == [], service.validator.check(doc)
+    ls = doc["spec"]["session"]["handoff"]["local_storage"]
+    assert {"key": "refreshToken", "from_response": "refreshToken"} in ls
+    assert {"key": "accessToken", "from_response": "data.token"} in ls
+    assert "cookies" not in doc["spec"]["session"]
+
+
+def test_guided_form_handoff_cookie(ctx):
+    client, service, *_ = ctx
+    login(client)
+    token = csrf(client, "/apps/new")
+    form = {**GUIDED, "session_cookie": "SID", "session_mode": "handoff"}
+    text = editor_text(client.post("/apps/new", data={"csrf": token, **form}).text)
+    doc = yaml.safe_load(text)
+    assert service.validator.check(doc) == []
+    assert doc["spec"]["session"]["handoff"]["set_cookies"] == ["SID"]
+    assert doc["spec"]["session"]["cookies"] == ["SID"]

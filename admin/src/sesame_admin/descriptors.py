@@ -304,7 +304,17 @@ def draft(form: dict[str, str]) -> dict[str, Any]:
     get = lambda name, default="": form.get(name, "").strip() or default  # noqa: E731
     base_url = get("base_url").rstrip("/")
     form_url = get("form_url", "/login")
-    cookie = get("session_cookie", "SESSIONID")
+    handoff_mode = get("session_mode") == "handoff"
+    raw_cookie = form.get("session_cookie", "").strip()
+    # En mode handoff, le cookie est facultatif (session par jeton possible) ; en mode proxy,
+    # il est requis, avec une valeur par défaut à relire.
+    cookie = raw_cookie or ("" if handoff_mode else "SESSIONID")
+    # local_storage : entrées « clé » ou « clé:champ_de_réponse », séparées par espaces/virgules.
+    handoff_ls = []
+    for tok in re.split(r"[\s,]+", form.get("handoff_local_storage", "")):
+        if tok:
+            key, _, resp = tok.partition(":")
+            handoff_ls.append({"key": key, "from_response": resp or key})
     metadata: dict[str, Any] = {"id": get("id"), "name": get("name"), "revision": 1}
     if get("description"):
         metadata["description"] = get("description")
@@ -325,17 +335,23 @@ def draft(form: dict[str, str]) -> dict[str, Any]:
     }
     if get("csrf_field"):
         login["csrf"] = [{"source": "hidden_input", "name": get("csrf_field")}]
-    login["success"] = {
-        "any_of": [
-            {
-                "status": [302, 303],
-                "location_not_matches": "^" + _regex_literal(form_url),
-                "cookie_set": cookie,
-            }
-        ]
-    }
+    success: dict[str, Any] = {"status": [302, 303], "location_not_matches": "^" + _regex_literal(form_url)}
+    if cookie:
+        success["cookie_set"] = cookie
+    login["success"] = {"any_of": [success]}
     if get("failure_text"):
         login["failure"] = {"any_of": [{"body_contains": get("failure_text")}]}
+    # Session : proxy (cookie relayé côté serveur) ou handoff (remis au navigateur, ADR 0020).
+    if handoff_mode:
+        handoff: dict[str, Any] = {}
+        if cookie:
+            handoff["set_cookies"] = [cookie]
+        if handoff_ls:
+            handoff["local_storage"] = handoff_ls
+        session: dict[str, Any] = {"mode": "handoff", **({"cookies": [cookie]} if cookie else {})}
+        session["handoff"] = handoff
+    else:
+        session = {"cookies": [cookie]}
     return {
         "apiVersion": "sesame/v1",
         "kind": "AppDescriptor",
@@ -350,7 +366,7 @@ def draft(form: dict[str, str]) -> dict[str, Any]:
             **({"access": access} if access else {}),
             "credentials": {"mode": "per_user", "keys": ["username", "password"]},
             "login": login,
-            "session": {"cookies": [cookie]},
+            "session": session,
             "expiry": {
                 "any_of": [
                     {

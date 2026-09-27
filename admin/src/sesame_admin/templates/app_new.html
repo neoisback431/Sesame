@@ -74,10 +74,25 @@
     <div><label for="username_field">Nom du champ identifiant</label><input type="text" id="username_field" name="username_field" value="username"></div>
     <div><label for="password_field">Nom du champ mot de passe</label><input type="text" id="password_field" name="password_field" value="password"></div>
     <div><label for="csrf_field">Champ caché CSRF (facultatif)</label><input type="text" id="csrf_field" name="csrf_field"></div>
-    <div><label for="session_cookie">Cookie de session de l'appli</label><input type="text" id="session_cookie" name="session_cookie" required></div>
+    <div><label for="session_cookie">Cookie de session de l'appli</label><input type="text" id="session_cookie" name="session_cookie"></div>
     <div><label for="failure_text">Texte affiché en cas d'échec de connexion (facultatif)</label>
       <input type="text" id="failure_text" name="failure_text"></div>
   </div>
+  <h2>Session</h2>
+  <div class="grid">
+    <div><label for="session_mode">Mode</label>
+      <select id="session_mode" name="session_mode">
+        <option value="proxy">proxy — Sesame relaie chaque requête (défaut, recommandé)</option>
+        <option value="handoff">handoff — Sesame remet la session au navigateur (ADR 0020)</option>
+      </select></div>
+    <div><label for="handoff_local_storage">Handoff : clés de stockage local (facultatif)</label>
+      <input type="text" id="handoff_local_storage" name="handoff_local_storage"
+        placeholder="refreshToken  ou  jeton:accessToken"></div>
+  </div>
+  <p class="muted">Mode <strong>handoff</strong> : réservé aux applis où le proxy est impossible (SPA qui lisent
+    leur cookie ou gardent un jeton dans le navigateur). La session (cookie ci-dessus et/ou valeurs de stockage
+    local, format <code>clé</code> ou <code>clé:champ_de_réponse</code>) est remise au navigateur : elle devient
+    visible et copiable, la déconnexion n'est plus immédiate. À n'utiliser qu'en connaissance de cause.</p>
   <p><button type="submit">Continuer vers l'éditeur</button></p>
 </form>
 {% endblock %}
