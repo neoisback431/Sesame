@@ -17,6 +17,8 @@ spec:
     base_url: http://mon-appli.interne:8080   # adresse jointe par le proxy
   public:
     host: mon-appli.sesame.example            # adresse exposée par Sesame
+    # start_path: /accueil                    # page ouverte par la tuile (défaut /) : utile si
+    #                                         # la racine affiche le login même une fois connecté
   # access est FACULTATIF : sans lui, tout utilisateur avec un compte actif est autorisé.
   # Présent, il restreint en plus aux groupes (claim OIDC) et/ou utilisateurs listés.
   access:

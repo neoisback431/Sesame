@@ -163,6 +163,12 @@
           "description": "Nom d'hôte sous lequel le portail expose l'appli. Une appli par nom d'hôte : évite de réécrire les chemins.",
           "type": "string",
           "pattern": "^[a-z0-9.-]+(:[0-9]+)?$"
+        },
+        "start_path": {
+          "description": "Page d'arrivée ouverte par la tuile du portail (défaut : /). Utile quand la racine de l'appli affiche le formulaire de login même une fois connecté.",
+          "type": "string",
+          "pattern": "^/[^\\s]*$",
+          "default": "/"
         }
       }
     },
