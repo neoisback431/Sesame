@@ -326,6 +326,14 @@ impl AppDescriptor {
         Ok(descriptor)
     }
 
+    /// Descripteur stocké en base (document JSON), avec les mêmes contrôles.
+    pub fn from_json(value: serde_json::Value) -> Result<Self, DescriptorError> {
+        let descriptor: Self =
+            serde_json::from_value(value).map_err(|e| DescriptorError::Invalid(format!("document : {e}")))?;
+        descriptor.validate()?;
+        Ok(descriptor)
+    }
+
     pub fn from_file(path: &Path) -> Result<Self, DescriptorError> {
         let text = std::fs::read_to_string(path).map_err(|source| DescriptorError::Io {
             path: path.display().to_string(),
@@ -539,6 +547,19 @@ mod tests {
         let text = FAKE_APP.replace(r#"paths: ["^/logout$"]"#, r#"paths: ["(unclosed"]"#);
         assert!(matches!(
             AppDescriptor::from_yaml(&text),
+            Err(DescriptorError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn parses_json_documents() {
+        let yaml: serde_json::Value = serde_yaml::from_str(FAKE_APP).unwrap();
+        let d = AppDescriptor::from_json(yaml.clone()).expect("document JSON valide");
+        assert_eq!(d.metadata.id, "fake-app");
+        let mut bad = yaml;
+        bad["spec"]["login"]["fields"]["password"] = serde_json::json!({"from_secret": "pin"});
+        assert!(matches!(
+            AppDescriptor::from_json(bad),
             Err(DescriptorError::Invalid(_))
         ));
     }

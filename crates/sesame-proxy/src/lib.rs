@@ -14,7 +14,7 @@ pub mod replay;
 pub mod rewrite;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 
 use axum::body::{to_bytes, Body, Bytes};
@@ -100,9 +100,11 @@ pub fn build_client(d: &AppDescriptor, extra_ca: Option<&[u8]>) -> Result<reqwes
 /// Verrou de rejeu d'un couple (session portail, appli).
 type ReplayLock = Arc<tokio::sync::Mutex<()>>;
 
+/// Applis par nom d'hôte public (`host[:port]`), remplacées d'un bloc au rechargement.
+type AppMap = Arc<HashMap<String, Arc<App>>>;
+
 pub struct Proxy {
-    /// Appli par nom d'hôte public (`host[:port]`).
-    pub apps: HashMap<String, Arc<App>>,
+    apps: RwLock<AppMap>,
     pub portal_url: Url,
     pub cookie: PortalCookie,
     pub sessions: Arc<dyn SessionStore>,
@@ -123,10 +125,7 @@ impl Proxy {
         max_body_bytes: usize,
     ) -> Self {
         Self {
-            apps: apps
-                .into_iter()
-                .map(|a| (a.descriptor.spec.public.host.clone(), Arc::new(a)))
-                .collect(),
+            apps: RwLock::new(index(apps)),
             portal_url,
             cookie,
             sessions,
@@ -136,19 +135,59 @@ impl Proxy {
             locks: Mutex::new(HashMap::new()),
         }
     }
+
+    /// Remplace le catalogue (rechargement à chaud). Les requêtes en cours gardent
+    /// l'appli qu'elles ont déjà résolue.
+    pub fn set_apps(&self, apps: Vec<App>) {
+        *self.apps.write().unwrap_or_else(|e| e.into_inner()) = index(apps);
+    }
+
+    pub fn app(&self, host: &str) -> Option<Arc<App>> {
+        self.apps
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(host)
+            .cloned()
+    }
+
+    pub fn app_count(&self) -> usize {
+        self.apps.read().unwrap_or_else(|e| e.into_inner()).len()
+    }
+}
+
+fn index(apps: Vec<App>) -> AppMap {
+    Arc::new(
+        apps.into_iter()
+            .map(|a| (a.descriptor.spec.public.host.clone(), Arc::new(a)))
+            .collect(),
+    )
+}
+
+/// Construit les applis d'un catalogue ; une appli dont le client HTTP ne peut être
+/// construit (CA illisible…) est écartée et signalée.
+pub fn build_apps(
+    descriptors: Vec<AppDescriptor>,
+    extra_ca: Option<&[u8]>,
+    scheme: &str,
+) -> (Vec<App>, Vec<String>) {
+    let mut apps = Vec::new();
+    let mut rejected = Vec::new();
+    for d in descriptors {
+        match build_client(&d, extra_ca) {
+            Ok(http) => apps.push(App::new(d, http, scheme)),
+            Err(e) => rejected.push(format!("{} : client HTTP : {e}", d.metadata.id)),
+        }
+    }
+    (apps, rejected)
 }
 
 pub fn router(proxy: Arc<Proxy>) -> Router {
-    let apps = proxy.apps.len();
+    let health = |State(p): State<Arc<Proxy>>| async move {
+        Json(serde_json::json!({ "status": "ok", "apps": p.app_count() }))
+    };
     Router::new()
-        .route(
-            "/.sesame/healthz",
-            get(move || async move { Json(serde_json::json!({ "status": "ok", "apps": apps })) }),
-        )
-        .route(
-            "/healthz",
-            get(move || async move { Json(serde_json::json!({ "status": "ok", "apps": apps })) }),
-        )
+        .route("/.sesame/healthz", get(health))
+        .route("/healthz", get(health))
         .fallback(handle)
         .with_state(proxy)
 }
@@ -518,7 +557,7 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
         .and_then(|h| h.to_str().ok())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let Some(app) = p.apps.get(&host).cloned() else {
+    let Some(app) = p.app(&host) else {
         return p.page(
             StatusCode::NOT_FOUND,
             "Application inconnue",

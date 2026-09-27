@@ -13,8 +13,8 @@ use chrono::{DateTime, Utc};
 use sesame_core::crypto::CookieCipher;
 use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{
-    AccountRegistry, AccountStatus, AppAccount, AppSession, PortError, PortResult, PortalSession,
-    SessionStore,
+    AccountRegistry, AccountStatus, AppAccount, AppSession, DescriptorStore, PortError, PortResult,
+    PortalSession, SessionStore, StoredDescriptor,
 };
 use sesame_core::secret::{AppCookie, ExposeSecret, SecretString};
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -346,5 +346,96 @@ impl AccountRegistry for PgStore {
             .await
             .map_err(db_err)?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl DescriptorStore for PgStore {
+    async fn list_descriptors(&self) -> PortResult<Vec<StoredDescriptor>> {
+        let rows = sqlx::query(
+            "SELECT app_id, revision, document, updated_at, updated_by FROM app_descriptors ORDER BY app_id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        rows.iter()
+            .map(|r| {
+                Ok(StoredDescriptor {
+                    app_id: r.try_get("app_id")?,
+                    revision: r.try_get::<i32, _>("revision")?.max(0) as u32,
+                    document: r.try_get("document")?,
+                    updated_at: r.try_get::<DateTime<Utc>, _>("updated_at")?.into(),
+                    updated_by: r.try_get("updated_by")?,
+                })
+            })
+            .collect::<Result<_, sqlx::Error>>()
+            .map_err(db_err)
+    }
+
+    async fn version(&self) -> PortResult<i64> {
+        sqlx::query_scalar("SELECT coalesce(max(id), 0) FROM app_descriptor_history")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db_err)
+    }
+
+    async fn put_descriptor(
+        &self,
+        app_id: &str,
+        document: serde_json::Value,
+        by: Option<&str>,
+    ) -> PortResult<u32> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        let revision: i32 = sqlx::query_scalar(
+            "INSERT INTO app_descriptors (app_id, revision, document, updated_by) VALUES ($1, 1, $2, $3)
+             ON CONFLICT (app_id) DO UPDATE
+             SET revision = app_descriptors.revision + 1, document = EXCLUDED.document,
+                 updated_at = now(), updated_by = EXCLUDED.updated_by
+             RETURNING revision",
+        )
+        .bind(app_id)
+        .bind(&document)
+        .bind(by)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        sqlx::query(
+            "INSERT INTO app_descriptor_history (app_id, revision, action, document, changed_by)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(app_id)
+        .bind(revision)
+        .bind(if revision == 1 { "created" } else { "updated" })
+        .bind(&document)
+        .bind(by)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        Ok(revision.max(0) as u32)
+    }
+
+    async fn delete_descriptor(&self, app_id: &str, by: Option<&str>) -> PortResult<()> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        let revision: Option<i32> =
+            sqlx::query_scalar("DELETE FROM app_descriptors WHERE app_id = $1 RETURNING revision")
+                .bind(app_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_err)?;
+        let Some(revision) = revision else {
+            return Err(PortError::NotFound);
+        };
+        sqlx::query(
+            "INSERT INTO app_descriptor_history (app_id, revision, action, changed_by)
+             VALUES ($1, $2, 'deleted', $3)",
+        )
+        .bind(app_id)
+        .bind(revision)
+        .bind(by)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)
     }
 }

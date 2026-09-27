@@ -244,3 +244,21 @@ async fn concurrent_requests_trigger_a_single_replay() {
     assert_eq!(b.mock.logins.load(Ordering::SeqCst), 1);
     assert_eq!(b.secrets.reads(), 1);
 }
+
+#[tokio::test]
+async fn catalog_hot_reload_adds_and_removes_apps() {
+    let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
+    assert_eq!(b.get("/").await.status, StatusCode::OK);
+
+    // Catalogue vidé : l'hôte n'est plus servi, sans redémarrage.
+    b.engine.set_apps(Vec::new());
+    assert_eq!(b.engine.app_count(), 0);
+    assert_eq!(b.get("/").await.status, StatusCode::NOT_FOUND);
+
+    // Appli rajoutée (comme après une création dans l'UI d'admin) : de nouveau servie.
+    let d = descriptor(&b.internal);
+    let (apps, rejected) = sesame_proxy::build_apps(vec![d], None, "https");
+    assert!(rejected.is_empty());
+    b.engine.set_apps(apps);
+    assert!(b.get("/").await.body.contains("Bonjour amartin"));
+}

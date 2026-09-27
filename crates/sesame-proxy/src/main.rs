@@ -6,11 +6,11 @@ use std::time::{Duration, SystemTime};
 
 use sesame_core::audit::StdoutAuditSink;
 use sesame_core::crypto::CookieCipher;
-use sesame_core::descriptor::load_dir;
-use sesame_core::ports::{SecretStore, SessionStore};
+use sesame_core::ports::{DescriptorStore, SecretStore, SessionStore};
+use sesame_core::sources::{log_rejected, watch, DescriptorSource};
 use sesame_proxy::config::{ProxyConfig, SecretStoreConfig};
 use sesame_proxy::replay::Replayer;
-use sesame_proxy::{build_client, router, App, Proxy};
+use sesame_proxy::{build_apps, router, Proxy};
 use sesame_secrets_openbao::{OpenBaoConfig, OpenBaoSecretStore};
 use sesame_store_postgres::PgStore;
 
@@ -22,20 +22,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = ProxyConfig::from_env()?;
     let ca = cfg.ca_file.as_ref().map(std::fs::read).transpose()?;
 
-    let descriptors = load_dir(&cfg.descriptors_dir)?;
-    let scheme = cfg.portal_url.scheme().to_owned();
-    let apps = descriptors
-        .into_iter()
-        .map(|d| {
-            let http = build_client(&d, ca.as_deref())?;
-            Ok(App::new(d, http, &scheme))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    tracing::info!(count = apps.len(), "descripteurs chargés");
-
     let cipher = CookieCipher::from_base64(&cfg.session_key)?;
     let store = Arc::new(PgStore::connect(&cfg.database_url, Some(cipher)).await?);
     store.migrate().await?;
+
+    // Catalogue : fichiers (Git, lecture seule) + base (UI d'administration).
+    let descriptor_store: Arc<dyn DescriptorStore> = store.clone();
+    let source = Arc::new(DescriptorSource::new(
+        Some(cfg.descriptors_dir.clone()),
+        Some(descriptor_store),
+    )?);
+    let initial_version = source.version().await?;
+    let catalog = source.load().await?;
+    log_rejected(&catalog);
+    let scheme = cfg.portal_url.scheme().to_owned();
+    let (apps, rejected) = build_apps(catalog.descriptors, ca.as_deref(), &scheme);
+    rejected
+        .iter()
+        .for_each(|r| tracing::error!(reason = %r, "appli écartée"));
+    tracing::info!(count = apps.len(), "descripteurs chargés");
 
     let secrets: Arc<dyn SecretStore> = match cfg.secret_store {
         SecretStoreConfig::OpenBao {
@@ -79,6 +84,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         audit,
         replayer,
         cfg.max_body_bytes,
+    ));
+
+    // Rechargement à chaud des descripteurs créés ou modifiés dans l'UI d'administration.
+    let reloaded = proxy.clone();
+    tokio::spawn(watch(
+        source,
+        cfg.reload_interval,
+        initial_version,
+        move |catalog| {
+            log_rejected(&catalog);
+            let (apps, rejected) = build_apps(catalog.descriptors, ca.as_deref(), &scheme);
+            rejected
+                .iter()
+                .for_each(|r| tracing::error!(reason = %r, "appli écartée"));
+            tracing::info!(count = apps.len(), "catalogue des applis rechargé");
+            reloaded.set_apps(apps);
+        },
     ));
 
     // Purge périodique des sessions expirées : PostgreSQL n'a pas de TTL natif.

@@ -10,8 +10,8 @@ use async_trait::async_trait;
 
 use crate::audit::AuditEvent;
 use crate::ports::{
-    AccountRegistry, AccountStatus, AppAccount, AppSession, AuditSink, PortError, PortResult, PortalSession,
-    SecretStore, SessionStore,
+    AccountRegistry, AccountStatus, AppAccount, AppSession, AuditSink, DescriptorStore, PortError,
+    PortResult, PortalSession, SecretStore, SessionStore, StoredDescriptor,
 };
 use crate::secret::{Credential, ExposeSecret, SecretString};
 
@@ -211,6 +211,52 @@ impl MemoryAuditSink {
 impl AuditSink for MemoryAuditSink {
     async fn record(&self, event: AuditEvent) -> PortResult<()> {
         locked(&self.events).push(event);
+        Ok(())
+    }
+}
+
+/// Descripteurs en mémoire.
+#[derive(Default)]
+pub struct MemoryDescriptorStore {
+    entries: Mutex<BTreeMap<String, StoredDescriptor>>,
+    version: Mutex<i64>,
+}
+
+#[async_trait]
+impl DescriptorStore for MemoryDescriptorStore {
+    async fn list_descriptors(&self) -> PortResult<Vec<StoredDescriptor>> {
+        Ok(locked(&self.entries).values().cloned().collect())
+    }
+
+    async fn version(&self) -> PortResult<i64> {
+        Ok(*locked(&self.version))
+    }
+
+    async fn put_descriptor(
+        &self,
+        app_id: &str,
+        document: serde_json::Value,
+        by: Option<&str>,
+    ) -> PortResult<u32> {
+        let mut entries = locked(&self.entries);
+        let revision = entries.get(app_id).map_or(1, |d| d.revision + 1);
+        entries.insert(
+            app_id.to_owned(),
+            StoredDescriptor {
+                app_id: app_id.to_owned(),
+                revision,
+                document,
+                updated_at: SystemTime::now(),
+                updated_by: by.map(str::to_owned),
+            },
+        );
+        *locked(&self.version) += 1;
+        Ok(revision)
+    }
+
+    async fn delete_descriptor(&self, app_id: &str, _by: Option<&str>) -> PortResult<()> {
+        locked(&self.entries).remove(app_id).ok_or(PortError::NotFound)?;
+        *locked(&self.version) += 1;
         Ok(())
     }
 }

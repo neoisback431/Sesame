@@ -14,7 +14,7 @@ pub mod catalog;
 pub mod config;
 pub mod oidc;
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Query, State};
@@ -43,7 +43,8 @@ pub struct Portal {
     pub public_url: Url,
     pub cookie: PortalCookie,
     pub session_ttl: Duration,
-    pub descriptors: Vec<AppDescriptor>,
+    /// Catalogue des applis, remplacé d'un bloc au rechargement à chaud.
+    pub descriptors: RwLock<Arc<Vec<AppDescriptor>>>,
     pub oidc: Oidc,
     pub state_cipher: CookieCipher,
     pub sessions: Arc<dyn SessionStore>,
@@ -99,6 +100,14 @@ fn redirect(to: &str, set_cookies: &[String]) -> Response {
 }
 
 impl Portal {
+    pub fn descriptors(&self) -> Arc<Vec<AppDescriptor>> {
+        self.descriptors.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn set_descriptors(&self, descriptors: Vec<AppDescriptor>) {
+        *self.descriptors.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(descriptors);
+    }
+
     fn error(&self, status: StatusCode, title: &str, message: &str, cid: &str) -> Response {
         let html = error_page(title, message, cid, self.public_url.as_str());
         (status, [(CACHE_CONTROL, "no-store")], Html(html)).into_response()
@@ -152,7 +161,8 @@ async fn home(State(p): State<AppState>, headers: HeaderMap) -> Response {
             );
         }
     };
-    let tiles = catalog::tiles(&p.descriptors, &session.user, &accounts);
+    let descriptors = p.descriptors();
+    let tiles = catalog::tiles(&descriptors, &session.user, &accounts);
     let html = catalog::render(&session.user, &tiles, p.public_url.scheme());
     ([(CACHE_CONTROL, "no-store")], Html(html)).into_response()
 }
@@ -165,7 +175,7 @@ struct LoginQuery {
 async fn login(State(p): State<AppState>, Query(q): Query<LoginQuery>) -> Response {
     p.start_login(safe_return_to(
         &p.public_url,
-        &p.descriptors,
+        &p.descriptors(),
         q.return_to.as_deref(),
     ))
 }

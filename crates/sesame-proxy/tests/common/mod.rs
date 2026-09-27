@@ -194,6 +194,8 @@ pub async fn spawn_mock() -> (Mock, String) {
 
 pub struct Bench {
     pub proxy: Router,
+    /// Accès direct au moteur (rechargement à chaud du catalogue).
+    pub engine: Arc<Proxy>,
     pub mock: Mock,
     pub internal: String,
     pub sessions: Arc<MemorySessionStore>,
@@ -266,8 +268,10 @@ pub async fn bench(groups: &[&str], password: &str, with_account: bool) -> Bench
         },
         1024 * 1024,
     );
+    let engine = Arc::new(proxy);
     Bench {
-        proxy: router(Arc::new(proxy)),
+        proxy: router(engine.clone()),
+        engine,
         mock,
         internal,
         sessions,

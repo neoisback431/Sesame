@@ -45,3 +45,12 @@ async fn postgres_account_registry() {
     store.seed_account("app1", &user).await.unwrap();
     contract::account_registry(&store, "app1", &user).await;
 }
+
+#[tokio::test]
+async fn postgres_descriptor_store() {
+    let Some(store) = store().await else {
+        eprintln!("SESAME_TEST_DATABASE_URL absente : test ignoré");
+        return;
+    };
+    contract::descriptor_store(&store, &unique("pg")).await;
+}

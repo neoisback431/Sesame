@@ -124,6 +124,37 @@ pub trait AccountRegistry: Send + Sync {
     async fn record_login(&self, app_id: &str, user_key: &str, at: SystemTime) -> PortResult<()>;
 }
 
+/// Descripteur stocké en base (créé ou modifié depuis l'UI d'administration).
+#[derive(Debug, Clone)]
+pub struct StoredDescriptor {
+    pub app_id: String,
+    pub revision: u32,
+    /// Document conforme à `schemas/app-descriptor.schema.json`, non encore validé.
+    pub document: serde_json::Value,
+    pub updated_at: SystemTime,
+    pub updated_by: Option<String>,
+}
+
+/// Descripteurs d'applis stockés en base, avec historique des révisions.
+///
+/// Portail et proxy lisent (`list_descriptors`, `version`) ; l'écriture vient de
+/// l'UI d'administration. Les descripteurs en fichiers (Git) restent possibles,
+/// en lecture seule, à côté.
+#[async_trait]
+pub trait DescriptorStore: Send + Sync {
+    async fn list_descriptors(&self) -> PortResult<Vec<StoredDescriptor>>;
+    /// Change à chaque création, modification ou suppression : sert au rechargement à chaud.
+    async fn version(&self) -> PortResult<i64>;
+    /// Crée ou remplace le descripteur ; la révision est incrémentée et historisée.
+    async fn put_descriptor(
+        &self,
+        app_id: &str,
+        document: serde_json::Value,
+        by: Option<&str>,
+    ) -> PortResult<u32>;
+    async fn delete_descriptor(&self, app_id: &str, by: Option<&str>) -> PortResult<()>;
+}
+
 /// Journal d'audit dédié.
 #[async_trait]
 pub trait AuditSink: Send + Sync {

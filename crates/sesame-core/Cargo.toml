@@ -14,7 +14,7 @@ base64.workspace = true
 chrono.workspace = true
 rand.workspace = true
 sha2.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 zeroize.workspace = true
 regex.workspace = true
 secrecy.workspace = true
@@ -30,7 +30,7 @@ tracing-subscriber.workspace = true
 contract = []
 
 [dev-dependencies]
-tokio.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

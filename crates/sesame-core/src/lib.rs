@@ -18,4 +18,5 @@ pub mod identity;
 pub mod memory;
 pub mod ports;
 pub mod secret;
+pub mod sources;
 pub mod telemetry;

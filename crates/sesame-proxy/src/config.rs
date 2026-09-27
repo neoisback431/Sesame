@@ -18,6 +18,8 @@ pub struct ProxyConfig {
     pub session_key: SecretString,
     pub ca_file: Option<PathBuf>,
     pub max_body_bytes: usize,
+    /// Intervalle de vérification du catalogue en base (rechargement à chaud).
+    pub reload_interval: std::time::Duration,
     pub secret_store: SecretStoreConfig,
 }
 
@@ -64,6 +66,7 @@ impl ProxyConfig {
             max_body_bytes: config::or("SESAME_MAX_BODY_BYTES", "33554432")
                 .parse()
                 .map_err(|_| ConfigError("SESAME_MAX_BODY_BYTES : entier attendu".into()))?,
+            reload_interval: config::duration("SESAME_DESCRIPTORS_RELOAD", "10s")?,
             secret_store,
         })
     }

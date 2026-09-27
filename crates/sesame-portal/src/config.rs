@@ -16,6 +16,8 @@ pub struct PortalConfig {
     pub cookie: PortalCookie,
     pub session_ttl: Duration,
     pub descriptors_dir: PathBuf,
+    /// Intervalle de vérification du catalogue en base (rechargement à chaud).
+    pub reload_interval: std::time::Duration,
     pub database_url: SecretString,
     /// Clé (base64, 32 octets) chiffrant l'état OIDC temporaire porté par cookie.
     pub state_key: SecretString,
@@ -49,6 +51,7 @@ impl PortalConfig {
             public_url,
             session_ttl: config::duration("SESAME_SESSION_TTL", "8h")?,
             descriptors_dir: config::or("SESAME_DESCRIPTORS_DIR", "descriptors").into(),
+            reload_interval: config::duration("SESAME_DESCRIPTORS_RELOAD", "10s")?,
             database_url: config::secret("SESAME_DATABASE_URL")?,
             state_key: config::secret("SESAME_PORTAL_STATE_KEY")?,
             ca_file: config::optional("SESAME_CA_FILE").map(PathBuf::from),

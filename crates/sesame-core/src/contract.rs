@@ -7,7 +7,9 @@ use std::time::{Duration, SystemTime};
 
 use crate::identity::UserIdentity;
 use crate::memory::cookie_value;
-use crate::ports::{AccountRegistry, AccountStatus, AppSession, PortError, PortalSession, SessionStore};
+use crate::ports::{
+    AccountRegistry, AccountStatus, AppSession, DescriptorStore, PortError, PortalSession, SessionStore,
+};
 use crate::secret::AppCookie;
 
 fn portal_session(id: &str, ttl: Duration) -> PortalSession {
@@ -164,6 +166,50 @@ pub async fn account_registry(registry: &dyn AccountRegistry, app: &str, user: &
     assert!(registry.get_account(app, "personne").await.unwrap().is_none());
 }
 
+/// `prefix` isole les données d'un test à l'autre sur un backend partagé.
+pub async fn descriptor_store(store: &dyn DescriptorStore, prefix: &str) {
+    let id = format!("{prefix}-app");
+    let v0 = store.version().await.unwrap();
+    let doc = serde_json::json!({"metadata": {"id": id, "name": "A"}});
+
+    assert_eq!(
+        store
+            .put_descriptor(&id, doc.clone(), Some("admin"))
+            .await
+            .unwrap(),
+        1
+    );
+    let v1 = store.version().await.unwrap();
+    assert!(v1 > v0);
+    let mut changed = doc.clone();
+    changed["metadata"]["name"] = "B".into();
+    assert_eq!(store.put_descriptor(&id, changed, None).await.unwrap(), 2);
+    assert!(store.version().await.unwrap() > v1);
+
+    let found = store.list_descriptors().await.unwrap();
+    let d = found.iter().find(|d| d.app_id == id).expect("descripteur");
+    assert_eq!(d.revision, 2);
+    assert_eq!(d.document["metadata"]["name"], "B");
+    assert!(d.updated_by.is_none());
+
+    let v2 = store.version().await.unwrap();
+    store.delete_descriptor(&id, Some("admin")).await.unwrap();
+    assert!(store.version().await.unwrap() > v2);
+    assert!(!store
+        .list_descriptors()
+        .await
+        .unwrap()
+        .iter()
+        .any(|d| d.app_id == id));
+    assert!(matches!(
+        store.delete_descriptor(&id, None).await,
+        Err(PortError::NotFound)
+    ));
+    // Recréé après suppression : l'historique continue, la révision repart de 1.
+    assert_eq!(store.put_descriptor(&id, doc, None).await.unwrap(), 1);
+    store.delete_descriptor(&id, None).await.unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use crate::memory::{MemoryAccountRegistry, MemorySessionStore};
@@ -171,6 +217,11 @@ mod tests {
     #[tokio::test]
     async fn memory_session_store() {
         super::session_store(&MemorySessionStore::default(), "t").await;
+    }
+
+    #[tokio::test]
+    async fn memory_descriptor_store() {
+        super::descriptor_store(&crate::memory::MemoryDescriptorStore::default(), "t").await;
     }
 
     #[tokio::test]
