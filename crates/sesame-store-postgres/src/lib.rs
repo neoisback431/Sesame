@@ -13,8 +13,8 @@ use chrono::{DateTime, Utc};
 use sesame_core::crypto::CookieCipher;
 use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{
-    AccountRegistry, AccountStatus, AppAccount, AppSession, DescriptorStore, PortError, PortResult,
-    PortalSession, SessionStore, StoredDescriptor,
+    AccountRegistry, AccountStatus, AppAccount, AppSession, DescriptorStore, DiagnosticStore, PortError,
+    PortResult, PortalSession, ReplayDiagnostic, SessionStore, StoredDescriptor,
 };
 use sesame_core::secret::{AppCookie, ExposeSecret, SecretString};
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -346,6 +346,38 @@ impl AccountRegistry for PgStore {
             .await
             .map_err(db_err)?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl DiagnosticStore for PgStore {
+    async fn put_diagnostic(&self, diagnostic: ReplayDiagnostic) -> PortResult<()> {
+        let document = serde_json::to_value(&diagnostic).map_err(|e| PortError::Other(e.to_string()))?;
+        sqlx::query(
+            "INSERT INTO replay_diagnostics (app_id, user_key, document) VALUES ($1, $2, $3)
+             ON CONFLICT (app_id, user_key) DO UPDATE SET document = $3, created_at = now()",
+        )
+        .bind(&diagnostic.app_id)
+        .bind(&diagnostic.user_key)
+        .bind(document)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn get_diagnostic(&self, app_id: &str, user_key: &str) -> PortResult<Option<ReplayDiagnostic>> {
+        let row = sqlx::query("SELECT document FROM replay_diagnostics WHERE app_id = $1 AND user_key = $2")
+            .bind(app_id)
+            .bind(user_key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
+        row.map(|r| {
+            let doc: serde_json::Value = r.try_get("document").map_err(db_err)?;
+            serde_json::from_value(doc).map_err(|e| PortError::Other(e.to_string()))
+        })
+        .transpose()
     }
 }
 

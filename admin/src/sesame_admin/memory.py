@@ -8,7 +8,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
-from .ports import Account, Conflict, DescriptorRevision, NotFound, Status, StoredDescriptor
+from .ports import Account, Conflict, DescriptorRevision, Diagnostic, NotFound, Status, StoredDescriptor
 
 
 class MemorySecretWriter:
@@ -29,6 +29,8 @@ class MemoryAccountStore:
         self.app_sessions: dict[tuple[str, str], int] = {}
         # Personnes déjà connectées au portail (simulées dans les tests).
         self.portal_users: set[str] = set()
+        # Diagnostics de rejeu (écrits par le proxy en production) : documents JSON.
+        self.diagnostics: dict[tuple[str, str], dict[str, Any]] = {}
 
     async def list_accounts(self, app_id: str) -> list[Account]:
         return sorted((a for a in self.accounts.values() if a.app_id == app_id), key=lambda a: a.user_key)
@@ -53,6 +55,7 @@ class MemoryAccountStore:
     async def delete_account(self, app_id: str, user_key: str) -> None:
         if self.accounts.pop((app_id, user_key), None) is None:
             raise NotFound(user_key)
+        self.diagnostics.pop((app_id, user_key), None)  # ON DELETE CASCADE en base
 
     async def count_by_app(self) -> dict[str, dict[str, int]]:
         counts: dict[str, Counter[str]] = {}
@@ -76,6 +79,10 @@ class MemoryAccountStore:
 
     async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:
         return self.app_sessions.pop((app_id, user_key), 0)
+
+    async def get_diagnostic(self, app_id: str, user_key: str) -> Diagnostic | None:
+        doc = self.diagnostics.get((app_id, user_key))
+        return Diagnostic.from_document(doc) if doc is not None else None
 
 
 def _host(document: dict[str, Any]) -> Any:

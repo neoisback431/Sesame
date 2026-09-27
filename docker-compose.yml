@@ -75,6 +75,8 @@ services:
       SESAME_OPENBAO_ROLE_ID: dev-proxy-role-id
       SESAME_OPENBAO_SECRET_ID: dev-proxy-secret-id
       SESAME_CA_FILE: /etc/sesame/ca.crt
+      # Dev : réponse de l'appli conservée en cas d'échec de rejeu, visible dans l'admin (ADR 0018).
+      SESAME_REPLAY_DEBUG: "true"
       RUST_LOG: info
     volumes:
       - ./descriptors:/etc/sesame/descriptors:ro

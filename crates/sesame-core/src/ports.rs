@@ -124,6 +124,54 @@ pub trait AccountRegistry: Send + Sync {
     async fn record_login(&self, app_id: &str, user_key: &str, at: SystemTime) -> PortResult<()>;
 }
 
+/// Diagnostic du dernier rejeu en échec d'un compte, pour corriger le descripteur depuis
+/// l'administration. Enregistré seulement si l'exploitant l'active (`SESAME_REPLAY_DEBUG`,
+/// ADR 0018). Le proxy y masque les valeurs du coffre (brutes et encodées) et les valeurs
+/// des cookies avant de l'écrire : il reste lisible par les administrateurs.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ReplayDiagnostic {
+    pub app_id: String,
+    pub user_key: String,
+    pub correlation_id: String,
+    /// Code d'échec (`login_unexpected_response`…).
+    pub reason: String,
+    /// Étape de la dernière réponse observée : `login_page` (GET) ou `login_submit` (envoi).
+    pub step: String,
+    pub method: String,
+    pub url: String,
+    /// Noms des champs envoyés (jamais leurs valeurs).
+    pub sent_fields: Vec<String>,
+    pub status: Option<u16>,
+    /// En-têtes de la réponse ; valeurs de `Set-Cookie` remplacées par `***`.
+    pub headers: Vec<(String, String)>,
+    /// Corps de la réponse, tronqué.
+    pub body: String,
+    pub body_truncated: bool,
+    #[serde(with = "unix_secs")]
+    pub at: SystemTime,
+}
+
+mod unix_secs {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    pub fn serialize<S: serde::Serializer>(t: &SystemTime, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_u64(t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()))
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<SystemTime, D::Error> {
+        let secs: u64 = serde::Deserialize::deserialize(d)?;
+        Ok(UNIX_EPOCH + Duration::from_secs(secs))
+    }
+}
+
+/// Diagnostics de rejeu : écrits par le proxy, lus par l'administration.
+#[async_trait]
+pub trait DiagnosticStore: Send + Sync {
+    /// Remplace le diagnostic précédent du compte (seul le dernier est conservé).
+    async fn put_diagnostic(&self, diagnostic: ReplayDiagnostic) -> PortResult<()>;
+    async fn get_diagnostic(&self, app_id: &str, user_key: &str) -> PortResult<Option<ReplayDiagnostic>>;
+}
+
 /// Descripteur stocké en base (créé ou modifié depuis l'UI d'administration).
 #[derive(Debug, Clone)]
 pub struct StoredDescriptor {
