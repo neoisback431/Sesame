@@ -66,8 +66,26 @@ URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_PUBLI
 | `SESAME_OIDC_ISSUER`, `SESAME_OIDC_CLIENT_ID`, `SESAME_OIDC_CLIENT_SECRET` 🔒, `SESAME_OIDC_SCOPES`, `SESAME_OIDC_USER_KEY_CLAIM`, `SESAME_OIDC_GROUPS_CLAIM` | comme le portail | Client OIDC **dédié** à l'administration |
 | `SESAME_OPENBAO_ADDR`, `SESAME_OPENBAO_MOUNT`, `SESAME_OPENBAO_PATH_PREFIX`, `SESAME_OPENBAO_NAMESPACE` | comme le proxy | Coffre |
 | `SESAME_OPENBAO_ROLE_ID`, `SESAME_OPENBAO_SECRET_ID` 🔒 | requis | AppRole **de l'admin** (écriture sans lecture) |
+| `SESAME_RECORDER_URL` | aucun | URL du service recorder interne, ex. `http://recorder:8090`. Active le bouton « Analyser une page de login » |
+| `SESAME_RECORDER_TOKEN` 🔒 | aucun | Jeton partagé avec le recorder. Le bouton n'apparaît que si l'URL **et** le jeton sont fournis |
 
 URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_ADMIN_PUBLIC_URL>/auth/callback`.
+
+## Service recorder (`sesame-recorder`)
+
+Service HTTP **interne** d'analyse d'une page de login, appelé par l'administration (ADR 0016). Jamais exposé via Nginx.
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `SESAME_RECORDER_LISTEN` | `0.0.0.0:8090` | Adresse d'écoute |
+| `SESAME_RECORDER_TOKEN` 🔒 | requis | Jeton attendu (`Authorization: Bearer`), partagé avec l'admin |
+| `SESAME_RECORDER_SCHEMA` | schéma par défaut | Schéma JSON de validation du descripteur proposé |
+| `SESAME_RECORDER_TIMEOUT` | `20` | Délai (s) d'analyse d'une page |
+| `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre les applis en TLS |
+| `SESAME_RECORDER_INSECURE` | `false` | Ne pas vérifier TLS (dev uniquement) |
+| `SESAME_ONBOARD_CHROMIUM` | aucun | Exécutable Chromium, si ce n'est pas celui de l'image |
+
+Aucune allowlist anti-SSRF : le recorder ouvre l'URL fournie (choix de l'exploitant, voir ADR 0016). Garde-fous : service interne, jeton obligatoire, déclencheur réservé aux administrateurs, audit de chaque analyse.
 
 ## Outil d'embarquement (`sesame-onboard`)
 
