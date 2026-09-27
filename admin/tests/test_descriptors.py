@@ -5,7 +5,14 @@ import re
 
 import pytest
 import yaml
-from sesame_admin.descriptors import DescriptorError, DescriptorValidator, draft, merge, parse_yaml
+from sesame_admin.descriptors import (
+    DescriptorError,
+    DescriptorValidator,
+    app_from_doc,
+    draft,
+    merge,
+    parse_yaml,
+)
 from sesame_admin.ports import NotFound, StoredDescriptor
 from sesame_admin.service import InvalidDescriptor, InvalidInput
 
@@ -217,3 +224,27 @@ async def test_delete_is_refused_while_accounts_remain(service):
     await service.delete_descriptor(ADMIN, "crm", 1, "c")
     reasons = [e.reason for e in service.audit.events if e.action == "descriptor_deleted"]
     assert reasons == ["accounts_remaining", "read_only", "conflict", "revision:1"]
+
+
+def test_guided_draft_without_habilitation_omits_access():
+    # Sans groupe ni utilisateur : access absent → le compte actif suffit.
+    d = draft(
+        {
+            "id": "wiki",
+            "name": "Wiki",
+            "public_host": "wiki.sesame.test",
+            "base_url": "http://wiki.interne:8080",
+            "session_cookie": "SID",
+        }
+    )
+    assert V.check(d) == []
+    assert "access" not in d["spec"]
+    app = app_from_doc(d, "ui")
+    assert app.access_open and app.allows("nimporte", ())
+
+
+def test_descriptor_without_access_is_valid_and_open():
+    doc = parse_yaml(descriptor_yaml("wiki2", "wiki2.sesame.test"))
+    doc["spec"].pop("access", None)
+    assert V.check(doc) == []
+    assert app_from_doc(doc, "ui").allows("bob", ())

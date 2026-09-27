@@ -52,6 +52,7 @@ pub struct Metadata {
 pub struct Spec {
     pub upstream: Upstream,
     pub public: Public,
+    #[serde(default)]
     pub access: Access,
     pub credentials: Credentials,
     pub login: Login,
@@ -111,9 +112,16 @@ pub struct Access {
 }
 
 impl Access {
-    /// Autorisé si l'utilisateur est listé ou appartient à l'un des groupes.
+    /// Habilitation vide (aucun groupe ni utilisateur) : autorisé — le compte actif fait foi.
+    /// Sinon, autorisé si l'utilisateur est listé ou appartient à l'un des groupes.
+    pub fn is_empty(&self) -> bool {
+        self.groups.is_empty() && self.users.is_empty()
+    }
+
     pub fn allows(&self, user_key: &str, groups: &[String]) -> bool {
-        self.users.iter().any(|u| u == user_key) || self.groups.iter().any(|g| groups.contains(g))
+        self.is_empty()
+            || self.users.iter().any(|u| u == user_key)
+            || self.groups.iter().any(|g| groups.contains(g))
     }
 }
 
@@ -356,9 +364,6 @@ impl AppDescriptor {
             return invalid("metadata.id invalide".into());
         }
         let spec = &self.spec;
-        if spec.access.groups.is_empty() && spec.access.users.is_empty() {
-            return invalid("access : au moins un groupe ou un utilisateur".into());
-        }
         if spec.credentials.keys.is_empty() {
             return invalid("credentials.keys vide".into());
         }
@@ -521,6 +526,18 @@ mod tests {
         assert!(access.allows("alice", &["g1".into()]));
         assert!(access.allows("carol", &[]));
         assert!(!access.allows("bob", &["g2".into()]));
+        // Habilitation vide : autorisé (le compte actif fait foi).
+        let open = Access::default();
+        assert!(open.is_empty() && open.allows("bob", &[]));
+    }
+
+    #[test]
+    fn descriptor_without_access_is_valid_and_open() {
+        let text = FAKE_APP
+            .replace("  access:\n    groups:\n      - fake-app-users\n", "");
+        let d = AppDescriptor::from_yaml(&text).expect("access facultatif");
+        assert!(d.spec.access.is_empty());
+        assert!(d.spec.access.allows("nimporte", &[]));
     }
 
     #[test]

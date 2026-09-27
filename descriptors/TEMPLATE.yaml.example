@@ -17,8 +17,10 @@ spec:
     base_url: http://mon-appli.interne:8080   # adresse jointe par le proxy
   public:
     host: mon-appli.sesame.example            # adresse exposée par Sesame
+  # access est FACULTATIF : sans lui, tout utilisateur avec un compte actif est autorisé.
+  # Présent, il restreint en plus aux groupes (claim OIDC) et/ou utilisateurs listés.
   access:
-    groups: [groupe-de-l-idp]                 # valeurs du claim de groupes
+    groups: [groupe-de-l-idp]                 # valeurs du claim de groupes (ou retirer le bloc access)
   credentials:
     mode: per_user
     keys: [username, password]                # clés lues dans le coffre

@@ -44,11 +44,14 @@
     <div><label for="base_url">URL de l'appli jointe par le proxy (ex. <code>http://crm.interne:8080</code>)</label>
       <input type="text" id="base_url" name="base_url" required></div>
   </div>
-  <h2>Habilitations</h2>
+  <h2>Habilitations <span class="muted">(facultatif)</span></h2>
+  <p class="muted">Laissez vide pour que <strong>tout utilisateur ayant un compte actif</strong> accède à l'appli
+    (le provisionnement d'un compte vaut autorisation). Remplissez pour <strong>restreindre</strong> en plus à
+    certains groupes (claim OIDC) ou utilisateurs.</p>
   <div class="grid">
     <div><label for="groups">Groupes (claim de groupes ; séparés par des espaces ou virgules)</label>
       <input type="text" id="groups" name="groups"></div>
-    <div><label for="users">Utilisateurs (clés utilisateur, facultatif)</label><input type="text" id="users" name="users"></div>
+    <div><label for="users">Utilisateurs (clés utilisateur)</label><input type="text" id="users" name="users"></div>
   </div>
   <h2>Formulaire de login</h2>
   <div class="grid">
