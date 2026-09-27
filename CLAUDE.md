@@ -115,7 +115,7 @@ Règles :
 | Modèle des credentials | **Par utilisateur** : un compte par couple (appli, utilisateur) dans le coffre | Tranché |
 | Interface d'administration | **UI web dès le départ** (Python) ; authentifiée via le fournisseur d'identité, réservée à un groupe d'administrateurs, actions tracées dans l'audit | Tranché |
 | Briques externes | **Découplées** : interfaces + implémentations interchangeables (voir section dédiée) | Tranché |
-| Licence open source | MIT ou Apache-2.0 (permissive ; Apache-2.0 ajoute une clause explicite sur les brevets) | À trancher |
+| Licence open source | **Apache-2.0** (`LICENSE`, `NOTICE`) | Tranché |
 | Langue du projet | **Français** pour l'instant (docs, commentaires de conception) ; passage à l'anglais à réévaluer avant publication | Tranché |
 | Coffre en dev | **OpenBao** (fork open source de Vault, même API) ; le code reste compatible Vault | Tranché |
 
@@ -134,4 +134,6 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 
 - Documentation et commentaires de conception en français ; identifiants de code en anglais.
 - Commits petits et ciblés, messages descriptifs.
+- Licence Apache-2.0 : chaque fichier source commence par l'en-tête SPDX `SPDX-License-Identifier: Apache-2.0`.
+- Dépendances : uniquement des licences compatibles Apache-2.0 (MIT, BSD, Apache-2.0, ISC, MPL-2.0…) ; pas de GPL/AGPL. Vérification en CI (`cargo deny` côté Rust, outil équivalent côté Python).
 - Mettre à jour ce fichier quand l'architecture, les commandes de build/test ou les décisions évoluent.
