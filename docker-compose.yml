@@ -21,6 +21,7 @@ services:
         # navigateur : l'issuer OIDC est identique des deux côtés.
         aliases: [sesame.localhost, idp.sesame.localhost, fake-app.sesame.localhost]
     depends_on: [portal, proxy, admin, keycloak]
+    restart: unless-stopped
 
   portal:
     build:
