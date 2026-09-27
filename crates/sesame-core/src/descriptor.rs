@@ -172,6 +172,9 @@ pub enum CsrfSource {
     Meta,
     Cookie,
     Regex,
+    /// Réponse d'un appel GET fait juste avant le login (`url`) : champ JSON `name`
+    /// (chemin pointé) ou `pattern` appliqué au corps.
+    Endpoint,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -188,6 +191,9 @@ pub struct SendAs {
 pub struct CsrfToken {
     pub source: CsrfSource,
     pub name: String,
+    /// Pour `source: endpoint` : chemin appelé en GET, même origine.
+    #[serde(default)]
+    pub url: Option<String>,
     #[serde(default)]
     pub pattern: Option<String>,
     #[serde(default)]
@@ -383,6 +389,23 @@ impl AppDescriptor {
                     }
                 };
             }
+            match (token.source, token.url.as_deref()) {
+                (CsrfSource::Endpoint, Some(u)) if u.starts_with('/') => {
+                    if let Some(p) = &token.pattern {
+                        compile(p).map_err(err)?;
+                    }
+                }
+                (CsrfSource::Endpoint, _) => {
+                    return invalid(format!(
+                        "csrf {} : url (chemin commençant par /) requise pour source=endpoint",
+                        token.name
+                    ))
+                }
+                (_, Some(_)) => {
+                    return invalid(format!("csrf {} : url réservée à source=endpoint", token.name))
+                }
+                _ => {}
+            }
         }
         if spec.session.cookies.is_empty() {
             return invalid("session.cookies vide".into());
@@ -529,6 +552,24 @@ mod tests {
         // Habilitation vide : autorisé (le compte actif fait foi).
         let open = Access::default();
         assert!(open.is_empty() && open.allows("bob", &[]));
+    }
+
+    #[test]
+    fn endpoint_csrf_requires_a_path_and_nothing_else_takes_one() {
+        let with = |from: &str, to: &str| AppDescriptor::from_yaml(&FAKE_APP.replace(from, to));
+        let endpoint = "- source: endpoint\n        url: /api/csrf-token";
+        let d = with("- source: hidden_input", endpoint).expect("endpoint valide");
+        assert_eq!(d.spec.login.csrf[0].source, CsrfSource::Endpoint);
+        assert_eq!(d.spec.login.csrf[0].url.as_deref(), Some("/api/csrf-token"));
+        assert!(
+            with("- source: hidden_input", "- source: endpoint").is_err(),
+            "url requise"
+        );
+        assert!(with("- source: hidden_input", "- source: endpoint\n        url: api").is_err());
+        assert!(
+            with("name: csrf_token", "name: csrf_token\n        url: /x").is_err(),
+            "url réservée"
+        );
     }
 
     #[test]

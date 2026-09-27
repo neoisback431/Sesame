@@ -248,20 +248,25 @@
       ],
       "properties": {
         "source": {
-          "description": "Où lire le jeton sur la page de login.",
+          "description": "Où lire le jeton : sur la page de login (hidden_input, meta, cookie, regex) ou dans la réponse d'un appel GET fait juste avant le login (endpoint).",
           "enum": [
             "hidden_input",
             "meta",
             "cookie",
-            "regex"
+            "regex",
+            "endpoint"
           ]
         },
         "name": {
-          "description": "Nom de l'input, de la balise meta ou du cookie.",
+          "description": "Nom de l'input, de la balise meta ou du cookie ; pour source=endpoint : champ de la réponse JSON (chemin pointé, ex. data.token) si pattern est absent.",
           "type": "string"
         },
+        "url": {
+          "description": "Pour source=endpoint : chemin appelé en GET (même origine) après la page de login ; ses cookies rejoignent la session du rejeu.",
+          "$ref": "#/$defs/path"
+        },
         "pattern": {
-          "description": "Pour source=regex : expression avec un groupe de capture.",
+          "description": "Pour source=regex : expression avec un groupe de capture, appliquée à la page de login ; pour source=endpoint (facultatif) : appliquée au corps de la réponse.",
           "$ref": "#/$defs/regex"
         },
         "send_as": {
@@ -278,18 +283,43 @@
           }
         }
       },
-      "if": {
-        "properties": {
-          "source": {
-            "const": "regex"
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "regex"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "pattern"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "endpoint"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "url"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "url"
+              ]
+            }
           }
         }
-      },
-      "then": {
-        "required": [
-          "pattern"
-        ]
-      }
+      ]
     },
     "matcher": {
       "description": "Condition sur une réponse HTTP de l'appli. Toutes les propriétés présentes doivent être vraies.",

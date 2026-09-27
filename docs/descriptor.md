@@ -39,6 +39,19 @@ Avec `include_hidden_inputs: true` (valeur par défaut), tous les `input type=hi
 | `meta` | `<meta name=… content=…>` | Champ du même nom (ou `send_as.header`) |
 | `cookie` | Cookie posé par la page de login | Champ du même nom (ou `send_as.header`) |
 | `regex` | Premier groupe de `pattern` dans le HTML | Champ du même nom |
+| `endpoint` | Réponse d'un `GET` sur `url` (même origine), fait après la page de login avec ses cookies : champ JSON `name` (chemin pointé, ex. `data.token`), ou premier groupe de `pattern` sur le corps. Les cookies posés par cet appel rejoignent la session du rejeu | Champ `name` (ou `send_as.header`) |
+
+Cas d'une appli dont le JavaScript récupère le jeton par une API avant de se connecter :
+
+```yaml
+csrf:
+  - source: endpoint
+    url: /api/csrf-token        # réponse : {"csrfToken": "…"}
+    name: csrfToken
+    send_as: { header: x-csrf-token }
+```
+
+Le recorder avec compte de test (ADR 0019) détecte ce cas et génère ce bloc.
 
 ## Conditions (`success`, `failure`, `expiry`)
 

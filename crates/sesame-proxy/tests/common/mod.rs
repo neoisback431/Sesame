@@ -174,6 +174,15 @@ pub async fn redirect_abs(headers: HeaderMap) -> Response {
         .into_response()
 }
 
+/// Jeton de la session en cours, comme une API qu'appellerait le JavaScript de la page.
+pub async fn csrf_endpoint(State(m): State<Mock>, headers: HeaderMap) -> Response {
+    let token = cookie(&headers, "PRE").and_then(|p| m.csrf.lock().unwrap().get(p).cloned());
+    match token {
+        Some(t) => axum::Json(serde_json::json!({ "data": { "token": t } })).into_response(),
+        None => StatusCode::FORBIDDEN.into_response(),
+    }
+}
+
 pub async fn spawn_mock() -> (Mock, String) {
     let mock = Mock::default();
     let app = Router::new()
@@ -184,6 +193,7 @@ pub async fn spawn_mock() -> (Mock, String) {
         .route("/echo", get(echo))
         .route("/logout", get(logout))
         .route("/redirect-abs", get(redirect_abs))
+        .route("/api/csrf-token", get(csrf_endpoint))
         .with_state(mock.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

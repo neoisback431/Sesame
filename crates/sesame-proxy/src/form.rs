@@ -74,6 +74,33 @@ pub fn extract_csrf(token: &CsrfToken, html: &str, jar: &Jar) -> Result<String, 
                 .map(|m| m.as_str().to_owned())
                 .ok_or_else(missing)
         }
+        // Lu par `endpoint_value` sur la réponse de l'appel dédié, pas sur la page.
+        CsrfSource::Endpoint => Err(missing()),
+    }
+}
+
+/// Jeton lu dans la réponse d'un appel `source: endpoint` : `pattern` sur le corps, sinon
+/// champ JSON `name` (chemin pointé, ex. `data.token`).
+pub fn endpoint_value(token: &CsrfToken, body: &str) -> Result<String, FormError> {
+    let missing = || FormError::Csrf(token.name.clone());
+    if let Some(pattern) = token.pattern.as_deref() {
+        let re = Regex::new(pattern).map_err(|_| missing())?;
+        return re
+            .captures(body)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_owned())
+            .ok_or_else(missing);
+    }
+    let json: serde_json::Value = serde_json::from_str(body).map_err(|_| missing())?;
+    let value = token
+        .name
+        .split('.')
+        .try_fold(&json, |v, key| v.get(key))
+        .ok_or_else(missing)?;
+    match value {
+        serde_json::Value::String(s) if !s.is_empty() => Ok(s.clone()),
+        serde_json::Value::Number(n) => Ok(n.to_string()),
+        _ => Err(missing()),
     }
 }
 
@@ -94,9 +121,28 @@ mod tests {
         CsrfToken {
             source,
             name: name.into(),
+            url: None,
             pattern: pattern.map(str::to_owned),
             send_as: SendAs::default(),
         }
+    }
+
+    #[test]
+    fn endpoint_token_from_json_path_or_pattern() {
+        let body = r#"{"data":{"token":"ep-77"},"n":5}"#;
+        let t = |name: &str, p: Option<&str>| csrf(CsrfSource::Endpoint, name, p);
+        assert_eq!(endpoint_value(&t("data.token", None), body).unwrap(), "ep-77");
+        assert_eq!(endpoint_value(&t("n", None), body).unwrap(), "5");
+        assert_eq!(
+            endpoint_value(&t("x", Some(r#""token":"([^"]+)""#)), body).unwrap(),
+            "ep-77"
+        );
+        assert!(endpoint_value(&t("data.absent", None), body).is_err());
+        assert!(
+            endpoint_value(&t("data", None), body).is_err(),
+            "objet, pas une valeur"
+        );
+        assert!(endpoint_value(&t("token", None), "pas du json").is_err());
     }
 
     #[test]

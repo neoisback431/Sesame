@@ -550,7 +550,13 @@ def observe_login(
 
     def on_response(response: Any) -> None:
         req = response.request
-        if state["request"] is None and req.resource_type in ("xhr", "fetch") and same_origin(req.url, base):
+        if (
+            state["request"] is None
+            and req.method == "GET"
+            and req.resource_type in ("xhr", "fetch")
+            and same_origin(req.url, base)
+            and response.ok
+        ):
             with contextlib.suppress(Exception):
                 api_bodies[_path(req.url)] = response.text()[:65536]
 
@@ -614,6 +620,14 @@ def observe_login(
             names,
             [h for h in headers if not _BROWSER_HEADERS.match(h)],
         )
+        # La connexion réelle remplace les déductions de la soumission factice.
+        superseded = (
+            "csrf_",
+            "login_submitted_by_javascript",
+            "fields_added_on_submit",
+            "unsupported_encoding",
+        )
+        rec.warnings = [w for w in rec.warnings if not w.startswith(superseded)]
         rec.submission = sub
         rec.method = "GET" if sub.method == "GET" else "POST"
         rec.encoding = "json" if encoding == "json" else "form"
@@ -645,10 +659,23 @@ def observe_login(
         def add_token(value: str, send_as: dict[str, str], label: str) -> bool:
             found = source_of(value)
             if found is None:
-                api = next((p for p, body in api_bodies.items() if value in body), None)
-                if api:
-                    rec.warnings.append(f"csrf_from_api_unsupported: {label} (obtenu par {api})")
-                return False
+                api = next((p for p, body in api_bodies.items() if len(value) >= 8 and value in body), None)
+                if api is None:
+                    return False
+                # Jeton obtenu par un appel GET du JavaScript avant le login : le proxy le refait.
+                token: dict[str, Any] = {"source": "endpoint", "url": api}
+                path = _json_path(api_bodies[api], value)
+                if path:
+                    token["name"] = path
+                else:
+                    pattern = _regex_source(api_bodies[api], value)
+                    if pattern is None:
+                        rec.warnings.append(f"csrf_endpoint_value_not_located: {label} ({api})")
+                        return False
+                    token.update(name=label, pattern=pattern)
+                token["send_as"] = send_as
+                csrf.append(token)
+                return True
             kind, name = found
             token: dict[str, Any] = {"source": kind, "name": name, "send_as": send_as}
             if kind == "regex":
@@ -718,6 +745,26 @@ def observe_login(
         api_bodies.clear()
         context.close()
         user = password = ""  # noqa: F841 (références effacées)
+
+
+def _json_path(body: str, value: str) -> str | None:
+    """Chemin pointé (``data.token``) du champ JSON valant ``value``, s'il est unique."""
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return None
+    found: list[str] = []
+
+    def walk(node: Any, path: list[str]) -> None:
+        if isinstance(node, dict):
+            for key, child in node.items():
+                if isinstance(key, str) and "." not in key:
+                    walk(child, [*path, key])
+        elif node == value and path:
+            found.append(".".join(path))
+
+    walk(data, [])
+    return found[0] if len(found) == 1 else None
 
 
 def _raw_json(request: Any) -> Any:
