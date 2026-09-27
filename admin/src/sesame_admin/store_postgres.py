@@ -15,6 +15,7 @@ from .ports import (
     Account,
     Conflict,
     DescriptorRevision,
+    Diagnostic,
     NotFound,
     Status,
     StoredDescriptor,
@@ -128,6 +129,14 @@ class PostgresAccountStore:
             limit,
         )
         return [r["user_key"] for r in rows]
+
+    async def get_diagnostic(self, app_id: str, user_key: str) -> Diagnostic | None:
+        row = await (await self.pool()).fetchrow(
+            "SELECT document FROM replay_diagnostics WHERE app_id = $1 AND user_key = $2",
+            app_id,
+            user_key,
+        )
+        return Diagnostic.from_document(json.loads(row["document"])) if row else None
 
     async def list_user_accounts(self, user_key: str) -> list[Account]:
         rows = await (await self.pool()).fetch(

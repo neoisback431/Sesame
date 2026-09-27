@@ -14,11 +14,14 @@ use reqwest::{Method, StatusCode};
 use sesame_core::audit::{AuditAction, AuditEvent, AuditOutcome};
 use sesame_core::descriptor::{AppDescriptor, Encoding, FormField, Method as LoginMethod};
 use sesame_core::identity::UserIdentity;
-use sesame_core::ports::{AccountRegistry, AccountStatus, AuditSink, PortError, SecretStore};
+use sesame_core::ports::{
+    AccountRegistry, AccountStatus, AuditSink, DiagnosticStore, PortError, ReplayDiagnostic, SecretStore,
+};
 use sesame_core::secret::{Credential, ExposeSecret};
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::diagnostic::{Capture, Masker};
 use crate::form::{extract_csrf, parse_form};
 use crate::jar::Jar;
 use crate::matcher::{self, ResponseView};
@@ -54,6 +57,8 @@ pub struct Replayer {
     pub secrets: Arc<dyn SecretStore>,
     pub accounts: Arc<dyn AccountRegistry>,
     pub audit: Arc<dyn AuditSink>,
+    /// Présent si `SESAME_REPLAY_DEBUG` : diagnostic du dernier échec (ADR 0018).
+    pub diagnostics: Option<Arc<dyn DiagnosticStore>>,
 }
 
 /// Corps de requête effacé de la mémoire à la destruction (contient le mot de passe).
@@ -180,8 +185,9 @@ impl Replayer {
 
         // 3. Rejeu, dans la limite de max_attempts.
         let mut last = ReplayError::Upstream;
+        let mut capture: Option<Capture> = None;
         for attempt in 1..=d.spec.login.max_attempts {
-            match self.login(http, d, &credential).await {
+            match self.login(http, d, &credential, &mut capture).await {
                 Ok(Outcome::Success(jar)) => {
                     self.audit(event(AuditAction::LoginReplay, AuditOutcome::Success))
                         .await?;
@@ -217,17 +223,55 @@ impl Replayer {
             .await?;
         if let ReplayError::Rejected(r) = err {
             self.mark_failed(d, user, cid, r).await;
+            self.save_diagnostic(d, user, cid, r, capture).await;
         }
         tracing::warn!(app, correlation_id = cid, reason, "rejeu en échec");
         Err(err)
     }
 
+    async fn save_diagnostic(
+        &self,
+        d: &AppDescriptor,
+        user: &UserIdentity,
+        cid: &str,
+        reason: &str,
+        capture: Option<Capture>,
+    ) {
+        let (Some(store), Some(c)) = (&self.diagnostics, capture) else {
+            return;
+        };
+        let diagnostic = ReplayDiagnostic {
+            app_id: d.metadata.id.clone(),
+            user_key: user.user_key.clone(),
+            correlation_id: cid.to_owned(),
+            reason: reason.to_owned(),
+            step: c.step.to_owned(),
+            method: c.method,
+            url: c.url,
+            sent_fields: c.sent_fields,
+            status: c.status,
+            headers: c.headers,
+            body: c.body,
+            body_truncated: c.body_truncated,
+            at: SystemTime::now(),
+        };
+        if let Err(e) = store.put_diagnostic(diagnostic).await {
+            tracing::warn!(error = %e, app = %d.metadata.id, "diagnostic de rejeu non enregistré");
+        }
+    }
+
+    /// `capture` reçoit, si les diagnostics sont activés, la dernière réponse observée.
     async fn login(
         &self,
         http: &reqwest::Client,
         d: &AppDescriptor,
         cred: &Credential,
+        capture: &mut Option<Capture>,
     ) -> Result<Outcome, reqwest::Error> {
+        let masker = self
+            .diagnostics
+            .as_ref()
+            .map(|_| Masker::new(cred.keys().filter_map(|k| cred.get(k)).map(|v| v.expose_secret())));
         let spec = &d.spec;
         let login = &spec.login;
         let Ok(base) = Url::parse(&spec.upstream.base_url) else {
@@ -262,14 +306,43 @@ impl Replayer {
                 .and_then(|l| page_url.join(l).ok());
             match next {
                 Some(next) if same_origin(&next, &base) => page_url = next,
-                _ => return Ok(Outcome::Failure("login_page_redirects_away")),
+                _ => {
+                    if let Some(m) = &masker {
+                        *capture = Some(Capture {
+                            step: "login_page",
+                            method: "GET".into(),
+                            url: m.mask(page_url.as_str()),
+                            sent_fields: Vec::new(),
+                            status: Some(resp.status().as_u16()),
+                            headers: m.headers(resp.headers()),
+                            body: String::new(),
+                            body_truncated: false,
+                        });
+                    }
+                    return Ok(Outcome::Failure("login_page_redirects_away"));
+                }
             }
             resp = request(Method::GET, page_url.clone(), &jar).send().await?;
         }
-        if resp.status() != StatusCode::OK {
+        let page_status = resp.status();
+        let page_headers = masker.as_ref().map(|m| m.headers(resp.headers()));
+        let html = read_limited(resp).await?;
+        if let (Some(m), Some(headers)) = (&masker, page_headers) {
+            let (body, body_truncated) = m.body(&html);
+            *capture = Some(Capture {
+                step: "login_page",
+                method: "GET".into(),
+                url: m.mask(page_url.as_str()),
+                sent_fields: Vec::new(),
+                status: Some(page_status.as_u16()),
+                headers,
+                body,
+                body_truncated,
+            });
+        }
+        if page_status != StatusCode::OK {
             return Ok(Outcome::Indeterminate("login_page_status"));
         }
-        let html = read_limited(resp).await?;
 
         let Ok(form) = parse_form(&html, &login.form_selector) else {
             return Ok(Outcome::Failure("login_form_not_found"));
@@ -348,7 +421,7 @@ impl Replayer {
                 q.append_pair(n, v);
             }
         }
-        let mut req = request(method, target.clone(), &jar)
+        let mut req = request(method.clone(), target.clone(), &jar)
             .header(REFERER, page_url.as_str())
             .header(ORIGIN, base.origin().ascii_serialization());
         for (k, v) in &login.extra_headers {
@@ -363,8 +436,10 @@ impl Replayer {
                 .header(CONTENT_TYPE, ct)
                 .body(reqwest::Body::from(bytes::Bytes::from_owner(owned)));
         }
+        let sent_fields: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
         drop(fields);
         let resp = req.send().await?;
+        let submit_headers = masker.as_ref().map(|m| m.headers(resp.headers()));
 
         let status = resp.status().as_u16();
         let location = resp
@@ -375,6 +450,19 @@ impl Replayer {
         let raw_cookies = set_cookies(&resp);
         let (names, _) = jar.apply(raw_cookies.iter().map(String::as_str));
         let body = read_limited(resp).await?;
+        if let (Some(m), Some(headers)) = (&masker, submit_headers) {
+            let (text, body_truncated) = m.body(&body);
+            *capture = Some(Capture {
+                step: "login_submit",
+                method: method.to_string(),
+                url: m.mask(target.as_str()),
+                sent_fields,
+                status: Some(status),
+                headers,
+                body: text,
+                body_truncated,
+            });
+        }
         let view = ResponseView {
             status,
             location: location.as_deref(),

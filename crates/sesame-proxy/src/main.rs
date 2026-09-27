@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use sesame_core::audit::StdoutAuditSink;
 use sesame_core::crypto::CookieCipher;
-use sesame_core::ports::{DescriptorStore, SecretStore, SessionStore};
+use sesame_core::ports::{DescriptorStore, DiagnosticStore, SecretStore, SessionStore};
 use sesame_core::sources::{log_rejected, watch, DescriptorSource};
 use sesame_proxy::config::{ProxyConfig, SecretStoreConfig};
 use sesame_proxy::replay::Replayer;
@@ -74,7 +74,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         secrets,
         accounts: store.clone(),
         audit: audit.clone(),
+        diagnostics: cfg
+            .replay_debug
+            .then(|| store.clone() as Arc<dyn DiagnosticStore>),
     };
+    if cfg.replay_debug {
+        tracing::warn!("SESAME_REPLAY_DEBUG actif : diagnostic des rejeux en échec enregistré (ADR 0018)");
+    }
     let sessions: Arc<dyn SessionStore> = store;
     let proxy = Arc::new(Proxy::new(
         apps,

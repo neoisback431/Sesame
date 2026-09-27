@@ -10,8 +10,8 @@ use async_trait::async_trait;
 
 use crate::audit::AuditEvent;
 use crate::ports::{
-    AccountRegistry, AccountStatus, AppAccount, AppSession, AuditSink, DescriptorStore, PortError,
-    PortResult, PortalSession, SecretStore, SessionStore, StoredDescriptor,
+    AccountRegistry, AccountStatus, AppAccount, AppSession, AuditSink, DescriptorStore, DiagnosticStore,
+    PortError, PortResult, PortalSession, ReplayDiagnostic, SecretStore, SessionStore, StoredDescriptor,
 };
 use crate::secret::{Credential, ExposeSecret, SecretString};
 
@@ -156,6 +156,27 @@ impl AccountRegistry for MemoryAccountRegistry {
             .ok_or(PortError::NotFound)?;
         account.last_login_at = Some(at);
         Ok(())
+    }
+}
+
+/// Diagnostics de rejeu en mémoire : (appli, utilisateur) -> dernier diagnostic.
+#[derive(Default)]
+pub struct MemoryDiagnosticStore {
+    entries: Mutex<HashMap<(String, String), ReplayDiagnostic>>,
+}
+
+#[async_trait]
+impl DiagnosticStore for MemoryDiagnosticStore {
+    async fn put_diagnostic(&self, diagnostic: ReplayDiagnostic) -> PortResult<()> {
+        let key = (diagnostic.app_id.clone(), diagnostic.user_key.clone());
+        locked(&self.entries).insert(key, diagnostic);
+        Ok(())
+    }
+
+    async fn get_diagnostic(&self, app_id: &str, user_key: &str) -> PortResult<Option<ReplayDiagnostic>> {
+        Ok(locked(&self.entries)
+            .get(&(app_id.to_owned(), user_key.to_owned()))
+            .cloned())
     }
 }
 

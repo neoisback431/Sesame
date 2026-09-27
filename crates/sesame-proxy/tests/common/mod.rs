@@ -19,8 +19,10 @@ use sesame_core::cookies::PortalCookie;
 use sesame_core::crypto::hash_token;
 use sesame_core::descriptor::AppDescriptor;
 use sesame_core::identity::UserIdentity;
-use sesame_core::memory::{MemoryAccountRegistry, MemoryAuditSink, MemorySecretStore, MemorySessionStore};
-use sesame_core::ports::{PortalSession, SessionStore};
+use sesame_core::memory::{
+    MemoryAccountRegistry, MemoryAuditSink, MemoryDiagnosticStore, MemorySecretStore, MemorySessionStore,
+};
+use sesame_core::ports::{DiagnosticStore, PortalSession, SessionStore};
 use sesame_proxy::replay::Replayer;
 use sesame_proxy::{build_client, router, App, Proxy};
 use tower::ServiceExt;
@@ -202,6 +204,7 @@ pub struct Bench {
     pub secrets: Arc<MemorySecretStore>,
     pub accounts: Arc<MemoryAccountRegistry>,
     pub audit: Arc<MemoryAuditSink>,
+    pub diagnostics: Arc<MemoryDiagnosticStore>,
 }
 
 pub fn descriptor(internal: &str) -> AppDescriptor {
@@ -224,6 +227,11 @@ pub fn alice(groups: &[&str]) -> UserIdentity {
 }
 
 pub async fn bench(groups: &[&str], password: &str, with_account: bool) -> Bench {
+    bench_with(groups, password, with_account, false).await
+}
+
+/// `replay_debug` : diagnostics des rejeux en échec activés (`SESAME_REPLAY_DEBUG`).
+pub async fn bench_with(groups: &[&str], password: &str, with_account: bool, replay_debug: bool) -> Bench {
     let (mock, internal) = spawn_mock().await;
     INTERNAL.with(|i| *i.borrow_mut() = internal.clone());
     let d = descriptor(&internal);
@@ -241,6 +249,7 @@ pub async fn bench(groups: &[&str], password: &str, with_account: bool) -> Bench
         MemoryAccountRegistry::default()
     });
     let audit = Arc::new(MemoryAuditSink::default());
+    let diagnostics = Arc::new(MemoryDiagnosticStore::default());
     let now = SystemTime::now();
     sessions
         .create_portal_session(PortalSession {
@@ -265,6 +274,7 @@ pub async fn bench(groups: &[&str], password: &str, with_account: bool) -> Bench
             secrets: secrets.clone(),
             accounts: accounts.clone(),
             audit: audit.clone(),
+            diagnostics: replay_debug.then(|| diagnostics.clone() as Arc<dyn DiagnosticStore>),
         },
         1024 * 1024,
     );
@@ -278,6 +288,7 @@ pub async fn bench(groups: &[&str], password: &str, with_account: bool) -> Bench
         secrets,
         accounts,
         audit,
+        diagnostics,
     }
 }
 

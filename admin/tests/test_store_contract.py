@@ -5,6 +5,7 @@ PostgreSQL : activé si ``SESAME_TEST_DATABASE_URL`` est définie ; le schéma e
 créé à partir des migrations Rust s'il est absent.
 """
 
+import json
 import os
 import uuid
 
@@ -197,3 +198,35 @@ async def test_descriptor_store_contract(descriptors):
     assert len(await descriptors.history(app)) == 4
     for a in (app, other):
         await descriptors.delete_descriptor(a, "admin", 1)
+
+
+async def test_diagnostic_contract(store):
+    """Diagnostic écrit par le proxy (document JSON du ReplayDiagnostic Rust), lu par l'admin,
+    supprimé avec le compte."""
+    app, user = f"app-{uuid.uuid4().hex[:8]}", "erin"
+    await store.upsert_active(app, user)
+    assert await store.get_diagnostic(app, user) is None
+    doc = {
+        "app_id": app, "user_key": user, "correlation_id": "cid-1", "reason": "login_rejected",
+        "step": "login_submit", "method": "POST", "url": "http://app/login",
+        "sent_fields": ["username", "password"], "status": 401,
+        "headers": [["set-cookie", "sid=***"]], "body": "refusé é", "body_truncated": False,
+        "at": 1_800_000_000,
+    }  # fmt: skip
+    if isinstance(store, MemoryAccountStore):
+        store.diagnostics[(app, user)] = doc
+    else:
+        await (await store.pool()).execute(
+            "INSERT INTO replay_diagnostics (app_id, user_key, document) VALUES ($1, $2, $3::jsonb)",
+            app, user, json.dumps(doc),
+        )  # fmt: skip
+    d = await store.get_diagnostic(app, user)
+    assert (d.reason, d.status, d.body, d.headers) == (
+        "login_rejected",
+        401,
+        "refusé é",
+        (("set-cookie", "sid=***"),),
+    )
+    assert d.sent_fields == ("username", "password") and d.at.year == 2027
+    await store.delete_account(app, user)
+    assert await store.get_diagnostic(app, user) is None

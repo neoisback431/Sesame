@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Diagnostic — {{ app.name }}{% endblock %}
+{% block content %}
+<p><a href="/apps/{{ app.id }}">← {{ app.name }}</a></p>
+<h1>Dernier rejeu en échec</h1>
+<p class="muted">Compte <code>{{ user_key }}</code> sur <code>{{ app.id }}</code>.</p>
+{% if not diagnostic %}
+<div class="card">
+  <p>Aucun diagnostic enregistré pour ce compte.</p>
+  <p class="muted">Le proxy n'enregistre la réponse de l'appli que si <code>SESAME_REPLAY_DEBUG=true</code>
+    (activé dans l'environnement de dev). Activez-le, réactivez le compte puis relancez l'appli depuis le portail.</p>
+</div>
+{% else %}
+{% set hints = {
+  "login_unexpected_response": "La réponse à l'envoi du formulaire ne remplit aucune condition de spec.login.success. Comparez le code HTTP, l'en-tête Location et les cookies posés ci-dessous avec ces conditions.",
+  "login_rejected": "Une condition de spec.login.failure a été remplie : identifiants refusés, ou condition d'échec trop large.",
+  "session_cookie_missing": "Connexion acceptée, mais un cookie de spec.session.cookies n'a pas été posé : comparez avec les noms des Set-Cookie ci-dessous.",
+  "login_form_not_found": "Le sélecteur spec.login.form_selector ne trouve pas le formulaire dans la page ci-dessous.",
+  "csrf_token_not_found": "Le jeton de spec.login.csrf est introuvable dans la page ci-dessous.",
+  "login_page_status": "La page spec.login.form_url ne répond pas 200.",
+  "login_page_redirects_away": "La page de login redirige hors de l'origine de spec.upstream.base_url.",
+} %}
+<div class="card">
+  <p><strong>{{ diagnostic.reason }}</strong> — {{ hints.get(diagnostic.reason, "") }}</p>
+  <p class="muted">{{ diagnostic.at.strftime("%Y-%m-%d %H:%M:%S") }} UTC — référence <code>{{ diagnostic.correlation_id }}</code></p>
+</div>
+<h2>Requête envoyée par Sesame</h2>
+<p><code>{{ diagnostic.method }} {{ diagnostic.url }}</code>
+  ({{ "page de login" if diagnostic.step == "login_page" else "envoi du formulaire" }})</p>
+{% if diagnostic.sent_fields %}<p>Champs envoyés : {% for f in diagnostic.sent_fields %}<code>{{ f }}</code> {% endfor %}
+  <span class="muted">(valeurs non conservées)</span></p>{% endif %}
+<h2>Réponse de l'appli : HTTP {{ diagnostic.status if diagnostic.status is not none else "—" }}</h2>
+<table>
+  <thead><tr><th>En-tête</th><th>Valeur</th></tr></thead>
+  <tbody>{% for n, v in diagnostic.headers %}<tr><td><code>{{ n }}</code></td><td><code>{{ v }}</code></td></tr>{% endfor %}</tbody>
+</table>
+<h3>Corps{% if diagnostic.body_truncated %} <span class="muted">(tronqué à 64 Ko)</span>{% endif %}</h3>
+<pre>{{ diagnostic.body }}</pre>
+<p class="muted">Identifiants du coffre et valeurs des cookies remplacés par <code>***</code>.</p>
+{% endif %}
+<details class="card"><summary>Descripteur actuel (révision {{ app.revision }})</summary><pre>{{ app.source }}</pre></details>
+{% if app.editable %}<p><a class="button" href="/apps/{{ app.id }}/descriptor">Modifier le descripteur</a></p>{% endif %}
+<p class="muted">Après correction, réactivez le compte puis relancez l'appli depuis le portail.</p>
+{% endblock %}

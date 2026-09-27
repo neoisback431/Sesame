@@ -38,6 +38,7 @@ URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_PUBLI
 | `SESAME_COOKIE_DOMAIN` | aucun | Identique au portail |
 | `SESAME_DESCRIPTORS_DIR` | `descriptors` | Identique au portail |
 | `SESAME_DESCRIPTORS_RELOAD` | `10s` | Identique au portail |
+| `SESAME_REPLAY_DEBUG` | `false` | Conserve, pour chaque compte, la dernière réponse de l'appli lors d'un rejeu en échec (statut, en-têtes, corps tronqué à 64 Ko), consultable dans l'administration (« Voir la réponse de l'appli »). Valeurs du coffre (brutes et encodées) et valeurs des cookies masquées. Activé en dev ; à n'activer en production qu'en connaissance de cause (ADR 0018) |
 | `SESAME_DATABASE_URL` 🔒 | requis | Connexion PostgreSQL |
 | `SESAME_SESSION_ENCRYPTION_KEY` 🔒 | requis | Clé chiffrant les cookies applicatifs au repos |
 | `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre les applis et le coffre |

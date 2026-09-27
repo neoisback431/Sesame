@@ -20,6 +20,8 @@ pub struct ProxyConfig {
     pub max_body_bytes: usize,
     /// Intervalle de vérification du catalogue en base (rechargement à chaud).
     pub reload_interval: std::time::Duration,
+    /// Diagnostic des rejeux en échec, consultable dans l'administration (ADR 0018).
+    pub replay_debug: bool,
     pub secret_store: SecretStoreConfig,
 }
 
@@ -67,6 +69,7 @@ impl ProxyConfig {
                 .parse()
                 .map_err(|_| ConfigError("SESAME_MAX_BODY_BYTES : entier attendu".into()))?,
             reload_interval: config::duration("SESAME_DESCRIPTORS_RELOAD", "10s")?,
+            replay_debug: config::flag("SESAME_REPLAY_DEBUG"),
             secret_store,
         })
     }

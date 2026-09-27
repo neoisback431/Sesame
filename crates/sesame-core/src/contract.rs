@@ -8,7 +8,8 @@ use std::time::{Duration, SystemTime};
 use crate::identity::UserIdentity;
 use crate::memory::cookie_value;
 use crate::ports::{
-    AccountRegistry, AccountStatus, AppSession, DescriptorStore, PortError, PortalSession, SessionStore,
+    AccountRegistry, AccountStatus, AppSession, DescriptorStore, DiagnosticStore, PortError, PortalSession,
+    ReplayDiagnostic, SessionStore,
 };
 use crate::secret::AppCookie;
 
@@ -166,6 +167,35 @@ pub async fn account_registry(registry: &dyn AccountRegistry, app: &str, user: &
     assert!(registry.get_account(app, "personne").await.unwrap().is_none());
 }
 
+/// Le compte (`app`, `user`) doit exister dans le registre (clé étrangère côté base).
+pub async fn diagnostic_store(store: &dyn DiagnosticStore, app: &str, user: &str) {
+    assert!(store.get_diagnostic(app, user).await.unwrap().is_none());
+    let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    let mut d = ReplayDiagnostic {
+        app_id: app.into(),
+        user_key: user.into(),
+        correlation_id: "cid-1".into(),
+        reason: "login_unexpected_response".into(),
+        step: "login_submit".into(),
+        method: "POST".into(),
+        url: "http://app/login".into(),
+        sent_fields: vec!["username".into(), "password".into()],
+        status: Some(200),
+        headers: vec![("set-cookie".into(), "sid=***; Path=/".into())],
+        body: "<h1>Erreur</h1> é".into(),
+        body_truncated: false,
+        at,
+    };
+    store.put_diagnostic(d.clone()).await.unwrap();
+    assert_eq!(store.get_diagnostic(app, user).await.unwrap(), Some(d.clone()));
+    // Seul le dernier diagnostic est conservé.
+    d.correlation_id = "cid-2".into();
+    d.status = None;
+    store.put_diagnostic(d.clone()).await.unwrap();
+    assert_eq!(store.get_diagnostic(app, user).await.unwrap(), Some(d));
+    assert!(store.get_diagnostic(app, "personne").await.unwrap().is_none());
+}
+
 /// `prefix` isole les données d'un test à l'autre sur un backend partagé.
 pub async fn descriptor_store(store: &dyn DescriptorStore, prefix: &str) {
     let id = format!("{prefix}-app");
@@ -222,6 +252,11 @@ mod tests {
     #[tokio::test]
     async fn memory_descriptor_store() {
         super::descriptor_store(&crate::memory::MemoryDescriptorStore::default(), "t").await;
+    }
+
+    #[tokio::test]
+    async fn memory_diagnostic_store() {
+        super::diagnostic_store(&crate::memory::MemoryDiagnosticStore::default(), "app1", "alice").await;
     }
 
     #[tokio::test]

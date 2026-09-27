@@ -13,7 +13,7 @@ use axum::http::{header, Request, StatusCode};
 use common::*;
 use sesame_core::audit::AuditAction;
 use sesame_core::crypto::hash_token;
-use sesame_core::ports::{AccountRegistry, AccountStatus, SessionStore};
+use sesame_core::ports::{AccountRegistry, AccountStatus, DiagnosticStore, SessionStore};
 
 // ---------------------------------------------------------------------------
 
@@ -210,6 +210,82 @@ async fn rejected_login_marks_account_failed_and_blocks_retries() {
     assert_eq!(b.secrets.reads(), 1);
     assert_eq!(b.mock.logins.load(Ordering::SeqCst), 1);
     assert!(b.actions().contains(&AuditAction::AccountStatusChanged));
+}
+
+#[tokio::test]
+async fn failed_replay_leaves_a_masked_diagnostic_when_enabled() {
+    let b = bench_with(&["fake-app-users"], "wrong-password", true, true).await;
+    let r = b.get("/").await;
+    assert_eq!(r.status, StatusCode::BAD_GATEWAY);
+    assert!(
+        !r.body.contains("Identifiants invalides"),
+        "rien de l'appli vers le navigateur"
+    );
+    let d = b
+        .diagnostics
+        .get_diagnostic("fake-app", "alice")
+        .await
+        .unwrap()
+        .expect("diagnostic enregistré");
+    assert_eq!(
+        (d.reason.as_str(), d.step.as_str()),
+        ("login_rejected", "login_submit")
+    );
+    assert_eq!((d.method.as_str(), d.status), ("POST", Some(401)));
+    assert!(
+        d.body.contains("Identifiants invalides"),
+        "réponse réelle de l'appli : {}",
+        d.body
+    );
+    assert!(d.sent_fields.iter().any(|f| f == "password") && d.sent_fields.iter().any(|f| f == "csrf_token"));
+    // L'appli recopie la saisie : les valeurs du coffre sont masquées.
+    let all = format!("{d:?}");
+    assert!(
+        !all.contains("wrong-password") && !all.contains("amartin"),
+        "{all}"
+    );
+    assert!(d.body.contains("***"));
+}
+
+#[tokio::test]
+async fn failed_login_page_diagnostic_masks_cookie_values() {
+    let b = bench_with(&["fake-app-users"], APP_PASSWORD, true, true).await;
+    // Sélecteur introuvable : l'échec a lieu sur la page de login.
+    let mut d = descriptor(&b.internal);
+    d.spec.login.form_selector = "form#absent".into();
+    let (apps, rejected) = sesame_proxy::build_apps(vec![d], None, "https");
+    assert!(rejected.is_empty());
+    b.engine.set_apps(apps);
+    b.get("/").await;
+    let diag = b
+        .diagnostics
+        .get_diagnostic("fake-app", "alice")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (diag.reason.as_str(), diag.step.as_str()),
+        ("login_form_not_found", "login_page")
+    );
+    assert!(diag.body.contains("<form id=\"login\""));
+    let cookie = diag
+        .headers
+        .iter()
+        .find(|(n, _)| n == "set-cookie")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(cookie, Some("PRE=***; HttpOnly"));
+}
+
+#[tokio::test]
+async fn no_diagnostic_is_kept_by_default() {
+    let b = bench(&["fake-app-users"], "wrong-password", true).await;
+    b.get("/").await;
+    assert!(b
+        .diagnostics
+        .get_diagnostic("fake-app", "alice")
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]

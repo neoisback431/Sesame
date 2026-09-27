@@ -378,6 +378,19 @@ def create_app(
         revisions = [(e, service.validator.to_yaml(e.document) if e.document else None) for e in entries]
         return render(request, "history.html", admin=admin, app_id=app_id, revisions=revisions)
 
+    @app.get("/apps/{app_id}/accounts/{user_key}/diagnostic")
+    async def account_diagnostic(request: Request, app_id: str, user_key: str, admin: Admin) -> Response:
+        try:
+            target = await service.app(app_id)
+            diagnostic = await service.accounts.get_diagnostic(app_id, user_key)
+        except NotFound:
+            return error(request, 404, "Application inconnue", "Aucun descripteur ne porte cet identifiant.")
+        except Unavailable:
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+        return render(
+            request, "diagnostic.html", admin=admin, app=target, user_key=user_key, diagnostic=diagnostic
+        )
+
     @app.get("/apps/{app_id}")
     async def app_detail(request: Request, app_id: str, admin: Admin) -> Response:
         try:

@@ -537,3 +537,37 @@ def test_git_app_restriction_cannot_be_opened_from_the_ui(ctx):
     r = client.post("/apps/fake-app/open-access", data={"csrf": csrf(client)})
     assert r.status_code == 303
     assert "retirer spec.access par merge request" in client.get("/apps/fake-app").text
+
+
+def test_failed_account_shows_the_replay_diagnostic(ctx):
+    """Diagnostic écrit par le proxy (SESAME_REPLAY_DEBUG) : réponse réelle de l'appli,
+    affichée échappée ; lien depuis un compte en échec (ADR 0018)."""
+    client, service, *_ = ctx
+    login(client)
+    token = csrf(client)
+    client.post(
+        "/apps/fake-app/accounts",
+        data={"csrf": token, "user_key": "alice", "cred_username": "a", "cred_password": SECRET},
+    )
+    asyncio.run(service.accounts.set_status("fake-app", "alice", "failed", "login_unexpected_response"))
+    assert "Aucun diagnostic" in client.get("/apps/fake-app/accounts/alice/diagnostic").text
+
+    service.accounts.diagnostics[("fake-app", "alice")] = {
+        "correlation_id": "cid-42",
+        "reason": "login_unexpected_response",
+        "step": "login_submit",
+        "method": "POST",
+        "url": "http://fake-app:8000/login",
+        "sent_fields": ["username", "password"],
+        "status": 200,
+        "headers": [["set-cookie", "sid=***; Path=/"]],
+        "body": "<script>alert(1)</script><p>Mot de passe incorrect</p>",
+        "body_truncated": False,
+        "at": 1_800_000_000,
+    }
+    assert "/apps/fake-app/accounts/alice/diagnostic" in client.get("/apps/fake-app").text
+    page = client.get("/apps/fake-app/accounts/alice/diagnostic").text
+    assert "HTTP 200" in page and "cid-42" in page and "sid=***; Path=/" in page
+    assert "Mot de passe incorrect" in page and "<script>alert(1)" not in page and "&lt;script&gt;" in page
+    assert "spec.login.success" in page
+    assert_no_leak(page)

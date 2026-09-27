@@ -8,7 +8,7 @@ PostgreSQL, mémoire) sont choisies par configuration.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 Status = Literal["active", "failed", "disabled"]
@@ -60,6 +60,40 @@ class DescriptorRevision:
     changed_by: str | None
 
 
+@dataclass(frozen=True)
+class Diagnostic:
+    """Dernier rejeu en échec d'un compte, écrit par le proxy si ``SESAME_REPLAY_DEBUG``
+    (ADR 0018). Valeurs du coffre et des cookies déjà masquées par le proxy."""
+
+    correlation_id: str
+    reason: str
+    step: str
+    method: str
+    url: str
+    sent_fields: tuple[str, ...]
+    status: int | None
+    headers: tuple[tuple[str, str], ...]
+    body: str
+    body_truncated: bool
+    at: datetime
+
+    @classmethod
+    def from_document(cls, doc: dict[str, Any]) -> Diagnostic:
+        return cls(
+            correlation_id=str(doc.get("correlation_id", "")),
+            reason=str(doc.get("reason", "")),
+            step=str(doc.get("step", "")),
+            method=str(doc.get("method", "")),
+            url=str(doc.get("url", "")),
+            sent_fields=tuple(str(f) for f in doc.get("sent_fields", [])),
+            status=doc.get("status"),
+            headers=tuple((str(n), str(v)) for n, v in doc.get("headers", [])),
+            body=str(doc.get("body", "")),
+            body_truncated=bool(doc.get("body_truncated")),
+            at=datetime.fromtimestamp(int(doc.get("at", 0)), UTC),
+        )
+
+
 class SecretWriter(Protocol):
     """Coffre en écriture seule : l'UI d'admin ne relit jamais un secret."""
 
@@ -102,6 +136,10 @@ class AccountStore(Protocol):
     async def known_users(self, limit: int) -> list[str]:
         """Clés utilisateur connues, pour suggérer une valeur exacte au provisionnement :
         titulaires d'un compte et personnes déjà connectées au portail. Triées."""
+        ...
+
+    async def get_diagnostic(self, app_id: str, user_key: str) -> Diagnostic | None:
+        """Diagnostic du dernier rejeu en échec (écrit par le proxy), s'il existe."""
         ...
 
 

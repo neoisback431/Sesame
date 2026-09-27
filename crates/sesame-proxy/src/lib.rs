@@ -7,6 +7,7 @@
 //! n'atteint le navigateur ; le cookie du portail n'atteint jamais l'appli.
 
 pub mod config;
+pub mod diagnostic;
 pub mod form;
 pub mod jar;
 pub mod matcher;
