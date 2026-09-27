@@ -1,3 +1,5 @@
+<p align="center"><img src="ressources/SesamBaniere.png" alt="SEsame : la clé d'un accès universel" width="640"></p>
+
 # Sesame
 
 Portail SSO à injection de credentials côté serveur, pour les applications web qui n'offrent qu'un formulaire login / mot de passe.

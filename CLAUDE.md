@@ -160,12 +160,14 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 | `schemas/app-descriptor.schema.json` | Schéma du descripteur : **fait foi**, contrat entre Rust et Python |
 | `descriptors/` | Descripteurs YAML (`fake-app.yaml` = exemple de référence, utilisé par les tests Rust ; `TEMPLATE.yaml.example` = gabarit commenté, ignoré au chargement) |
 | `dev/` | Appli factice (Flask), realm Keycloak, seed OpenBao, seed du registre des comptes |
+| `ressources/` | Logo et bannière d'origine ; déclinaisons web générées par `scripts/build_web_assets.py` dans `crates/sesame-core/assets/` (embarquées, servies par le portail sous `/static/`, y compris pour les pages du proxy) et `admin/src/sesame_admin/static/` |
 | `tests/e2e/` | Parcours bout en bout Playwright sur le compose de dev |
 | `deploy/` | `nginx/nginx.conf`, `docker/rust.Dockerfile` (`--build-arg BIN=…`) |
 | `docs/` | `architecture.md`, `descriptor.md`, `configuration.md` (variables d'environnement), `dev.md`, `decisions/` (ADR) |
 
 Toute modification du schéma du descripteur se reporte dans `descriptor.rs`, `docs/descriptor.md`, `descriptors/fake-app.yaml` et `descriptors/TEMPLATE.yaml.example`. Toute évolution de la sémantique du rejeu ou des conditions se reporte des deux côtés : `crates/sesame-proxy` (Rust) et `onboarding/` (Python). Toute évolution de `AppDescriptor::validate` ou de la fusion (`sources.rs`) se reporte dans `admin/src/sesame_admin/descriptors.py`. Si le formulaire de l'appli factice change, mettre à jour son `form_fingerprint`.
 Toute nouvelle variable d'environnement se documente dans `docs/configuration.md`.
+Charte : couleurs reprises du logo (bleu nuit `#0a1f5c`, bleu `#1464c0`, cyan `#13b5cf`), définies dans `sesame_core::html::STYLE` et `admin/…/templates/base.html` : les garder alignées. Après modification d'une image de `ressources/`, relancer `uv run scripts/build_web_assets.py`. Les pages du proxy ne servent aucune ressource sur l'hôte d'une appli : elles pointent vers le portail.
 UI d'admin : pas de `from __future__ import annotations` dans `web.py` (FastAPI doit résoudre l'alias local `Admin`) ; le schéma de base appartient aux migrations Rust ; le format d'audit Python doit rester identique à celui des services Rust (JSON compact, `"log_type":"audit"`).
 Tests du proxy : banc commun dans `crates/sesame-proxy/tests/common/` (appli simulée + implémentations en mémoire) ; les tests de non-fuite des logs vivent dans un binaire de test séparé (`no_leak.rs`).
 
