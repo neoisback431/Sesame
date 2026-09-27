@@ -1,17 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """UI d'administration : authentification, groupe admin, CSRF, opérations, absence de fuite."""
 
+import asyncio
+import html
 import re
 
 import pytest
 from fastapi.testclient import TestClient
 from sesame_admin.audit import MemoryAuditSink
 from sesame_admin.auth import AuthError
-from sesame_admin.memory import MemoryAccountStore, MemorySecretWriter
 from sesame_admin.ports import Unavailable
-from sesame_admin.service import AdminService
 from sesame_admin.web import create_app
 from starlette.responses import RedirectResponse
+
+from .conftest import descriptor_yaml, make_service
 
 SECRET = "Pw-ADMIN-4242-secret"
 
@@ -38,7 +40,7 @@ class FakeAuth:
 @pytest.fixture
 def ctx(apps):
     audit = MemoryAuditSink()
-    service = AdminService(apps, MemorySecretWriter(), MemoryAccountStore(), audit)
+    service = make_service(apps, audit)
     auth = FakeAuth()
     app = create_app(
         service,
@@ -248,3 +250,123 @@ def test_bulk_disable_requires_csrf(ctx):
     login(client)
     client.post("/users/carol/disable-all", data={"csrf": "forged"})
     assert "CSRF" in client.get("/users/carol").text
+
+
+GUIDED = {
+    "id": "crm",
+    "name": "CRM",
+    "public_host": "crm.sesame.test",
+    "base_url": "http://crm.interne:8080",
+    "groups": "ventes",
+    "form_url": "/login",
+    "form_selector": "form",
+    "username_field": "user",
+    "password_field": "pass",
+    "session_cookie": "CRMSESSID",
+}
+
+
+def editor_text(page: str) -> str:
+    return html.unescape(re.search(r"<textarea[^>]*>(.*?)</textarea>", page, re.S).group(1))
+
+
+def test_create_app_from_guided_form_then_edit_history_delete(ctx):
+    client, service, _, audit = ctx
+    login(client)
+    token = csrf(client, "/apps/new")
+    r = client.post("/apps/new", data={"csrf": token, **GUIDED})
+    assert r.status_code == 200 and "Créer l'application" in r.text
+    text = editor_text(r.text)
+    assert "id: crm" in text and "user:\n" in text and service.audit.events[-1].action == "admin_login"
+
+    r = client.post("/apps", data={"csrf": token, "descriptor": text, "check": "1"})
+    assert "Descripteur valide" in r.text and not await_list(service)
+    r = client.post("/apps", data={"csrf": token, "descriptor": text})
+    assert r.status_code == 303 and r.headers["location"] == "/apps/crm"
+    page = client.get("/apps/crm").text
+    assert "créée" in page and "Modifier le descripteur" in page and "base" in page
+    assert "CRM" in client.get("/").text
+
+    r = client.get("/apps/crm/descriptor")
+    assert 'name="revision" value="1"' in r.text
+    changed = editor_text(r.text).replace("name: CRM", "name: CRM ventes")
+    r = client.post("/apps/crm/descriptor", data={"csrf": token, "descriptor": changed, "revision": "1"})
+    assert r.status_code == 303
+    assert "révision 2" in client.get("/apps/crm").text
+    # Deuxième onglet resté sur la révision 1 : refusé, rien n'est écrasé.
+    r = client.post("/apps/crm/descriptor", data={"csrf": token, "descriptor": text, "revision": "1"})
+    assert r.status_code == 422 and "entre-temps" in r.text
+
+    history = client.get("/apps/crm/history").text
+    assert history.count("<tr>") >= 3 and "modification" in history and "création" in history
+
+    r = client.post("/apps/crm/delete", data={"csrf": token, "revision": "2"})
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    assert "supprimée" in client.get("/").text
+    assert client.get("/apps/crm").status_code == 404
+    assert [e.action for e in audit.events if e.action.startswith("descriptor_")] == [
+        "descriptor_created",
+        "descriptor_updated",
+        "descriptor_updated",
+        "descriptor_deleted",
+    ]
+
+
+def await_list(service):
+    return asyncio.run(service.descriptors.list_descriptors())
+
+
+def test_invalid_descriptor_is_reported_and_escaped(ctx):
+    client, service, *_ = ctx
+    login(client)
+    token = csrf(client, "/apps/new")
+    evil = descriptor_yaml(
+        **{"name: Appli factice": "name: x\n  bogus: </textarea><script>alert(1)</script>"}
+    )
+    r = client.post("/apps", data={"csrf": token, "descriptor": evil})
+    assert r.status_code == 422 and 'role="alert"' in r.text
+    assert "<script>alert(1)" not in r.text and "&lt;/textarea&gt;" in r.text
+    assert await_list(service) == []
+
+
+def test_descriptor_writes_require_csrf(ctx):
+    client, service, *_ = ctx
+    login(client)
+    r = client.post("/apps", data={"csrf": "forged", "descriptor": descriptor_yaml()})
+    assert r.status_code == 400 and "CSRF" in r.text
+    assert await_list(service) == []
+    assert client.post("/apps/new", data={"csrf": "forged", **GUIDED}).status_code == 400
+
+
+def test_git_descriptors_stay_read_only(ctx):
+    client, *_ = ctx
+    login(client)
+    assert "Modifier le descripteur" not in client.get("/apps/fake-app").text
+    assert client.get("/apps/fake-app/descriptor").status_code == 409
+
+
+def test_rejected_descriptor_opens_in_the_editor(ctx):
+    client, service, *_ = ctx
+    login(client)
+    doc = {"apiVersion": "sesame/v1", "kind": "AppDescriptor", "metadata": {"id": "old", "name": "Old"}}
+    asyncio.run(service.descriptors.create_descriptor("old", doc, "x"))
+    assert "Descripteurs écartés" in client.get("/").text
+    r = client.get("/apps/old")
+    assert r.status_code == 302 and r.headers["location"] == "/apps/old/descriptor"
+    assert "id: old" in editor_text(client.get("/apps/old/descriptor").text)
+
+
+def test_db_app_pages_do_not_leak_credentials(ctx):
+    client, service, *_ = ctx
+    login(client)
+    token = csrf(client, "/apps/new")
+    client.post("/apps", data={"csrf": token, "descriptor": descriptor_yaml()})
+    client.post(
+        "/apps/crm/accounts",
+        data={"csrf": token, "user_key": "carol", "cred_username": "cdupont", "cred_password": SECRET},
+    )
+    assert service.secrets.entries[("crm", "carol")]["password"] == SECRET
+    for path in ("/", "/apps/crm", "/apps/crm/descriptor", "/apps/crm/history", "/users/carol"):
+        assert_no_leak(client.get(path).text)
+    r = client.post("/apps/crm/delete", data={"csrf": token, "revision": "1"})
+    assert "comptes" in client.get(r.headers["location"]).text

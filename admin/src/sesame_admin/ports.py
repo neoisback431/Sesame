@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 Status = Literal["active", "failed", "disabled"]
 
@@ -22,6 +22,10 @@ class NotFound(LookupError):
     pass
 
 
+class Conflict(RuntimeError):
+    """Écriture concurrente : la révision attendue n'est plus la révision courante."""
+
+
 @dataclass(frozen=True)
 class Account:
     app_id: str
@@ -30,6 +34,30 @@ class Account:
     status_reason: str | None
     last_login_at: datetime | None
     updated_at: datetime | None
+
+
+@dataclass(frozen=True)
+class StoredDescriptor:
+    """Descripteur en base : document JSON conforme au schéma, sans aucun secret."""
+
+    app_id: str
+    revision: int
+    document: dict[str, Any]
+    updated_at: datetime | None
+    updated_by: str | None
+
+
+@dataclass(frozen=True)
+class DescriptorRevision:
+    """Entrée de l'historique (ajout seul) ; ``document`` est absent pour une suppression."""
+
+    id: int
+    app_id: str
+    revision: int
+    action: Literal["created", "updated", "deleted"]
+    document: dict[str, Any] | None
+    changed_at: datetime | None
+    changed_by: str | None
 
 
 class SecretWriter(Protocol):
@@ -69,4 +97,33 @@ class AccountStore(Protocol):
 
     async def search_users(self, query: str, limit: int) -> list[tuple[str, dict[str, int]]]:
         """Utilisateurs dont la clé contient ``query`` (casse ignorée), avec leurs comptes par état."""
+        ...
+
+
+class DescriptorStore(Protocol):
+    """Descripteurs d'applis en base (table ``app_descriptors`` et son historique).
+
+    Écriture à contrôle de concurrence optimiste : chaque écriture indique la
+    révision qu'elle remplace et échoue (``Conflict``) si elle a changé entre-temps.
+    ``metadata.revision`` du document stocké est tenu égal à la révision en base.
+    """
+
+    async def list_descriptors(self) -> list[StoredDescriptor]: ...
+
+    async def get_descriptor(self, app_id: str) -> StoredDescriptor | None: ...
+
+    async def create_descriptor(self, app_id: str, document: dict[str, Any], by: str) -> int:
+        """Crée le descripteur (révision 1). ``Conflict`` s'il existe déjà ou si l'hôte public est pris."""
+        ...
+
+    async def update_descriptor(
+        self, app_id: str, document: dict[str, Any], by: str, expected_revision: int
+    ) -> int:
+        """Remplace le document et renvoie la nouvelle révision. ``NotFound`` / ``Conflict``."""
+        ...
+
+    async def delete_descriptor(self, app_id: str, by: str, expected_revision: int) -> None: ...
+
+    async def history(self, app_id: str) -> list[DescriptorRevision]:
+        """Historique de l'appli, du plus récent au plus ancien."""
         ...

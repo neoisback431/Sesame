@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Nouvelle application{% endblock %}
+{% block content %}
+<p><a href="/">← Applications</a></p>
+<h1>Nouvelle application</h1>
+<p class="muted">Ce formulaire produit un premier jet de descripteur, à relire et compléter dans l'éditeur avant
+  enregistrement. Rien n'est enregistré à cette étape. Aucun secret ici : les identifiants de chaque utilisateur
+  s'enregistrent ensuite, compte par compte.</p>
+<form class="card" method="post" action="/apps/new" autocomplete="off">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <h2>Identité</h2>
+  <div class="grid">
+    <div><label for="id">Identifiant (minuscules, chiffres, tirets)</label>
+      <input type="text" id="id" name="id" required pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?"></div>
+    <div><label for="name">Nom affiché</label><input type="text" id="name" name="name" required></div>
+    <div><label for="description">Description</label><input type="text" id="description" name="description"></div>
+    <div><label for="owner">Équipe responsable</label><input type="text" id="owner" name="owner"></div>
+  </div>
+  <h2>Adresses</h2>
+  <div class="grid">
+    <div><label for="public_host">Hôte public (exposé par Sesame, ex. <code>crm.sesame.example</code>)</label>
+      <input type="text" id="public_host" name="public_host" required></div>
+    <div><label for="base_url">URL de l'appli jointe par le proxy (ex. <code>http://crm.interne:8080</code>)</label>
+      <input type="text" id="base_url" name="base_url" required></div>
+  </div>
+  <h2>Habilitations</h2>
+  <div class="grid">
+    <div><label for="groups">Groupes (claim de groupes ; séparés par des espaces ou virgules)</label>
+      <input type="text" id="groups" name="groups"></div>
+    <div><label for="users">Utilisateurs (clés utilisateur, facultatif)</label><input type="text" id="users" name="users"></div>
+  </div>
+  <h2>Formulaire de login</h2>
+  <div class="grid">
+    <div><label for="form_url">Chemin de la page de login</label><input type="text" id="form_url" name="form_url" value="/login"></div>
+    <div><label for="form_selector">Sélecteur CSS du formulaire</label><input type="text" id="form_selector" name="form_selector" value="form"></div>
+    <div><label for="username_field">Nom du champ identifiant</label><input type="text" id="username_field" name="username_field" value="username"></div>
+    <div><label for="password_field">Nom du champ mot de passe</label><input type="text" id="password_field" name="password_field" value="password"></div>
+    <div><label for="csrf_field">Champ caché CSRF (facultatif)</label><input type="text" id="csrf_field" name="csrf_field"></div>
+    <div><label for="session_cookie">Cookie de session de l'appli</label><input type="text" id="session_cookie" name="session_cookie" required></div>
+    <div><label for="failure_text">Texte affiché en cas d'échec de connexion (facultatif)</label>
+      <input type="text" id="failure_text" name="failure_text"></div>
+  </div>
+  <p><button type="submit">Continuer vers l'éditeur</button></p>
+</form>
+{% endblock %}

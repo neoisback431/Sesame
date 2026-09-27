@@ -3,7 +3,19 @@
 {% block content %}
 <p><a href="/">← Applications</a></p>
 <h1>{{ app.name }}</h1>
-<p class="muted">{{ app.description or "" }} — <code>{{ app.id }}</code>, révision {{ app.revision }}, <code>{{ app.public_host }}</code></p>
+<p class="muted">{{ app.description or "" }} — <code>{{ app.id }}</code>, révision {{ app.revision }}, <code>{{ app.public_host }}</code>
+  {% if app.editable %}<span class="tag db">base</span>{% else %}<span class="tag">Git</span>{% endif %}</p>
+{% if app.editable %}
+<p>
+  <a class="button" href="/apps/{{ app.id }}/descriptor">Modifier le descripteur</a>
+  <a class="button" href="/apps/{{ app.id }}/history">Historique des révisions</a>
+  <form class="inline" method="post" action="/apps/{{ app.id }}/delete"
+        onsubmit="return confirm('Supprimer l\'application {{ app.id }} ? Elle cessera d\'être servie par Sesame.')">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ app.revision }}">
+    <button type="submit">Supprimer l'application</button></form>
+</p>
+{% if app.updated_by %}<p class="muted">Dernière modification {{ app.updated_at.strftime("%Y-%m-%d %H:%M") if app.updated_at else "" }} par <code>{{ app.updated_by }}</code>.</p>{% endif %}
+{% endif %}
 
 <h2>Comptes</h2>
 <table>
@@ -53,7 +65,7 @@
 </div>
 
 <details class="card">
-  <summary>Descripteur (lecture seule)</summary>
+  <summary>Descripteur{% if not app.editable %} (fichier Git, lecture seule){% endif %}</summary>
   <pre>{{ app.source }}</pre>
 </details>
 {% endblock %}

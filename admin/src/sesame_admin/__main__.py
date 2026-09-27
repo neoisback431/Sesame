@@ -14,10 +14,10 @@ import uvicorn
 from .audit import StdoutAuditSink
 from .auth import OidcAuthenticator
 from .config import Settings
-from .descriptors import load_dir
+from .descriptors import DescriptorValidator, load_dir
 from .openbao import OpenBaoSecretWriter
 from .service import AdminService
-from .store_postgres import PostgresAccountStore
+from .store_postgres import PgPool, PostgresAccountStore, PostgresDescriptorStore
 from .web import create_app
 
 
@@ -47,7 +47,15 @@ def main() -> None:
         s.openbao, httpx.AsyncClient(timeout=10, verify=verify, follow_redirects=False)
     )
     audit = StdoutAuditSink()
-    service = AdminService(apps, secrets, PostgresAccountStore(s.database_url), audit)
+    db = PgPool(s.database_url)
+    service = AdminService(
+        apps,
+        secrets,
+        PostgresAccountStore(db),
+        audit,
+        PostgresDescriptorStore(db),
+        DescriptorValidator(s.schema_file),
+    )
     app = create_app(
         service,
         OidcAuthenticator(s.oidc, str(s.ca_file) if s.ca_file else None),
@@ -61,7 +69,7 @@ def main() -> None:
         session_ttl_secs=s.session_ttl_secs,
         secure_cookies=s.public_url.startswith("https://"),
     )
-    logging.getLogger(__name__).info("administration démarrée (%d applis)", len(apps))
+    logging.getLogger(__name__).info("administration démarrée (%d applis en fichiers)", len(apps))
     uvicorn.run(
         app,
         host=s.listen_host,

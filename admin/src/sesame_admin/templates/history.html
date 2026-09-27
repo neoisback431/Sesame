@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Historique de {{ app_id }}{% endblock %}
+{% block content %}
+<p><a href="/apps/{{ app_id }}">← {{ app_id }}</a></p>
+<h1>Historique de {{ app_id }}</h1>
+<table>
+  <thead><tr><th>Date</th><th>Révision</th><th>Action</th><th>Par</th></tr></thead>
+  <tbody>
+  {% for e, source in revisions %}
+    <tr>
+      <td>{{ e.changed_at.strftime("%Y-%m-%d %H:%M:%S") if e.changed_at else "—" }}</td>
+      <td>{{ e.revision }}</td>
+      <td>{{ {"created": "création", "updated": "modification", "deleted": "suppression"}[e.action] }}</td>
+      <td><code>{{ e.changed_by or "—" }}</code></td>
+    </tr>
+    {% if source %}
+    <tr><td colspan="4"><details><summary>Document</summary><pre>{{ source }}</pre></details></td></tr>
+    {% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

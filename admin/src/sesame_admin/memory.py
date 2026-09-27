@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import copy
 from collections import Counter
 from datetime import UTC, datetime
+from typing import Any
 
-from .ports import Account, NotFound, Status
+from .ports import Account, Conflict, DescriptorRevision, NotFound, Status, StoredDescriptor
 
 
 class MemorySecretWriter:
@@ -68,3 +70,65 @@ class MemoryAccountStore:
 
     async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:
         return self.app_sessions.pop((app_id, user_key), 0)
+
+
+def _host(document: dict[str, Any]) -> Any:
+    return document.get("spec", {}).get("public", {}).get("host")
+
+
+class MemoryDescriptorStore:
+    def __init__(self) -> None:
+        self.descriptors: dict[str, StoredDescriptor] = {}
+        self.log: list[DescriptorRevision] = []
+
+    def _put(self, app_id: str, document: dict[str, Any], by: str, revision: int, action: str) -> int:
+        host = _host(document)
+        if host is not None and any(
+            _host(d.document) == host for d in self.descriptors.values() if d.app_id != app_id
+        ):
+            raise Conflict("hôte public déjà utilisé")
+        doc = copy.deepcopy(document)
+        doc.setdefault("metadata", {})["revision"] = revision
+        now = datetime.now(UTC)
+        self.descriptors[app_id] = StoredDescriptor(app_id, revision, doc, now, by)
+        self.log.append(
+            DescriptorRevision(len(self.log) + 1, app_id, revision, action, copy.deepcopy(doc), now, by)  # type: ignore[arg-type]
+        )
+        return revision
+
+    async def list_descriptors(self) -> list[StoredDescriptor]:
+        return [copy.deepcopy(self.descriptors[k]) for k in sorted(self.descriptors)]
+
+    async def get_descriptor(self, app_id: str) -> StoredDescriptor | None:
+        return copy.deepcopy(self.descriptors.get(app_id))
+
+    async def create_descriptor(self, app_id: str, document: dict[str, Any], by: str) -> int:
+        if app_id in self.descriptors:
+            raise Conflict("identifiant déjà utilisé")
+        return self._put(app_id, document, by, 1, "created")
+
+    async def update_descriptor(
+        self, app_id: str, document: dict[str, Any], by: str, expected_revision: int
+    ) -> int:
+        current = self.descriptors.get(app_id)
+        if current is None:
+            raise NotFound(app_id)
+        if current.revision != expected_revision:
+            raise Conflict("révision modifiée entre-temps")
+        return self._put(app_id, document, by, current.revision + 1, "updated")
+
+    async def delete_descriptor(self, app_id: str, by: str, expected_revision: int) -> None:
+        current = self.descriptors.get(app_id)
+        if current is None:
+            raise NotFound(app_id)
+        if current.revision != expected_revision:
+            raise Conflict("révision modifiée entre-temps")
+        del self.descriptors[app_id]
+        self.log.append(
+            DescriptorRevision(
+                len(self.log) + 1, app_id, current.revision, "deleted", None, datetime.now(UTC), by
+            )
+        )
+
+    async def history(self, app_id: str) -> list[DescriptorRevision]:
+        return [copy.deepcopy(r) for r in reversed(self.log) if r.app_id == app_id]

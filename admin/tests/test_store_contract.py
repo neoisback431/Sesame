@@ -9,9 +9,9 @@ import os
 import uuid
 
 import pytest
-from sesame_admin.memory import MemoryAccountStore
-from sesame_admin.ports import NotFound
-from sesame_admin.store_postgres import PostgresAccountStore
+from sesame_admin.memory import MemoryAccountStore, MemoryDescriptorStore
+from sesame_admin.ports import Conflict, NotFound
+from sesame_admin.store_postgres import PostgresAccountStore, PostgresDescriptorStore
 
 from .conftest import ROOT
 
@@ -115,3 +115,70 @@ async def test_user_views_and_session_revocation_contract(store):
 
     for app, u in ((f"app-a-{tag}", user), (f"app-b-{tag}", user), (f"app-a-{tag}", other)):
         await store.delete_account(app, u)
+
+
+@pytest.fixture(params=["memory", "postgres"])
+async def descriptors(request):
+    if request.param == "memory":
+        yield MemoryDescriptorStore()
+        return
+    accounts = await postgres_store()  # crée le schéma si besoin
+    await accounts.close()
+    s = PostgresDescriptorStore(os.environ["SESAME_TEST_DATABASE_URL"])
+    yield s
+    await s.close()
+
+
+def document(app_id: str, host: str, name: str = "A") -> dict:
+    return {"metadata": {"id": app_id, "name": name, "revision": 99}, "spec": {"public": {"host": host}}}
+
+
+async def test_descriptor_store_contract(descriptors):
+    tag = uuid.uuid4().hex[:8]
+    app, other = f"app-{tag}", f"other-{tag}"
+    assert await descriptors.get_descriptor(app) is None
+
+    assert await descriptors.create_descriptor(app, document(app, f"{tag}.test"), "admin") == 1
+    found = await descriptors.get_descriptor(app)
+    assert (found.revision, found.updated_by) == (1, "admin")
+    assert found.document["metadata"]["revision"] == 1  # tenue égale à la révision en base
+    assert app in [d.app_id for d in await descriptors.list_descriptors()]
+    with pytest.raises(Conflict):
+        await descriptors.create_descriptor(app, document(app, f"x-{tag}.test"), "admin")
+    with pytest.raises(Conflict):  # une appli par nom d'hôte
+        await descriptors.create_descriptor(other, document(other, f"{tag}.test"), "admin")
+
+    assert await descriptors.update_descriptor(app, document(app, f"{tag}.test", "B"), "bob", 1) == 2
+    found = await descriptors.get_descriptor(app)
+    assert (found.revision, found.document["metadata"], found.updated_by) == (
+        2,
+        {"id": app, "name": "B", "revision": 2},
+        "bob",
+    )
+    with pytest.raises(Conflict):  # révision périmée
+        await descriptors.update_descriptor(app, document(app, f"{tag}.test", "C"), "bob", 1)
+    with pytest.raises(NotFound):
+        await descriptors.update_descriptor(other, document(other, f"o-{tag}.test"), "bob", 1)
+    await descriptors.create_descriptor(other, document(other, f"o-{tag}.test"), "admin")
+    with pytest.raises(Conflict):
+        await descriptors.update_descriptor(other, document(other, f"{tag}.test"), "bob", 1)
+
+    with pytest.raises(Conflict):
+        await descriptors.delete_descriptor(app, "carol", 1)
+    await descriptors.delete_descriptor(app, "carol", 2)
+    assert await descriptors.get_descriptor(app) is None
+    with pytest.raises(NotFound):
+        await descriptors.delete_descriptor(app, "carol", 2)
+
+    history = await descriptors.history(app)
+    assert [(h.action, h.revision, h.changed_by) for h in history] == [
+        ("deleted", 2, "carol"),
+        ("updated", 2, "bob"),
+        ("created", 1, "admin"),
+    ]
+    assert history[0].document is None and history[1].document["metadata"]["name"] == "B"
+    # Recréée après suppression : la révision repart de 1, l'historique continue.
+    assert await descriptors.create_descriptor(app, document(app, f"{tag}.test"), "admin") == 1
+    assert len(await descriptors.history(app)) == 4
+    for a in (app, other):
+        await descriptors.delete_descriptor(a, "admin", 1)

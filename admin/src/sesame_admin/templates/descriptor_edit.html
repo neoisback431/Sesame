@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ "Descripteur " ~ app_id if app_id else "Nouvelle application" }}{% endblock %}
+{% block content %}
+<p><a href="{{ '/apps/' ~ app_id if app_id else '/' }}">← {{ app_id or "Applications" }}</a></p>
+<h1>{% if app_id %}Descripteur de {{ app_id }}{% else %}Nouvelle application{% endif %}</h1>
+<p class="muted">Référence : <code>docs/descriptor.md</code>. Le document est validé contre le schéma et les contrôles
+  du proxy avant enregistrement. <code>metadata.revision</code> est tenue par Sesame.
+  {% if app_id %}Révision courante : {{ revision }} ; l'enregistrement est refusé si quelqu'un l'a modifiée entre-temps.{% endif %}
+  Aucun secret dans un descripteur : les constantes <code>value</code> sont visibles de tous les administrateurs.</p>
+{% if errors %}
+<ul class="errors" role="alert">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+{% elif valid %}
+<div class="flash ok" role="status">Descripteur valide (non enregistré).</div>
+{% endif %}
+<form method="post" action="{{ '/apps/' ~ app_id ~ '/descriptor' if app_id else '/apps' }}" autocomplete="off">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% if app_id %}<input type="hidden" name="revision" value="{{ revision }}">{% endif %}
+  <label for="descriptor">Descripteur (YAML)</label>
+  <textarea id="descriptor" name="descriptor" rows="40" spellcheck="false">{{ text }}</textarea>
+  <p>
+    <button type="submit" name="check" value="1">Vérifier</button>
+    <button type="submit">{% if app_id %}Enregistrer{% else %}Créer l'application{% endif %}</button>
+  </p>
+</form>
+{% endblock %}

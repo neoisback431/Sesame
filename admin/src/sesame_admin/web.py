@@ -20,15 +20,34 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .audit import AuditEvent, AuditSink
 from .auth import Authenticator, AuthError
+from .descriptors import draft
 from .identity import AdminUser, ClaimsError, identity_from_claims
 from .ports import NotFound, Unavailable
-from .service import AdminService, InvalidInput
+from .service import AdminService, InvalidDescriptor, InvalidInput
 
 log = logging.getLogger(__name__)
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 # Retour après une action : seulement une page locale de l'administration.
 _BACK = re.compile(r"^/(apps|users)/[A-Za-z0-9@._+-]{1,256}$")
+# Champs du formulaire guidé de création d'appli.
+_GUIDED = (
+    "id",
+    "name",
+    "description",
+    "owner",
+    "public_host",
+    "base_url",
+    "groups",
+    "users",
+    "form_url",
+    "form_selector",
+    "username_field",
+    "password_field",
+    "csrf_field",
+    "session_cookie",
+    "failure_text",
+)
 
 
 class NotAdmin(Exception):
@@ -159,20 +178,175 @@ def create_app(
     async def apps(request: Request, admin: Admin) -> Response:
         try:
             counts = await service.accounts.count_by_app()
+            catalog = await service.catalog()
         except Unavailable:
-            return error(request, 503, "Service indisponible", "Le registre des comptes est injoignable.")
-        rows = [(a, counts.get(a.id, {})) for a in sorted(service.apps.values(), key=lambda a: a.name)]
-        return render(request, "apps.html", admin=admin, rows=rows)
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+        rows = [(a, counts.get(a.id, {})) for a in sorted(catalog.apps.values(), key=lambda a: a.name)]
+        return render(request, "apps.html", admin=admin, rows=rows, rejected=catalog.rejected)
+
+    # --- Création / modification / suppression d'appli ------------------------------
+
+    def editor(
+        request: Request,
+        admin: AdminUser,
+        *,
+        text: str,
+        app_id: str | None = None,
+        revision: int = 0,
+        errors: list[str] | None = None,
+        valid: bool = False,
+        status: int = 200,
+    ) -> HTMLResponse:
+        return render(
+            request,
+            "descriptor_edit.html",
+            status,
+            admin=admin,
+            text=text,
+            app_id=app_id,
+            revision=revision,
+            errors=errors or [],
+            valid=valid,
+        )
+
+    @app.get("/apps/new")
+    async def app_new(request: Request, admin: Admin) -> Response:
+        return render(request, "app_new.html", admin=admin)
+
+    @app.post("/apps/new")
+    async def app_draft(request: Request, admin: Admin) -> Response:
+        """Formulaire guidé → premier jet dans l'éditeur (rien n'est enregistré)."""
+        try:
+            await check_csrf(request)
+        except InvalidInput as e:
+            return error(request, 400, "Requête refusée", str(e))
+        form = await request.form()
+        doc = draft({k: str(form.get(k, ""))[:1000] for k in _GUIDED})
+        return editor(request, admin, text=service.validator.to_yaml(doc))
+
+    @app.post("/apps")
+    async def app_create(request: Request, admin: Admin, descriptor: Annotated[str, Form()]) -> Response:
+        cid = correlation_id(request)
+        try:
+            await check_csrf(request)
+            if "check" in await request.form():
+                service.parse(descriptor, 1)
+                return editor(request, admin, text=descriptor, valid=True)
+            app_id, _ = await service.create_descriptor(admin, descriptor, cid)
+        except InvalidDescriptor as e:
+            return editor(request, admin, text=descriptor, errors=e.errors, status=422)
+        except InvalidInput as e:
+            return editor(request, admin, text=descriptor, errors=[str(e)], status=400)
+        except Unavailable:
+            log.error("brique externe indisponible", extra={"correlation_id": cid})
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+        request.session["flash"] = {
+            "kind": "ok",
+            "text": f"Appli « {app_id} » créée : accessible via Sesame d'ici quelques secondes.",
+        }
+        return RedirectResponse(f"/apps/{app_id}", status_code=303)
+
+    @app.get("/apps/{app_id}/descriptor")
+    async def descriptor_edit(request: Request, app_id: str, admin: Admin) -> Response:
+        if app_id in service.files:
+            return error(
+                request,
+                409,
+                "Lecture seule",
+                "Cette appli est décrite par un fichier Git : modifiez-la par merge request.",
+            )
+        try:
+            stored = await service.stored(app_id)
+        except NotFound:
+            return error(request, 404, "Application inconnue", "Aucun descripteur ne porte cet identifiant.")
+        except Unavailable:
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+        return editor(
+            request,
+            admin,
+            text=service.validator.to_yaml(stored.document),
+            app_id=app_id,
+            revision=stored.revision,
+        )
+
+    @app.post("/apps/{app_id}/descriptor")
+    async def descriptor_update(
+        request: Request,
+        app_id: str,
+        admin: Admin,
+        descriptor: Annotated[str, Form()],
+        revision: Annotated[int, Form()],
+    ) -> Response:
+        cid = correlation_id(request)
+        args = {"text": descriptor, "app_id": app_id, "revision": revision}
+        try:
+            await check_csrf(request)
+            if "check" in await request.form():
+                service.parse(descriptor, revision + 1)
+                return editor(request, admin, valid=True, **args)
+            new_revision = await service.update_descriptor(admin, app_id, descriptor, revision, cid)
+        except InvalidDescriptor as e:
+            return editor(request, admin, errors=e.errors, status=422, **args)
+        except InvalidInput as e:
+            return editor(request, admin, errors=[str(e)], status=400, **args)
+        except NotFound:
+            return error(request, 404, "Application inconnue", "Ce descripteur a été supprimé entre-temps.")
+        except Unavailable:
+            log.error("brique externe indisponible", extra={"correlation_id": cid})
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+        request.session["flash"] = {
+            "kind": "ok",
+            "text": f"Descripteur enregistré (révision {new_revision}), actif sous quelques secondes.",
+        }
+        return RedirectResponse(f"/apps/{app_id}", status_code=303)
+
+    @app.post("/apps/{app_id}/delete")
+    async def app_delete(
+        request: Request, app_id: str, admin: Admin, revision: Annotated[int, Form()]
+    ) -> Response:
+        cid = correlation_id(request)
+        try:
+            await check_csrf(request)
+            await service.delete_descriptor(admin, app_id, revision, cid)
+        except InvalidInput as e:
+            request.session["flash"] = {"kind": "error", "text": str(e)}
+            return RedirectResponse(f"/apps/{app_id}", status_code=303)
+        except NotFound:
+            request.session["flash"] = {"kind": "error", "text": "Application introuvable."}
+            return RedirectResponse("/", status_code=303)
+        except Unavailable:
+            log.error("brique externe indisponible", extra={"correlation_id": cid})
+            request.session["flash"] = {
+                "kind": "error",
+                "text": f"Opération impossible : service indisponible (référence {cid}).",
+            }
+            return RedirectResponse(f"/apps/{app_id}", status_code=303)
+        request.session["flash"] = {"kind": "ok", "text": f"Appli « {app_id} » supprimée."}
+        return RedirectResponse("/", status_code=303)
+
+    @app.get("/apps/{app_id}/history")
+    async def app_history(request: Request, app_id: str, admin: Admin) -> Response:
+        try:
+            entries = await service.descriptors.history(app_id)
+        except Unavailable:
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+        if not entries:
+            return error(request, 404, "Aucun historique", "Aucune révision en base pour cet identifiant.")
+        revisions = [(e, service.validator.to_yaml(e.document) if e.document else None) for e in entries]
+        return render(request, "history.html", admin=admin, app_id=app_id, revisions=revisions)
 
     @app.get("/apps/{app_id}")
     async def app_detail(request: Request, app_id: str, admin: Admin) -> Response:
         try:
-            target = service.app(app_id)
+            target = await service.app(app_id)
             accounts = await service.accounts.list_accounts(app_id)
         except NotFound:
+            if app_id not in service.files and await service.descriptors.get_descriptor(app_id):
+                # En base mais écarté du catalogue : l'éditeur permet de le corriger.
+                return RedirectResponse(f"/apps/{app_id}/descriptor", status_code=302)
             return error(request, 404, "Application inconnue", "Aucun descripteur ne porte cet identifiant.")
         except Unavailable:
-            return error(request, 503, "Service indisponible", "Le registre des comptes est injoignable.")
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
         return render(request, "app.html", admin=admin, app=target, accounts=accounts)
 
     async def act(request: Request, app_id: str, operation) -> Response:
@@ -200,7 +374,7 @@ def create_app(
         request: Request, app_id: str, admin: Admin, user_key: Annotated[str, Form()]
     ) -> Response:
         async def op(cid: str) -> str:
-            target = service.app(app_id)
+            target = await service.app(app_id)
             form = await request.form()
             fields = {k: str(form.get(f"cred_{k}", "")) for k in target.credential_keys}
             await service.provision(admin, app_id, user_key, fields, cid)
@@ -238,11 +412,10 @@ def create_app(
     async def user_detail(request: Request, user_key: str, admin: Admin) -> Response:
         try:
             accounts = await service.accounts.list_user_accounts(user_key)
+            apps = (await service.catalog()).apps
         except Unavailable:
-            return error(request, 503, "Service indisponible", "Le registre des comptes est injoignable.")
-        return render(
-            request, "user.html", admin=admin, user_key=user_key, accounts=accounts, apps=service.apps
-        )
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+        return render(request, "user.html", admin=admin, user_key=user_key, accounts=accounts, apps=apps)
 
     @app.post("/users/{user_key}/disable-all")
     async def disable_all(request: Request, user_key: str, admin: Admin) -> Response:

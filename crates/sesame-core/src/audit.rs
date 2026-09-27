@@ -18,6 +18,9 @@ pub enum AuditAction {
     AdminLogin,
     CredentialWritten,
     CredentialDeleted,
+    DescriptorCreated,
+    DescriptorUpdated,
+    DescriptorDeleted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

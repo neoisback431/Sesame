@@ -8,7 +8,8 @@
   <tbody>
   {% for app, counts in rows %}
     <tr>
-      <td><a href="/apps/{{ app.id }}">{{ app.name }}</a><br><span class="muted">{{ app.id }}</span></td>
+      <td><a href="/apps/{{ app.id }}">{{ app.name }}</a><br><span class="muted">{{ app.id }}</span>
+        {% if app.editable %}<span class="tag db">base</span>{% else %}<span class="tag">Git</span>{% endif %}</td>
       <td>{{ app.public_host }}</td>
       <td>{% for g in app.groups %}<code>{{ g }}</code> {% endfor %}{% for u in app.users %}<code>{{ u }}</code> {% endfor %}</td>
       <td>{{ counts.get('active', 0) }} actif(s){% if counts.get('failed') %}, <strong>{{ counts['failed'] }} en échec</strong>{% endif %}{% if counts.get('disabled') %}, {{ counts['disabled'] }} désactivé(s){% endif %}</td>
@@ -20,16 +21,25 @@
   </tbody>
 </table>
 
-<details class="card">
-  <summary><strong>Ajouter une application</strong></summary>
-  <p>Les applications sont décrites par des fichiers versionnés dans Git (dossier <code>descriptors/</code>),
-    relus par merge request, et non créées depuis cette interface.</p>
-  <ol>
-    <li>Copier <code>descriptors/TEMPLATE.yaml.example</code> en <code>descriptors/&lt;id&gt;.yaml</code> et le compléter.</li>
-    <li>Le valider avec un compte de test : <code>sesame-onboard verify descriptors/&lt;id&gt;.yaml</code>.</li>
-    <li>Reporter l'empreinte : <code>sesame-onboard fingerprint descriptors/&lt;id&gt;.yaml</code>.</li>
-    <li>Fusionner la merge request, puis redémarrer le portail, le proxy et cette interface.</li>
-  </ol>
-  <p>L'application apparaît alors ici ; ses comptes se gèrent via « Gérer les comptes ».</p>
-</details>
+{% if rejected %}
+<div class="card">
+  <h2>Descripteurs écartés</h2>
+  <p class="muted">Enregistrés en base mais ignorés par le portail et le proxy. À corriger ou supprimer.</p>
+  <ul>
+  {% for r in rejected %}
+    <li><a href="/apps/{{ r.stored.app_id }}/descriptor"><code>{{ r.stored.app_id }}</code></a> — {{ r.reason }}</li>
+  {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Ajouter une application</h2>
+  <p><a class="button" href="/apps/new">Nouvelle application</a></p>
+  <p class="muted">Formulaire guidé puis éditeur YAML, validé contre le schéma du descripteur. L'appli est prise en compte
+    par le portail et le proxy sans redémarrage (quelques secondes). Avant d'ouvrir l'appli aux utilisateurs, vérifiez
+    le rejeu avec un compte de test : <code>sesame-onboard verify</code>.</p>
+  <p class="muted">Les applis décrites par un fichier Git (<code>descriptors/</code>) restent en lecture seule ici :
+    elles se modifient par merge request.</p>
+</div>
 {% endblock %}
