@@ -47,6 +47,10 @@ class Settings:
     schema_file: Path
     database_url: str = field(repr=False)
     ca_file: Path | None
+    # Recorder : service interne d'analyse d'une page de login. Fonctionnalité
+    # activée seulement si l'URL et le jeton sont tous deux fournis.
+    recorder_url: str | None
+    recorder_token: str | None = field(repr=False)
     oidc: OidcSettings
     openbao: OpenBaoConfig
 
@@ -66,6 +70,8 @@ class Settings:
             schema_file=Path(_or("SESAME_SCHEMA_FILE", "schemas/app-descriptor.schema.json")),
             database_url=_required("SESAME_DATABASE_URL"),
             ca_file=Path(ca) if ca else None,
+            recorder_url=(os.environ.get("SESAME_RECORDER_URL", "").strip() or None),
+            recorder_token=(os.environ.get("SESAME_RECORDER_TOKEN", "").strip() or None),
             oidc=OidcSettings(
                 issuer=_required("SESAME_OIDC_ISSUER").rstrip("/"),
                 client_id=_required("SESAME_OIDC_CLIENT_ID"),

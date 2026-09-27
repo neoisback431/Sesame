@@ -380,3 +380,108 @@ def test_brand_assets_are_public_and_used(ctx):
     assert client.get("/static/../web.py").status_code == 404
     page = client.get("/logged-out").text
     assert 'src="/static/banner.webp"' in page and 'href="/static/favicon-32.png"' in page
+
+
+# --- Recorder (bouton « Analyser une page de login ») ----------------------------------
+
+from sesame_admin.recorder import RecorderError, RecordingResult  # noqa: E402
+
+
+class FakeRecorder:
+    def __init__(self):
+        self.calls = []
+        self.result = RecordingResult(
+            yaml="apiVersion: sesame/v1\n# descripteur proposé\n",
+            summary=["formulaire : form#login"],
+            todo=["spec.public.host : hôte public exposé par Sesame"],
+            warnings=["login_submitted_by_javascript"],
+            blocking=[],
+            valid=False,
+            errors=[],
+        )
+        self.error: str | None = None
+
+    async def analyze(self, login_url, *, probe_failure=False):
+        self.calls.append((login_url, probe_failure))
+        if self.error:
+            raise RecorderError(self.error)
+        return self.result
+
+
+def ctx_with_recorder(apps, recorder):
+    audit = MemoryAuditSink()
+    service = make_service(apps, audit)
+    app = create_app(
+        service,
+        FakeAuth(),
+        audit,
+        public_url="https://admin.test",
+        session_key="k" * 32,
+        admin_group="sesame-admins",
+        issuer="https://idp.test",
+        user_key_claim="preferred_username",
+        groups_claim="groups",
+        recorder=recorder,
+    )
+    client = TestClient(app, base_url="https://admin.test", follow_redirects=False)
+    return client, service, audit
+
+
+def test_analyze_prefills_editor_and_audits(apps):
+    recorder = FakeRecorder()
+    client, _, audit = ctx_with_recorder(apps, recorder)
+    login(client)
+    assert "Analyser une page de login" in client.get("/apps/new").text
+    token = csrf(client, "/apps/new")
+    r = client.post(
+        "/apps/analyze",
+        data={"csrf": token, "login_url": "https://crm.interne/login", "probe_failure": "on"},
+    )
+    assert r.status_code == 200
+    assert "descripteur proposé" in r.text  # YAML pré-rempli dans l'éditeur
+    assert "login_submitted_by_javascript" in r.text  # notes affichées
+    assert recorder.calls == [("https://crm.interne/login", True)]
+    assert audit.events[-1].action == "descriptor_recorded"
+    assert audit.events[-1].outcome == "success"
+    assert audit.events[-1].reason == "crm.interne"  # hôte seulement, pas l'URL complète
+
+
+def test_analyze_reports_recorder_error(apps):
+    recorder = FakeRecorder()
+    recorder.error = "recorder injoignable (ConnectError)"
+    client, _, audit = ctx_with_recorder(apps, recorder)
+    login(client)
+    token = csrf(client, "/apps/new")
+    r = client.post("/apps/analyze", data={"csrf": token, "login_url": "https://crm.interne/login"})
+    assert r.status_code == 303 and r.headers["location"] == "/apps/new"
+    assert "Analyse impossible" in client.get("/apps/new").text
+    assert audit.events[-1].action == "descriptor_recorded" and audit.events[-1].outcome == "failure"
+
+
+def test_analyze_rejects_bad_url(apps):
+    recorder = FakeRecorder()
+    client, _, _ = ctx_with_recorder(apps, recorder)
+    login(client)
+    token = csrf(client, "/apps/new")
+    r = client.post("/apps/analyze", data={"csrf": token, "login_url": "ftp://x/login"})
+    assert r.status_code == 303
+    assert recorder.calls == []
+    assert "URL de login invalide" in client.get("/apps/new").text
+
+
+def test_analyze_requires_csrf(apps):
+    recorder = FakeRecorder()
+    client, _, _ = ctx_with_recorder(apps, recorder)
+    login(client)
+    r = client.post("/apps/analyze", data={"csrf": "forged", "login_url": "https://crm.interne/login"})
+    assert r.status_code == 400 and recorder.calls == []
+
+
+def test_analyze_hidden_when_recorder_disabled(ctx):
+    client, _, _, _ = ctx
+    login(client)
+    page = client.get("/apps/new").text
+    assert "Analyser une page de login" not in page
+    token = csrf(client, "/apps/new")
+    r = client.post("/apps/analyze", data={"csrf": token, "login_url": "https://crm.interne/login"})
+    assert r.status_code == 404

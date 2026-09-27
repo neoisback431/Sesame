@@ -16,6 +16,7 @@ from .auth import OidcAuthenticator
 from .config import Settings
 from .descriptors import DescriptorValidator, load_dir
 from .openbao import OpenBaoSecretWriter
+from .recorder import HttpRecorder
 from .service import AdminService
 from .store_postgres import PgPool, PostgresAccountStore, PostgresDescriptorStore
 from .web import create_app
@@ -56,6 +57,7 @@ def main() -> None:
         PostgresDescriptorStore(db),
         DescriptorValidator(s.schema_file),
     )
+    recorder = HttpRecorder(s.recorder_url, s.recorder_token) if s.recorder_url and s.recorder_token else None
     app = create_app(
         service,
         OidcAuthenticator(s.oidc, str(s.ca_file) if s.ca_file else None),
@@ -68,6 +70,7 @@ def main() -> None:
         groups_claim=s.oidc.groups_claim,
         session_ttl_secs=s.session_ttl_secs,
         secure_cookies=s.public_url.startswith("https://"),
+        recorder=recorder,
     )
     logging.getLogger(__name__).info("administration démarrée (%d applis en fichiers)", len(apps))
     uvicorn.run(
