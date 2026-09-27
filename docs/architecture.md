@@ -332,6 +332,15 @@ sequenceDiagram
 
 Hors périmètre initial : login en plusieurs étapes, captcha, MFA applicatif, enregistrement d'une connexion réelle.
 
+### Recorder depuis l'administration
+
+Le recorder est aussi exposé comme **service HTTP interne** (`sesame-recorder`, `POST /record`), appelé par la console d'administration via le bouton « Analyser une page de login » qui pré-remplit l'éditeur. Voir [ADR 0016](decisions/0016-recorder-dans-admin.md).
+
+- Service **interne uniquement**, jamais exposé via Nginx ; l'admin s'authentifie par un **jeton partagé** (`SESAME_RECORDER_TOKEN`).
+- Chaque analyse est **auditée** (`descriptor_recorded`), avec le seul hôte de l'URL cible.
+- **Aucune allowlist anti-SSRF** (choix de l'exploitant : les applis à embarquer sont sur des hôtes internes). Le recorder ouvre l'URL fournie ; garde-fous : service interne, jeton, déclencheur réservé aux administrateurs, audit. Risque résiduel : un administrateur peut viser une URL interne (dont les métadonnées cloud). Amélioration possible non retenue : bloquer les seules adresses de métadonnées cloud.
+- La même image sert la CLI `make record` (entrypoint remplacé).
+
 ## Observabilité
 
 - Logs JSON sur stdout (Rust : `tracing`). Aucun secret, aucun cookie, pas de query string dans les logs d'accès.
@@ -349,6 +358,7 @@ Hors périmètre initial : login en plusieurs étapes, captcha, MFA applicatif, 
 | Verrouillage de compte par rejeux en boucle | `max_attempts`, attente à délai croissant, alerte |
 | Élévation via l'UI d'admin | Groupe d'administrateurs dédié, audit de chaque action (y compris les descripteurs : un administrateur peut changer l'hôte ou l'URL amont d'une appli), écriture sans relecture des secrets, historique des révisions |
 | Accès direct aux applis sans passer par Sesame | Hors de Sesame : filtrage réseau recommandé (seul le proxy joint les applis) |
+| SSRF via le recorder (analyse d'une URL arbitraire) | **Aucune allowlist** (choix de l'exploitant, ADR 0016) ; atténué par : service interne, jeton partagé, déclencheur réservé aux administrateurs, audit. Amélioration possible : blocage des métadonnées cloud |
 
 ## Environnement de dev
 
