@@ -48,7 +48,9 @@ health:
 # Ex. : make record URL=http://fake-app:8000/login ARGS="--id fake-app --probe-failure"
 record:
 	@test -n "$(URL)" || (echo "usage : make record URL=<page de login> [ARGS=…]" && exit 2)
-	docker compose run --rm --build recorder "$(URL)" $(ARGS)
+	docker compose run --rm --build --no-deps \
+	  --entrypoint sesame-onboard recorder \
+	  --schema /etc/sesame/app-descriptor.schema.json record "$(URL)" $(ARGS)
 
 test: test-rust test-python
 
