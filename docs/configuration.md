@@ -81,6 +81,7 @@ Service HTTP **interne** d'analyse d'une page de login, appelé par l'administra
 | `SESAME_RECORDER_TOKEN` 🔒 | requis | Jeton attendu (`Authorization: Bearer`), partagé avec l'admin |
 | `SESAME_RECORDER_SCHEMA` | schéma par défaut | Schéma JSON de validation du descripteur proposé |
 | `SESAME_RECORDER_TIMEOUT` | `20` | Délai (s) d'analyse d'une page |
+| `SESAME_APPS_DOMAIN` | aucun | Domaine des applis exposées par Sesame (ex. `sesame.localhost:8443` en dev, `apps.example.org` en production) : l'hôte public proposé est `<id>.<domaine>`. Doit être résolu (DNS) vers Nginx. Absent : `<id>.sesame.example`, signalé à corriger. Lu aussi par `sesame-onboard record` |
 | `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre les applis en TLS |
 | `SESAME_RECORDER_INSECURE` | `false` | Ne pas vérifier TLS (dev uniquement) |
 | `SESAME_ONBOARD_CHROMIUM` | aucun | Exécutable Chromium, si ce n'est pas celui de l'image |

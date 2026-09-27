@@ -103,6 +103,14 @@ def test_fake_app_without_any_login_attempt(fake, client, browser):
     assert re.search(expiry, "/login") and re.search(expiry, f"{fake.base}/login?next=/")
     assert any("session.cookies" in t for t in draft.todo)
 
+    # Sans groupe : pas de spec.access (le compte suffit, ADR 0017) ; hôte public sous le
+    # domaine configuré des applis (un exemple non résolu ferait échouer le navigateur).
+    open_draft = record.to_descriptor(rec, app_id="crm", apps_domain="sesame.localhost:8443")
+    assert descriptors.validate(open_draft.document) == []
+    assert "access" not in open_draft.document["spec"]
+    assert open_draft.document["spec"]["public"]["host"] == "crm.sesame.localhost:8443"
+    assert not any("spec.public.host" in t for t in open_draft.todo)
+
 
 def test_failure_probe_observes_the_rejection(fake, client, browser):
     rec = run(f"{fake.base}/login", client, browser, probe_failure=True)

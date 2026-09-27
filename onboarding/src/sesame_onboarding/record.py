@@ -19,6 +19,7 @@ de jeton CSRF, de cookie, ni les valeurs factices saisies.
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 import secrets
 import time
@@ -492,6 +493,7 @@ def to_descriptor(
     groups: list[str] | None = None,
     users: list[str] | None = None,
     session_cookie: str | None = None,
+    apps_domain: str | None = None,
 ) -> Draft:
     todo: list[str] = []
     host = urlsplit(rec.base_url).hostname or "appli"
@@ -502,16 +504,18 @@ def to_descriptor(
     if app_id != requested_id:
         todo.append(f"metadata.id normalisé en « {app_id} » (minuscules et tirets requis)")
     if not public_host:
-        public_host = f"{app_id}.sesame.example"
-        todo.append("spec.public.host : hôte public exposé par Sesame")
+        # Domaine des applis exposées par Sesame, issu de la configuration (ex.
+        # « sesame.localhost:8443 » en dev) ; à défaut, un exemple à remplacer.
+        domain = (apps_domain or os.environ.get("SESAME_APPS_DOMAIN", "")).strip().strip(".")
+        public_host = f"{app_id}.{domain or 'sesame.example'}"
+        if not domain:
+            todo.append("spec.public.host : hôte public exposé par Sesame (SESAME_APPS_DOMAIN non défini)")
+    # spec.access facultatif (ADR 0017) : sans restriction, le compte actif suffit.
     access: dict[str, Any] = {}
     if groups:
         access["groups"] = groups
     if users:
         access["users"] = users
-    if not access:
-        access["groups"] = [f"{app_id}-users"]
-        todo.append("spec.access : groupes ou utilisateurs habilités")
 
     login_path = urlsplit(rec.form_url).path or "/"
     base = rec.base_url.rstrip("/")
@@ -558,7 +562,7 @@ def to_descriptor(
         "spec": {
             "upstream": {"base_url": base},
             "public": {"host": public_host},
-            "access": access,
+            **({"access": access} if access else {}),
             "credentials": {
                 "mode": "per_user",
                 "keys": ["username", "password"] if rec.username_field else ["password"],
