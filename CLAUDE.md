@@ -134,6 +134,7 @@ Session expirée sur un `POST` : rejeu puis `303` vers la page d'origine (soumis
 | Déconnexion fournisseur | **RP-Initiated Logout** optionnel (`SESAME_OIDC_LOGOUT`) : `client_id` + `post_logout_redirect_uri`, **sans `id_token_hint`** (l'ID token n'est pas conservé) | Tranché |
 | Embarquement | **CLI `sesame-onboard`** : `verify` (rejeu sans JavaScript, règles du proxy), `fingerprint`, `health` (empreinte du HTML brut, sans identifiants), `record` (recorder Playwright, soumission factice interceptée, sonde d'échec facultative ; ADR 0015) ; **compte de test facultatif** (connexion réelle observée : requête JS ou formulaire, source des jetons, succès, cookie de session ; identifiants jamais conservés ; ADR 0019) | Tranché |
 | Diagnostic des rejeux | **`SESAME_REPLAY_DEBUG`** (proxy, désactivé par défaut, activé en dev) : dernière réponse de l'appli en cas d'échec (statut, en-têtes, corps 64 Ko), valeurs du coffre et des cookies masquées, visible dans l'admin ; rien vers le navigateur (ADR 0018) | Tranché |
+| Mode « remise » (handoff) | **Facultatif, par appli, désactivé par défaut** (`spec.session.mode: proxy \| handoff`) : rejeu côté serveur puis remise au navigateur du seul élément de session (cookie ou valeur de stockage local), appli jointe directement ; mot de passe jamais remis ; exception assumée aux principes 1 (jetons) et 3 (ADR 0020) | Tranché (non implémenté) |
 | Recorder dans l'admin | **Service HTTP interne** `sesame-recorder` appelé par l'admin (jeton partagé), bouton « Analyser une page de login » pré-remplissant l'éditeur ; **aucune allowlist anti-SSRF** (choix de l'exploitant, garde-fous interne+jeton+admins+audit ; ADR 0016) | Tranché |
 
 Les décisions ont été prises le 2026-09-27. Consigner leur justification dans `docs/decisions/` (ADR). Toute nouvelle décision structurante est posée en question avant d'être codée, puis ajoutée à ce tableau.
@@ -153,7 +154,7 @@ Les décisions ont été prises le 2026-09-27. Consigner leur justification dans
 
 ### Mode « remise de cookie » (handoff)
 
-Facultatif, par appli, désactivé par défaut. Sesame rejoue le login côté serveur, puis remet le cookie de session au navigateur, qui parle ensuite directement à l'appli, sans proxy.
+Décision acceptée (ADR 0020, variantes `cookie` et `local_storage`), implémentation à faire. Facultatif, par appli, désactivé par défaut. Sesame rejoue le login côté serveur, puis remet le cookie de session au navigateur, qui parle ensuite directement à l'appli, sans proxy.
 
 - Déclenchement : `spec.session.mode: proxy | handoff` dans le descripteur.
 - Pose du cookie : via Nginx (une URL dédiée sur l'hôte de l'appli routée vers Sesame), ou via un domaine parent commun à Sesame et aux applis.
