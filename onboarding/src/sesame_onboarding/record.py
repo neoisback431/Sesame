@@ -379,6 +379,8 @@ def record(
         page.goto(login_url, wait_until="load")
         with contextlib.suppress(Exception):  # pages qui interrogent en continu
             page.wait_for_load_state("networkidle", timeout=5000)
+        with contextlib.suppress(Exception):  # formulaire rendu tardivement par le JavaScript
+            page.wait_for_selector("input[type=password]", state="visible", timeout=min(timeout, 10) * 1000)
         if not same_origin(page.url, base):
             rec.blocking.append("login_page_redirects_away")
             return rec

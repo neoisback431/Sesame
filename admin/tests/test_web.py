@@ -609,3 +609,35 @@ def test_guided_form_start_path(ctx):
     assert "start_path: /chat" in text
     text = editor_text(client.post("/apps/new", data={"csrf": token, **GUIDED, "start_path": "/"}).text)
     assert "start_path" not in text
+
+
+def test_analyze_without_form_explains_the_cause(apps):
+    """Formulaire introuvable : la cause et le constat du recorder sont affichés, pas un message vague."""
+    from sesame_admin.recorder import _result
+
+    recorder = FakeRecorder()
+    recorder.result = _result(
+        {
+            "error": "formulaire de login introuvable",
+            "summary": [
+                "page de login : https://sso.autre.example/auth",
+                "BLOQUANT : login_page_redirects_away",
+            ],
+            "warnings": [],
+            "blocking": ["login_page_redirects_away"],
+        }
+    )
+    client, _, audit = ctx_with_recorder(apps, recorder)
+    login(client)
+    token = csrf(client, "/apps/new")
+    r = client.post("/apps/analyze", data={"csrf": token, "login_url": "https://crm.interne/login"})
+    assert r.status_code == 200
+    assert "login_page_redirects_away" in r.text and "autre domaine" in r.text
+    assert "constat : page de login : https://sso.autre.example/auth" in r.text
+
+
+def test_recorder_error_without_findings_is_still_an_error():
+    from sesame_admin.recorder import RecorderError, _result
+
+    with pytest.raises(RecorderError, match="login_url requis"):
+        _result({"error": "login_url requis"})
