@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Cookie du portail : lecture dans l'en-tête `Cookie`, construction du `Set-Cookie`.
 
+/// Recompose un en-tête `Cookie` sans le cookie `name` (retire le cookie du portail avant
+/// un relais transparent). Renvoie `None` s'il ne reste aucun cookie.
+pub fn without(header: &str, name: &str) -> Option<String> {
+    let kept: Vec<&str> = header
+        .split(';')
+        .map(str::trim)
+        .filter(|c| !c.is_empty() && c.split('=').next().map(str::trim) != Some(name))
+        .collect();
+    (!kept.is_empty()).then(|| kept.join("; "))
+}
+
 /// Valeur du cookie `name` dans un ou plusieurs en-têtes `Cookie`.
 pub fn find<'a>(headers: impl IntoIterator<Item = &'a str>, name: &str) -> Option<&'a str> {
     headers

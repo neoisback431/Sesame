@@ -75,7 +75,7 @@ Le recorder avec compte de test (ADR 0019) détecte ce cas et génère ce bloc.
 
 ### Mode handoff (`spec.session.handoff`)
 
-Réservé aux applis où le proxy est impossible (WebSockets, SPA qui lisent leurs cookies ou gardent un jeton dans le navigateur) **et** où l'exception aux principes 1 et 3 est acceptée (élément de session visible du navigateur ; déconnexion et désactivation non immédiates ; pas de reconnexion automatique ; audit limité à la connexion). La tuile du portail mène à `/__sesame/handoff` ; l'appli est ensuite jointe directement.
+Réservé aux applis où le proxy est impossible (SPA qui lisent leurs cookies ou gardent un jeton dans le navigateur) **et** où l'exception aux principes 1 et 3 est acceptée (élément de session visible du navigateur ; déconnexion et désactivation non immédiates ; audit limité à la connexion). **Totalement transparent, sans chemin dédié** : à la première arrivée, Sesame rejoue le login, remet la session (cookie et/ou stockage local) et un marqueur, puis redirige vers l'URL demandée ; ensuite il relaie l'appli sans nouveau rejeu, le navigateur portant la session (ses cookies et son en-tête `Authorization` sont relayés).
 
 - `set_cookies` : noms, parmi `session.cookies`, des cookies capturés à poser sur le navigateur (`Set-Cookie`).
 - `local_storage` : valeurs écrites dans le stockage local, lues dans la réponse JSON au login (`key`, `from_response` = chemin pointé).

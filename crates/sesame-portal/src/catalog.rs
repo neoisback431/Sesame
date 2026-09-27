@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Page « Mes applications » : applis habilitées pour lesquelles l'utilisateur a un compte.
 
-use sesame_core::descriptor::{AppDescriptor, SessionMode, HANDOFF_PATH};
+use sesame_core::descriptor::AppDescriptor;
 use sesame_core::html::{escape, page};
 use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{AccountStatus, AppAccount};
@@ -40,14 +40,6 @@ pub fn tiles<'a>(
 }
 
 /// Initiale affichée dans la pastille de la tuile.
-/// Cible de la tuile : la page d'arrivée, ou le chemin de remise en mode handoff (ADR 0020).
-fn tile_path(d: &AppDescriptor) -> &str {
-    match d.spec.session.mode {
-        SessionMode::Handoff => HANDOFF_PATH,
-        SessionMode::Proxy => &d.spec.public.start_path,
-    }
-}
-
 fn initial(name: &str) -> String {
     name.chars()
         .find(|c| c.is_alphanumeric())
@@ -86,7 +78,7 @@ pub fn render(user: &UserIdentity, tiles: &[Tile<'_>], scheme: &str, portal_url:
                     "<li class=\"tile\"><a href=\"{scheme}://{}{}\"><span class=\"ico\" aria-hidden=\"true\">{}</span>\
 <span><strong>{}</strong><br>{desc}</span></a></li>",
                     escape(&d.spec.public.host),
-                    escape(tile_path(d)),
+                    escape(&d.spec.public.start_path),
                     escape(&initial(&d.metadata.name)),
                     escape(&d.metadata.name)
                 ));
@@ -160,15 +152,17 @@ mod tests {
         assert!(html.contains("https://sesame.test/static/logo-64.png"));
         assert!(html.contains("Alice &lt;admin&gt;"));
 
-        // Appli handoff : la tuile mène au chemin de remise, jamais à la racine (ADR 0020).
+        // Appli handoff : la tuile mène à la page d'arrivée normale (remise transparente,
+        // sans chemin dédié ; ADR 0020).
         let mut d = AppDescriptor::from_yaml(FAKE_APP).unwrap();
         d.spec.session.mode = sesame_core::descriptor::SessionMode::Handoff;
+        d.spec.public.start_path = "/dashboard".into();
         d.spec.session.handoff = Some(sesame_core::descriptor::Handoff {
             set_cookies: vec!["FAKEAPPSESSID".into()],
             local_storage: Vec::new(),
             redirect_status: 303,
         });
         let html = render(&u, &tiles(&[d], &u, &active), "https", "https://sesame.test/");
-        assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/__sesame/handoff\""));
+        assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/dashboard\""));
     }
 }
