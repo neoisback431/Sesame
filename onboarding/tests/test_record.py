@@ -666,25 +666,30 @@ def test_token_based_session_is_reported_by_name(client, browser):
 
 def test_handoff_descriptor_for_a_token_session(client, browser):
     """Avec handoff=True, une session par jeton produit un descripteur handoff valide,
-    local_storage sur les champs de jeton détectés, sans cookie (ADR 0020)."""
+    local_storage sur les champs de jeton détectés, sans cookie (ADR 0020), rejouable."""
+    from sesame_onboarding import verify
+
     app = Recorder(token_session_app())
     try:
         rec = run(f"{app.base}/login", client, browser, credentials=("k@yast.test", "Pw-tok"))
+        assert rec.session_token_keys, "jeton détecté"
+        doc = proposal.to_descriptor(rec, app_id="yast", handoff=True).document
+        assert descriptors.validate(doc) == [], descriptors.validate(doc)
+        session = doc["spec"]["session"]
+        assert session["mode"] == "handoff"
+        assert "cookies" not in session
+        keys = [i["key"] for i in session["handoff"]["local_storage"]]
+        assert "accessToken" in keys or "refreshToken" in keys
+        # Session par jeton : le succès suit la réponse réelle (200), pas une redirection.
+        assert doc["spec"]["login"]["success"]["any_of"][0]["status"] == [200]
+        # Rejouable tel quel (sans cookie de session : l'élément remis vient de la réponse).
+        assert verify.verify(doc, {"username": "k@yast.test", "password": "Pw-tok"}, client).ok
     finally:
         app.srv.shutdown()
-    assert rec.session_token_keys, "jeton détecté"
-    doc = proposal.to_descriptor(rec, app_id="yast", handoff=True).document
-    assert descriptors.validate(doc) == [], descriptors.validate(doc)
-    session = doc["spec"]["session"]
-    assert session["mode"] == "handoff"
-    assert "cookies" not in session
-    keys = [i["key"] for i in session["handoff"]["local_storage"]]
-    assert "accessToken" in keys or "refreshToken" in keys
-    # Session par jeton : le succès suit la réponse réelle (200), pas la redirection par défaut.
-    assert doc["spec"]["login"]["success"]["any_of"][0]["status"] == [200]
-    # Sans handoff : reste bloquant (proxy ne gère pas), pas de mode handoff.
-    proxy_doc = proposal.to_descriptor(rec, app_id="yast").document
-    assert proxy_doc["spec"]["session"].get("mode", "proxy") == "proxy"
+    # Sans handoff : mode proxy, et la session par jeton est signalée bloquante.
+    draft = proposal.to_descriptor(rec, app_id="yast")
+    assert draft.document["spec"]["session"].get("mode", "proxy") == "proxy"
+    assert draft.blocking
 
 
 def token_session_app() -> Flask:
