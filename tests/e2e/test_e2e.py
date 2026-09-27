@@ -246,6 +246,24 @@ def test_app_created_in_admin_is_served_without_restart(browser: Browser):
     admin.context.close()
 
 
+def test_recorder_button_prefills_the_editor(browser: Browser):
+    """Depuis l'admin, « Analyser une page de login » interroge le service recorder,
+    qui ouvre l'appli factice dans un navigateur et pré-remplit l'éditeur."""
+    admin = login(browser, "admin", start=f"{ADMIN}login")
+    admin.get_by_role("link", name="Nouvelle application").click()
+    expect(admin.get_by_role("heading", name="Analyser une page de login")).to_be_visible()
+    admin.fill("#login_url", "http://fake-app:8000/login")
+    admin.get_by_role("button", name="Analyser").click()
+    # Éditeur pré-rempli avec un descripteur reprenant le formulaire observé.
+    editor = admin.locator("#descriptor")
+    expect(editor).to_be_visible()
+    proposed = editor.input_value()
+    assert "form_url: /login" in proposed
+    assert "username" in proposed and "password" in proposed
+    assert "apiVersion: sesame/v1" in proposed
+    admin.context.close()
+
+
 def test_audit_trail_and_no_secret_in_logs():
     logs = compose("logs", "--no-color", "portal", "proxy", "admin", "nginx")
     assert APP_PASSWORD not in logs and CAROL_APP_PASSWORD not in logs
@@ -263,6 +281,7 @@ def test_audit_trail_and_no_secret_in_logs():
         "account_status_changed",
         "descriptor_created",
         "descriptor_deleted",
+        "descriptor_recorded",
     ):
         assert any(f'"action":"{action}"' in line for line in audit), action
     # Cookies applicatifs chiffrés au repos : pas de valeur en clair dans la base.
