@@ -931,8 +931,10 @@ def to_descriptor(
     if rec.login and rec.login.logged_in and rec.login.final_path not in ("/", login_path):
         start_path = rec.login.final_path
     cookie = session_cookie
-    observed = rec.login if rec.login and rec.login.logged_in and rec.login.session_cookies else None
-    if not cookie and observed:
+    # Connexion de test réussie : sa réponse fait foi (statut, cookies), même sans cookie de
+    # session (cas d'une session par jeton, où l'élément vit dans la réponse / le stockage local).
+    observed = rec.login if rec.login and rec.login.logged_in else None
+    if not cookie and observed and observed.session_cookies:
         cookie = observed.session_cookies[0]
     # En handoff avec session par jeton (aucun cookie), le cookie reste vide : la session
     # est remise via local_storage. Sinon, on propose un cookie (ou un repère à renseigner).

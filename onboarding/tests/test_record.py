@@ -678,6 +678,8 @@ def test_handoff_descriptor_for_a_token_session(client, browser):
     assert "cookies" not in session
     keys = [i["key"] for i in session["handoff"]["local_storage"]]
     assert "accessToken" in keys or "refreshToken" in keys
+    # Session par jeton : le succès suit la réponse réelle (200), pas la redirection par défaut.
+    assert doc["spec"]["login"]["success"]["any_of"][0]["status"] == [200]
     # Sans handoff : reste bloquant (proxy ne gère pas), pas de mode handoff.
     proxy_doc = record.to_descriptor(rec, app_id="yast").document
     assert proxy_doc["spec"]["session"].get("mode", "proxy") == "proxy"
