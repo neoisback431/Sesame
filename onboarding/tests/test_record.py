@@ -167,6 +167,12 @@ def test_javascript_login_is_analyzed_without_leaking_values(client, browser):
     draft = record.to_descriptor(rec, app_id="rh")
     assert descriptors.validate(draft.document) == []
     assert draft.document["metadata"]["name"] == "Portail RH"
+
+    # Un identifiant fourni en camelCase est normalisé (schéma : minuscules-tirets).
+    normalized = record.to_descriptor(rec, app_id="monAppli")
+    assert normalized.document["metadata"]["id"] == "monappli"
+    assert descriptors.validate(normalized.document) == []
+    assert any("normalisé" in item for item in normalized.todo)
     assert {"status": [401]} in draft.document["spec"]["expiry"]["any_of"]
     text = record.render(draft, rec) + "\n".join(record.summary(rec)) + repr(rec)
     assert "meta-tok-5531" not in text and DUMMY_PASSWORD not in text and DUMMY_USER not in text
