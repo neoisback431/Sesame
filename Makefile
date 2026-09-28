@@ -3,8 +3,11 @@
 
 CERTS := deploy/nginx/certs
 PY_PROJECTS := dev/fake-app admin onboarding
+# Dépôt de référence ; une autre organisation qui publie ses propres images passe
+# REGISTRY=ghcr.io/<son-organisation>/sesame à `make release-images`.
+REGISTRY ?= ghcr.io/neoisback431/sesame
 
-.PHONY: help dev-certs up up-demo down logs health record test test-full test-rust test-python test-python-full test-postgres e2e lint lint-rust lint-python validate-descriptors check-dev-keys images deny deny-python
+.PHONY: help dev-certs up up-demo down logs health record test test-full test-rust test-python test-python-full test-postgres e2e lint lint-rust lint-python validate-descriptors check-dev-keys images release-images deny deny-python
 
 help:
 	@echo "dev-certs             certificat TLS de dev pour *.sesame.localhost"
@@ -18,7 +21,8 @@ help:
 	@echo "e2e                   tests bout en bout Playwright (après make up-demo)"
 	@echo "lint                  fmt, clippy, ruff, validation des descripteurs"
 	@echo "deny                  licences des dépendances (Rust et Python)"
-	@echo "images                construit les images Docker"
+	@echo "images                construit les images Docker (dev)"
+	@echo "release-images VERSION=vX.Y.Z [REGISTRY=…]  construit et publie les 4 images de release"
 
 $(CERTS)/sesame.crt:
 	mkdir -p $(CERTS)
@@ -116,3 +120,21 @@ deny-python:
 
 images:
 	docker compose build
+
+# 4 images publiées, une par service déployable (portail, proxy, admin, recorder) : pas
+# d'image combinée, pour garder la frontière de sécurité portail/proxy (seul le proxy lit
+# le coffre) et l'isolation du recorder (aucune allowlist anti-SSRF, ADR 0016). Portail et
+# proxy partagent le même Dockerfile (étages runtime-portal / runtime-proxy) mais restent
+# deux images et deux conteneurs distincts.
+release-images:
+	@test -n "$(VERSION)" || (echo "usage : make release-images VERSION=vX.Y.Z [REGISTRY=…]" && exit 2)
+	docker build -f deploy/docker/rust.Dockerfile --build-arg BIN=sesame-portal --target runtime-portal \
+	  -t $(REGISTRY)-portal:$(VERSION) -t $(REGISTRY)-portal:latest .
+	docker build -f deploy/docker/rust.Dockerfile --build-arg BIN=sesame-proxy --target runtime-proxy \
+	  -t $(REGISTRY)-proxy:$(VERSION) -t $(REGISTRY)-proxy:latest .
+	docker build admin -t $(REGISTRY)-admin:$(VERSION) -t $(REGISTRY)-admin:latest
+	docker build onboarding -f onboarding/recorder.Dockerfile \
+	  -t $(REGISTRY)-recorder:$(VERSION) -t $(REGISTRY)-recorder:latest
+	@for name in portal proxy admin recorder; do \
+	  docker push $(REGISTRY)-$$name:$(VERSION) && docker push $(REGISTRY)-$$name:latest; \
+	done
