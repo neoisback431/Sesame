@@ -26,6 +26,9 @@ pub struct ProxyConfig {
 }
 
 pub enum SecretStoreConfig {
+    /// Par défaut (ADR 0021) : pas de brique externe supplémentaire, secrets chiffrés
+    /// dans le même PostgreSQL que les sessions et le registre des comptes.
+    Postgres { key: SecretString },
     OpenBao {
         addr: Url,
         mount: String,
@@ -40,7 +43,10 @@ impl ProxyConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         let portal_url = Url::parse(&config::required("SESAME_PORTAL_URL")?)
             .map_err(|e| ConfigError(format!("SESAME_PORTAL_URL : {e}")))?;
-        let secret_store = match config::or("SESAME_SECRET_STORE", "openbao").as_str() {
+        let secret_store = match config::or("SESAME_SECRET_STORE", "postgres").as_str() {
+            "postgres" => SecretStoreConfig::Postgres {
+                key: config::secret("SESAME_SECRETS_ENCRYPTION_KEY")?,
+            },
             // Vault et OpenBao partagent la même API.
             "openbao" | "vault" => SecretStoreConfig::OpenBao {
                 addr: Url::parse(&config::required("SESAME_OPENBAO_ADDR")?)
