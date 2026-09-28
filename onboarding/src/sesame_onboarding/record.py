@@ -725,8 +725,17 @@ def observe_login(
         response = None
         with contextlib.suppress(Exception):
             response = request.response()
+        # Réponse de login en JSON (redirection décidée côté client, ex. `window.location =
+        # redirect_url` après lecture du corps) : "load"/"networkidle" se résolvent parfois avant
+        # que ce script n'ait eu le temps de déclencher la navigation, ce qui ferait constater à
+        # tort un champ mot de passe encore visible. On attend directement sa disparition, avec le
+        # même budget que l'attente de la requête ci-dessus.
         with contextlib.suppress(Exception):
-            page.wait_for_load_state("load")
+            deadline_dom = time.monotonic() + timeout
+            while (
+                page.locator("input[type=password]:visible").count() > 0 and time.monotonic() < deadline_dom
+            ):
+                page.wait_for_timeout(100)
             page.wait_for_load_state("networkidle", timeout=5000)
 
         # La connexion réelle remplace les déductions de la soumission factice.
