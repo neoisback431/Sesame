@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+# Frontal TLS de Sesame. Gabarit : ${SESAME_DOMAIN} est remplacé au démarrage du
+# conteneur (seules les variables SESAME_* le sont ; les variables Nginx restent intactes).
+# Certificat attendu dans certs/ : fullchain.pem + privkey.pem, couvrant
+# ${SESAME_DOMAIN} et *.${SESAME_DOMAIN}.
+worker_processes auto;
+events { worker_connections 1024; }
+
+http {
+  server_tokens off;
+  log_format json escape=json
+    '{"time":"$time_iso8601","host":"$host","method":"$request_method",'
+    '"uri":"$uri","status":$status,"duration":$request_time,'
+    '"upstream":"$upstream_addr","request_id":"$request_id"}';
+  # $uri plutôt que $request_uri : pas de chaîne de requête (codes OIDC) dans les logs.
+  access_log /dev/stdout json;
+  error_log /dev/stderr warn;
+
+  ssl_certificate     /etc/nginx/certs/fullchain.pem;
+  ssl_certificate_key /etc/nginx/certs/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+
+  proxy_http_version 1.1;
+  proxy_set_header Host $http_host;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto https;
+  proxy_set_header X-Forwarded-Host $http_host;
+  proxy_set_header X-Request-Id $request_id;
+  proxy_buffer_size 16k;
+  proxy_buffers 8 16k;
+
+  add_header Strict-Transport-Security "max-age=31536000" always;
+
+  # Résolution des services au moment de la requête : Nginx démarre même si un service
+  # n'est pas encore prêt (502 en attendant).
+  resolver 127.0.0.11 valid=10s ipv6=off;
+
+  server {
+    listen 80 default_server;
+    return 301 https://$host$request_uri;
+  }
+
+  # Portail d'authentification.
+  server {
+    listen 443 ssl;
+    server_name ${SESAME_DOMAIN};
+    set $upstream http://portal:8080;
+    location / { proxy_pass $upstream; }
+  }
+
+  # Administration.
+  server {
+    listen 443 ssl;
+    server_name admin.${SESAME_DOMAIN};
+    set $upstream http://admin:8000;
+    location / { proxy_pass $upstream; }
+  }
+
+  # Toutes les applications protégées : moteur de proxy (routage par nom d'hôte).
+  server {
+    listen 443 ssl default_server;
+    server_name *.${SESAME_DOMAIN};
+    set $upstream http://proxy:8081;
+    location / { proxy_pass $upstream; }
+  }
+}

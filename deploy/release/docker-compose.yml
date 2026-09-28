@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: Apache-2.0
+# Sesame : déploiement à partir des images publiées. Toute la configuration est dans
+# .env (voir .env.example et le README). Démarrage : docker compose up -d
+#
+# Adresses : https://<SESAME_DOMAIN>        portail « Mes applications »
+#            https://admin.<SESAME_DOMAIN>  administration
+#            https://<appli>.<SESAME_DOMAIN> chaque application protégée
+
+name: sesame
+
+services:
+  # Frontal TLS : configuration générée au démarrage à partir de SESAME_DOMAIN.
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["443:443", "80:80"]
+    environment:
+      SESAME_DOMAIN: ${SESAME_DOMAIN:?SESAME_DOMAIN manquant dans .env}
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+      NGINX_ENVSUBST_FILTER: ^SESAME_
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on: [portal, proxy, admin]
+    restart: unless-stopped
+
+  portal:
+    image: ${SESAME_REGISTRY:-ghcr.io/neoisback431}/sesame-portal:${SESAME_VERSION:-latest}
+    environment:
+      SESAME_PUBLIC_URL: https://${SESAME_DOMAIN}
+      SESAME_COOKIE_DOMAIN: ${SESAME_DOMAIN}
+      SESAME_ADMIN_URL: https://admin.${SESAME_DOMAIN}
+      SESAME_ADMIN_GROUP: ${SESAME_ADMIN_GROUP:-sesame-admins}
+      SESAME_DATABASE_URL: postgres://sesame:${POSTGRES_PASSWORD:?lancez ./generate-keys.sh}@postgres:5432/sesame
+      SESAME_PORTAL_STATE_KEY: ${SESAME_PORTAL_STATE_KEY:?lancez ./generate-keys.sh}
+      SESAME_OIDC_ISSUER: ${SESAME_OIDC_ISSUER:?SESAME_OIDC_ISSUER manquant dans .env}
+      SESAME_OIDC_CLIENT_ID: ${SESAME_OIDC_PORTAL_CLIENT_ID:?SESAME_OIDC_PORTAL_CLIENT_ID manquant dans .env}
+      SESAME_OIDC_CLIENT_SECRET: ${SESAME_OIDC_PORTAL_CLIENT_SECRET:?SESAME_OIDC_PORTAL_CLIENT_SECRET manquant dans .env}
+      SESAME_OIDC_USER_KEY_CLAIM: ${SESAME_OIDC_USER_KEY_CLAIM:-sub}
+      SESAME_OIDC_GROUPS_CLAIM: ${SESAME_OIDC_GROUPS_CLAIM:-groups}
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  proxy:
+    image: ${SESAME_REGISTRY:-ghcr.io/neoisback431}/sesame-proxy:${SESAME_VERSION:-latest}
+    environment:
+      SESAME_PORTAL_URL: https://${SESAME_DOMAIN}
+      SESAME_COOKIE_DOMAIN: ${SESAME_DOMAIN}
+      SESAME_DATABASE_URL: postgres://sesame:${POSTGRES_PASSWORD}@postgres:5432/sesame
+      SESAME_SESSION_ENCRYPTION_KEY: ${SESAME_SESSION_ENCRYPTION_KEY:?lancez ./generate-keys.sh}
+      SESAME_SECRETS_ENCRYPTION_KEY: ${SESAME_SECRETS_ENCRYPTION_KEY:?lancez ./generate-keys.sh}
+      # Mise au point d'une appli : réponse de l'appli au dernier rejeu en échec, visible
+      # dans l'admin (valeurs sensibles masquées).
+      SESAME_REPLAY_DEBUG: ${SESAME_REPLAY_DEBUG:-false}
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  admin:
+    image: ${SESAME_REGISTRY:-ghcr.io/neoisback431}/sesame-admin:${SESAME_VERSION:-latest}
+    environment:
+      SESAME_ADMIN_PUBLIC_URL: https://admin.${SESAME_DOMAIN}
+      SESAME_ADMIN_SESSION_KEY: ${SESAME_ADMIN_SESSION_KEY:?lancez ./generate-keys.sh}
+      SESAME_ADMIN_GROUP: ${SESAME_ADMIN_GROUP:-sesame-admins}
+      SESAME_DATABASE_URL: postgres://sesame:${POSTGRES_PASSWORD}@postgres:5432/sesame
+      SESAME_OIDC_ISSUER: ${SESAME_OIDC_ISSUER}
+      SESAME_OIDC_CLIENT_ID: ${SESAME_OIDC_ADMIN_CLIENT_ID:?SESAME_OIDC_ADMIN_CLIENT_ID manquant dans .env}
+      SESAME_OIDC_CLIENT_SECRET: ${SESAME_OIDC_ADMIN_CLIENT_SECRET:?SESAME_OIDC_ADMIN_CLIENT_SECRET manquant dans .env}
+      SESAME_OIDC_USER_KEY_CLAIM: ${SESAME_OIDC_USER_KEY_CLAIM:-sub}
+      SESAME_OIDC_GROUPS_CLAIM: ${SESAME_OIDC_GROUPS_CLAIM:-groups}
+      # L'admin chiffre les identifiants applicatifs, le proxy les déchiffre : même clé.
+      SESAME_SECRETS_ENCRYPTION_KEY: ${SESAME_SECRETS_ENCRYPTION_KEY}
+      SESAME_RECORDER_URL: http://recorder:8090
+      SESAME_RECORDER_TOKEN: ${SESAME_RECORDER_TOKEN:?lancez ./generate-keys.sh}
+    depends_on:
+      postgres: { condition: service_healthy }
+      # Le schéma de la base est créé par le portail et le proxy au démarrage.
+      portal: { condition: service_started }
+    restart: unless-stopped
+
+  # Analyse des pages de login (bouton « Analyser une page de login » de l'admin).
+  # Service interne : jamais exposé par Nginx.
+  recorder:
+    image: ${SESAME_REGISTRY:-ghcr.io/neoisback431}/sesame-recorder:${SESAME_VERSION:-latest}
+    environment:
+      SESAME_RECORDER_TOKEN: ${SESAME_RECORDER_TOKEN}
+      SESAME_APPS_DOMAIN: ${SESAME_DOMAIN}
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: sesame
+      POSTGRES_USER: sesame
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sesame -d sesame"]
+      interval: 2s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

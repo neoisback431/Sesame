@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# Contexte de build des images construites depuis la racine (portail, proxy, admin,
+# recorder) : ni artefacts, ni secrets locaux.
+.git
+target
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/node_modules
+.env
+deploy/nginx/certs
+deploy/release/.env
+deploy/release/certs
