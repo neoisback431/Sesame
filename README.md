@@ -47,6 +47,17 @@ L'UI d'administration est sur https://admin.sesame.localhost:8443 (compte de dev
 | `tests/e2e/` | Tests bout en bout (Playwright) |
 | `scripts/` | Outillage (validation des descripteurs…) |
 
+## Publier une release
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+Construit et publie les 4 images (portail, proxy, admin, recorder) sur GitHub Container
+Registry, puis crée la Release GitHub correspondante (`.github/workflows/release.yml`,
+[ADR 0025](docs/decisions/0025-publication-images-github.md)). En local :
+`make release-images VERSION=v0.2.0`.
+
 ## Licence
 
 [Apache-2.0](LICENSE)
