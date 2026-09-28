@@ -64,6 +64,7 @@ pub fn router(portal: Arc<Portal>) -> Router {
         .route("/auth/callback", get(callback))
         .route("/auth/logout", post(logout))
         .route("/auth/logged-out", get(logged_out))
+        .route("/apps/{app_id}/disconnect", post(disconnect_app))
         .route("/static/{name}", get(static_asset))
         .route(
             "/healthz",
@@ -180,6 +181,39 @@ async fn home(State(p): State<AppState>, headers: HeaderMap) -> Response {
         admin_url,
     );
     ([(CACHE_CONTROL, "no-store")], Html(html)).into_response()
+}
+
+/// Force la déconnexion d'une seule appli depuis « Mes applications » : supprime la
+/// session applicative stockée, sans appeler l'appli elle-même. Le prochain accès
+/// déclenche un nouveau rejeu (même mécanisme qu'une session expirée).
+async fn disconnect_app(
+    State(p): State<AppState>,
+    Path(app_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let cid = correlation_id(&headers);
+    let Some(session) = p.current_session(&headers).await else {
+        return p.start_login(p.public_url.to_string());
+    };
+    if !p.descriptors().iter().any(|d| d.metadata.id == app_id) {
+        return p.error(
+            StatusCode::NOT_FOUND,
+            "Application inconnue",
+            "Cette application n'existe pas.",
+            &cid,
+        );
+    }
+    let event = AuditEvent::new(AuditAction::AppLogout, AuditOutcome::Success)
+        .actor(&session.user)
+        .app(&app_id)
+        .correlation(&cid)
+        .reason("manual_from_portal");
+    if let Err(e) = p.sessions.delete_app_session(&session.id, &app_id).await {
+        tracing::error!(correlation_id = %cid, app_id = %app_id, error = %e, "déconnexion de l'appli impossible");
+    } else if let Err(e) = p.audit.record(event).await {
+        tracing::error!(correlation_id = %cid, error = %e, "audit de déconnexion d'appli impossible");
+    }
+    redirect("/", &[])
 }
 
 #[derive(Deserialize)]

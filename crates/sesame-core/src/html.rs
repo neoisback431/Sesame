@@ -102,10 +102,14 @@ box-shadow:0 1px 2px rgba(10,31,92,.06)}\
 .tile .ico{flex:none;width:40px;height:40px;border-radius:10px;display:grid;place-items:center;color:#fff;\
 font-weight:700;background:linear-gradient(135deg,var(--blue),var(--cyan))}\
 .tile .desc,.muted{color:var(--muted);font-size:.9em}.warn{color:#a03c00;font-size:.9em}\
+.tile .unavailable{opacity:.55;box-shadow:none}\
 .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:24px}\
 .hero{text-align:center}.hero img{max-width:100%;height:auto;border-radius:14px}\
 button,a.button{display:inline-block;padding:7px 16px;border:0;border-radius:6px;background:var(--blue);\
 color:#fff;font:inherit;text-decoration:none;cursor:pointer}button:hover,a.button:hover{background:var(--navy)}\
+form.disconnect{text-align:right;margin-top:4px}\
+button.link{background:none;padding:0;color:var(--muted);font-size:.85em;text-decoration:underline}\
+button.link:hover{background:none;color:var(--navy)}\
 form.logout{margin-top:32px}";
 
 #[cfg(test)]
