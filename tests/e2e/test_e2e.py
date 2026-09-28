@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Parcours bout en bout sur l'environnement de dev (``make up`` au préalable).
 
-Navigateur réel (Playwright) : SSO Keycloak, page « Mes applications », rejeu
+Navigateur réel (Playwright) : SSO Keycloak, page « Mes applications » (tuiles ouvertes
+dans un nouvel onglet, tuile grisée sans compte, bouton « Déconnecter » par appli), rejeu
 du login de l'appli factice, expiration, habilitations, déconnexion,
 administration (enregistrement d'un compte, désactivation, suppression, création
 d'une appli servie sans redémarrage),
@@ -64,25 +65,53 @@ def browser_cookie_names(page: Page) -> set[str]:
     return {c["name"] for c in page.context.cookies()}
 
 
+def open_tile(page: Page, name: str) -> Page:
+    """Clique une tuile (cible `_blank`, nouvel onglet) et renvoie la page ouverte."""
+    with page.context.expect_page() as info:
+        page.get_by_role("link", name=re.compile(name)).click()
+    app = info.value
+    app.wait_for_load_state()
+    return app
+
+
 def test_alice_reaches_the_app_through_her_portal(browser: Browser):
     page = login(browser, "alice")
     expect(page.locator("h1")).to_have_text("Mes applications")
     tile = page.get_by_role("link", name=re.compile("Appli factice"))
     expect(tile).to_have_attribute("href", APP)
 
-    tile.click()
-    expect(page.locator("h1")).to_have_text("Bonjour amartin")
+    # La tuile ouvre un nouvel onglet (target=_blank) : le portail reste affiché à côté.
+    app = open_tile(page, "Appli factice")
+    expect(app.locator("h1")).to_have_text("Bonjour amartin")
     # URL interne réécrite vers l'adresse publique.
-    account = page.get_by_role("link", name=re.compile("Mon compte"))
+    account = app.get_by_role("link", name=re.compile("Mon compte"))
     expect(account).to_have_attribute("href", f"{APP}account")
     account.click()
-    expect(page.locator("h1")).to_have_text("Compte de amartin")
+    expect(app.locator("h1")).to_have_text("Compte de amartin")
 
     # Le navigateur ne détient que le cookie du portail (et ceux de l'IdP).
-    names = browser_cookie_names(page)
+    names = browser_cookie_names(app)
     assert "sesame_session" in names
     assert not names & {"FAKEAPPSESSID", "FAKEAPPPRE"}, names
-    assert APP_PASSWORD not in page.content()
+    assert APP_PASSWORD not in app.content()
+    page.context.close()
+
+
+def test_disconnect_button_removes_only_that_apps_session(browser: Browser):
+    page = login(browser, "alice", start=APP)
+    expect(page.locator("h1")).to_have_text("Bonjour amartin")
+    count = (
+        "SELECT count(*) FROM app_sessions s JOIN portal_sessions p ON p.id_hash = s.portal_session "
+        "WHERE p.user_key = 'alice' AND s.app_id = 'fake-app'"
+    )
+    assert int(sql(count)) == 1
+    page.goto(PORTAL)
+    page.get_by_role("button", name="Déconnecter").click()
+    expect(page.locator("h1")).to_have_text("Mes applications")
+    assert int(sql(count)) == 0
+    # La session portail, elle, tient toujours : un nouvel onglet rejoue sans SSO.
+    app = open_tile(page, "Appli factice")
+    expect(app.locator("h1")).to_have_text("Bonjour amartin")
     page.context.close()
 
 
@@ -139,9 +168,10 @@ def test_non_admin_is_denied_the_admin_ui(browser: Browser):
 
 
 def test_admin_provisions_an_account_then_user_gets_in(browser: Browser):
-    # carol est habilitée (groupe) mais n'a pas encore de compte : aucune tuile.
+    # carol est habilitée (groupe) mais n'a pas encore de compte : tuile grisée (ADR 0022).
     carol = login(browser, "carol")
-    expect(carol.get_by_text("Aucune application")).to_be_visible()
+    expect(carol.get_by_text("Vous n'avez pas de compte sur cette application.")).to_be_visible()
+    expect(carol.get_by_role("link", name=re.compile("Appli factice"))).to_have_count(0)
 
     admin = login(browser, "admin", start=f"{ADMIN}login")
     expect(admin.locator("h1")).to_have_text("Applications")
@@ -155,8 +185,8 @@ def test_admin_provisions_an_account_then_user_gets_in(browser: Browser):
     expect(admin.locator("tr", has_text="carol")).to_contain_text("actif")
 
     carol.reload()
-    carol.get_by_role("link", name=re.compile("Appli factice")).click()
-    expect(carol.locator("h1")).to_have_text("Bonjour cdupont")
+    carol_app = open_tile(carol, "Appli factice")
+    expect(carol_app.locator("h1")).to_have_text("Bonjour cdupont")
 
     # Désactivation : la session applicative ouverte est révoquée, l'accès est refusé
     # immédiatement (sans attendre l'expiration) et sans lecture du coffre.
@@ -225,8 +255,8 @@ def test_app_created_in_admin_is_served_without_restart(browser: Browser):
         alice.wait_for_timeout(1000)
         alice.reload()
     expect(tile).to_have_attribute("href", APP_BIS)
-    tile.click()
-    expect(alice.locator("h1")).to_have_text("Bonjour amartin")
+    app_bis = open_tile(alice, "Appli factice bis")
+    expect(app_bis.locator("h1")).to_have_text("Bonjour amartin")
     assert "FAKEAPPSESSID" not in browser_cookie_names(alice)
 
     # Suppression : refusée tant qu'il reste un compte, puis l'appli n'est plus servie.

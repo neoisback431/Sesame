@@ -1,6 +1,6 @@
 # 0009. Parcours utilisateur : page « Mes applications » et rejeu à l'arrivée
 
-**Statut** : acceptée (2026-09-27). Remplacée en partie par [0017](0017-habilitation-par-compte.md) : sans `spec.access`, le compte actif suffit.
+**Statut** : acceptée (2026-09-27). Remplacée en partie par [0017](0017-habilitation-par-compte.md) : sans `spec.access`, le compte actif suffit ; et par [0022](0022-tuiles-nouvel-onglet-deconnexion-par-appli.md) : une appli sans compte est affichée grisée, pas masquée.
 
 ## Contexte
 

@@ -25,3 +25,4 @@ Une fiche par décision structurante : contexte, décision, conséquences. Une d
 | [0019](0019-recorder-compte-de-test.md) | Recorder avec compte de test (remplace en partie 0015) | 2026-09-28 |
 | [0020](0020-mode-remise-handoff.md) | Mode « remise » (handoff), exception aux principes 1 et 3 | 2026-09-28 |
 | [0021](0021-coffre-postgresql-par-defaut.md) | Coffre PostgreSQL par défaut, sans Vault obligatoire (remplace en partie 0007) | 2026-09-28 |
+| [0022](0022-tuiles-nouvel-onglet-deconnexion-par-appli.md) | Nouvel onglet, déconnexion par appli, tuile grisée sans compte (remplace en partie 0009) | 2026-09-28 |

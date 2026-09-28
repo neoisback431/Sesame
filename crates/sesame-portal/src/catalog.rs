@@ -6,14 +6,24 @@ use sesame_core::html::{escape, page};
 use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{AccountStatus, AppAccount};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TileState {
+    /// Compte actif : tuile cliquable, avec un bouton pour forcer la déconnexion.
+    Active,
+    /// Dernier rejeu en échec : tuile affichée mais signalée, non cliquable.
+    Failed,
+    /// Habilité mais sans compte : tuile grisée, non cliquable.
+    NoAccount,
+}
+
 #[derive(Debug)]
 pub struct Tile<'a> {
     pub descriptor: &'a AppDescriptor,
-    /// Dernier rejeu en échec : tuile affichée mais signalée, non cliquable.
-    pub failed: bool,
+    pub state: TileState,
 }
 
-/// Habilité (descripteur) ET compte `active` ou `failed` (registre). `disabled` est masqué.
+/// Habilité (descripteur). `disabled` est masqué ; `active` et `failed` affichés normalement ;
+/// sans compte, affiché grisé (voir ADR 0022) plutôt que masqué.
 pub fn tiles<'a>(
     descriptors: &'a [AppDescriptor],
     user: &UserIdentity,
@@ -23,18 +33,15 @@ pub fn tiles<'a>(
         .iter()
         .filter(|d| d.spec.access.allows(&user.user_key, &user.groups))
         .filter_map(|d| {
-            let account = accounts.iter().find(|a| a.app_id == d.metadata.id)?;
-            match account.status {
-                AccountStatus::Active => Some(Tile {
-                    descriptor: d,
-                    failed: false,
-                }),
-                AccountStatus::Failed => Some(Tile {
-                    descriptor: d,
-                    failed: true,
-                }),
-                AccountStatus::Disabled => None,
-            }
+            let state = match accounts.iter().find(|a| a.app_id == d.metadata.id) {
+                Some(a) => match a.status {
+                    AccountStatus::Active => TileState::Active,
+                    AccountStatus::Failed => TileState::Failed,
+                    AccountStatus::Disabled => return None,
+                },
+                None => TileState::NoAccount,
+            };
+            Some(Tile { descriptor: d, state })
         })
         .collect()
 }
@@ -79,23 +86,32 @@ pub fn render(
                 .as_deref()
                 .map(|s| format!("<span class=\"desc\">{}</span>", escape(s)))
                 .unwrap_or_default();
-            if t.failed {
-                body.push_str(&format!(
+            match t.state {
+                TileState::Failed => body.push_str(&format!(
                     "<li class=\"tile\"><div><span class=\"ico\" aria-hidden=\"true\">{}</span><span>\
 <strong>{}</strong><br>{desc}<br>\
 <span class=\"warn\">Connexion impossible : contactez votre administrateur.</span></span></div></li>",
                     escape(&initial(&d.metadata.name)),
                     escape(&d.metadata.name)
-                ));
-            } else {
-                body.push_str(&format!(
-                    "<li class=\"tile\"><a href=\"{scheme}://{}{}\"><span class=\"ico\" aria-hidden=\"true\">{}</span>\
-<span><strong>{}</strong><br>{desc}</span></a></li>",
+                )),
+                TileState::NoAccount => body.push_str(&format!(
+                    "<li class=\"tile\"><div class=\"unavailable\"><span class=\"ico\" aria-hidden=\"true\">{}</span><span>\
+<strong>{}</strong><br>{desc}<br>\
+<span class=\"muted\">Vous n'avez pas de compte sur cette application.</span></span></div></li>",
+                    escape(&initial(&d.metadata.name)),
+                    escape(&d.metadata.name)
+                )),
+                TileState::Active => body.push_str(&format!(
+                    "<li class=\"tile\"><a href=\"{scheme}://{}{}\" target=\"_blank\" rel=\"noopener noreferrer\">\
+<span class=\"ico\" aria-hidden=\"true\">{}</span><span><strong>{}</strong><br>{desc}</span></a>\
+<form class=\"disconnect\" method=\"post\" action=\"/apps/{}/disconnect\">\
+<button type=\"submit\" class=\"link\">Déconnecter</button></form></li>",
                     escape(&d.spec.public.host),
                     escape(&d.spec.public.start_path),
                     escape(&initial(&d.metadata.name)),
-                    escape(&d.metadata.name)
-                ));
+                    escape(&d.metadata.name),
+                    escape(&d.metadata.id),
+                )),
             }
         }
         body.push_str("</ul>");
@@ -133,19 +149,24 @@ mod tests {
     }
 
     #[test]
-    fn requires_access_and_account() {
+    fn requires_access_shows_state_by_account() {
         let ds = vec![AppDescriptor::from_yaml(FAKE_APP).unwrap()];
         let active = [account(AccountStatus::Active)];
         assert_eq!(tiles(&ds, &user(&["fake-app-users"]), &active).len(), 1);
         assert!(tiles(&ds, &user(&["autre"]), &active).is_empty(), "non habilité");
-        assert!(
-            tiles(&ds, &user(&["fake-app-users"]), &[]).is_empty(),
-            "sans compte"
-        );
+
+        // Habilité mais sans compte : grisé, pas masqué (ADR 0022).
+        let sans_compte = tiles(&ds, &user(&["fake-app-users"]), &[]);
+        assert_eq!(sans_compte.len(), 1);
+        assert_eq!(sans_compte[0].state, TileState::NoAccount);
+
         let disabled = [account(AccountStatus::Disabled)];
         assert!(tiles(&ds, &user(&["fake-app-users"]), &disabled).is_empty());
         let failed = [account(AccountStatus::Failed)];
-        assert!(tiles(&ds, &user(&["fake-app-users"]), &failed)[0].failed);
+        assert_eq!(
+            tiles(&ds, &user(&["fake-app-users"]), &failed)[0].state,
+            TileState::Failed
+        );
     }
 
     #[test]
@@ -161,6 +182,14 @@ mod tests {
             None,
         );
         assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/\""));
+        assert!(
+            html.contains("target=\"_blank\" rel=\"noopener noreferrer\""),
+            "nouvel onglet"
+        );
+        assert!(
+            html.contains("action=\"/apps/fake-app/disconnect\""),
+            "bouton de déconnexion"
+        );
         assert!(!html.contains("Administration"));
 
         // Page d'arrivée : la tuile y mène directement (échappée).
@@ -178,6 +207,19 @@ mod tests {
         assert!(html.contains("<span class=\"ico\" aria-hidden=\"true\">A</span>"));
         assert!(html.contains("https://sesame.test/static/logo-64.png"));
         assert!(html.contains("Alice &lt;admin&gt;"));
+    }
+
+    #[test]
+    fn renders_grayed_tile_without_account() {
+        let ds = vec![AppDescriptor::from_yaml(FAKE_APP).unwrap()];
+        let u = user(&["fake-app-users"]);
+        let t = tiles(&ds, &u, &[]);
+        let html = render(&u, &t, "https", "https://sesame.test/", None);
+        assert!(html.contains("class=\"unavailable\""));
+        assert!(html.contains("Vous n'avez pas de compte sur cette application."));
+        // Grisée, non cliquable : pas de lien vers l'appli ni de bouton de déconnexion.
+        assert!(!html.contains("href=\"https://fake-app.sesame.localhost:8443/\""));
+        assert!(!html.contains("action=\"/apps/fake-app/disconnect\""));
     }
 
     #[test]
