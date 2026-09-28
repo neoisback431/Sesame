@@ -6,3 +6,7 @@ __pycache__/
 .ruff_cache/
 *.pyc
 .env
+deploy/release/.env
+deploy/release/certs/*
+!deploy/release/certs/README
+dist/

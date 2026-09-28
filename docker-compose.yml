@@ -100,7 +100,7 @@ services:
     restart: on-failure
 
   admin:
-    build: ./admin
+    build: { context: ., dockerfile: admin/Dockerfile }
     environment:
       SESAME_ADMIN_LISTEN: 0.0.0.0:8000
       SESAME_ADMIN_PUBLIC_URL: https://admin.sesame.localhost:8443
@@ -160,7 +160,7 @@ services:
   # (dépendances Python déjà présentes : cryptography, asyncpg). Facultatif, profil
   # « demo » (voir `fake-app`).
   secrets-seed:
-    build: ./admin
+    build: { context: ., dockerfile: admin/Dockerfile }
     profiles: [demo]
     entrypoint: ["python", "/seed/seed_secret.py"]
     environment:
@@ -209,7 +209,7 @@ services:
   # Appelé par l'admin ; jamais exposé via Nginx. Aussi utilisable en one-shot :
   # make record URL=… (remplace l'entrypoint par la CLI).
   recorder:
-    build: { context: ./onboarding, dockerfile: recorder.Dockerfile }
+    build: { context: ., dockerfile: onboarding/recorder.Dockerfile }
     environment:
       SESAME_RECORDER_LISTEN: 0.0.0.0:8090
       # Jeton de dev partagé avec l'admin (à remplacer hors dev).
