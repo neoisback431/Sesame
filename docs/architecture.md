@@ -75,8 +75,8 @@ sequenceDiagram
 ```
 
 1. L'utilisateur se connecte au portail en SSO.
-2. Le portail affiche la page **« Mes applications »** : une tuile par appli pour laquelle l'utilisateur possède un **compte actif** dans le registre des comptes **et**, si le descripteur définit `spec.access`, y est habilité (groupes / utilisateurs). Sans `spec.access`, le compte suffit ([ADR 0017](decisions/0017-habilitation-par-compte.md)). Les applis sans compte sont masquées.
-3. Un clic sur une tuile ouvre l'adresse de l'appli **exposée par Sesame** (`compta.sesame.example`, suivie de `spec.public.start_path`), jamais son adresse réelle : tout le trafic passe par le proxy, et les cookies applicatifs restent côté serveur (sauf mode handoff, voir plus bas).
+2. Le portail affiche la page **« Mes applications »** : une tuile par appli pour laquelle l'utilisateur est habilité (si le descripteur définit `spec.access` ; sans lui, ouvert à tout titulaire de compte, [ADR 0017](decisions/0017-habilitation-par-compte.md)). Avec un **compte actif**, la tuile est cliquable ; **sans compte**, elle est affichée **grisée**, non cliquable (« Vous n'avez pas de compte sur cette application. ») plutôt que masquée ([ADR 0022](decisions/0022-tuiles-nouvel-onglet-deconnexion-par-appli.md)). Un compte `disabled` reste masqué.
+3. Un clic sur une tuile ouvre, **dans un nouvel onglet** (ADR 0022), l'adresse de l'appli **exposée par Sesame** (`compta.sesame.example`, suivie de `spec.public.start_path`), jamais son adresse réelle : tout le trafic passe par le proxy, et les cookies applicatifs restent côté serveur (sauf mode handoff, voir plus bas). Un bouton « Déconnecter » sur chaque tuile active force la fin de la session applicative sans attendre son expiration (`POST /apps/<id>/disconnect`, portail), sans se déconnecter du portail ni des autres applis.
 4. Le proxy constate l'absence de session applicative et rejoue le login à ce moment-là. C'est le même mécanisme que pour une session expirée, donc un seul chemin de code.
 5. L'utilisateur arrive dans l'appli, déjà connecté.
 
@@ -94,6 +94,7 @@ Le portail doit savoir quelles applis afficher sans accéder au coffre : seul le
 
 | État | Sens | Tuile | Rejeu |
 |---|---|---|---|
+| *(aucune entrée)* | Habilité, sans compte | Grisée, non cliquable (ADR 0022) | Bloqué |
 | `active` | Compte provisionné | Affichée | Autorisé |
 | `failed` | Dernier rejeu en échec (identifiants refusés, formulaire changé…) | Affichée, signalée | Bloqué jusqu'à correction |
 | `disabled` | Désactivé par un administrateur | Masquée | Bloqué |
@@ -316,7 +317,7 @@ Chaque lecture de secret et chaque rejeu produit un événement, succès ou éch
 | `login_replay` | Proxy | Rejeu du login (succès, échec, abandon) |
 | `session_handoff` | Proxy | Remise de la session au navigateur (mode handoff) |
 | `app_session_expired` | Proxy | Expiration détectée |
-| `app_logout` | Proxy | Chemin de déconnexion de l'appli appelé |
+| `app_logout` | Proxy, portail | Chemin de déconnexion de l'appli appelé (proxy), ou déconnexion forcée d'une appli depuis « Mes applications » (portail, `reason: manual_from_portal`, ADR 0022) |
 
 Champs : horodatage UTC, action, résultat, acteur (`issuer` + `subject`), appli, compte visé (`target_user`, pour les actions d'administration), identifiant de corrélation, raison courte. Jamais de secret, de cookie ni de contenu de réponse.
 
