@@ -18,7 +18,6 @@ make up          # génère le certificat de dev puis lance docker compose
 | https://fake-app.sesame.localhost:8443 | Appli factice, via le moteur de proxy |
 | https://admin.sesame.localhost:8443 | Administration (compte `admin`) |
 | https://idp.sesame.localhost:8443 | Keycloak (admin de la console : `kcadmin` / `kcadmin`) |
-| http://127.0.0.1:8200 | OpenBao (jeton root de dev : `dev-root-token`) |
 
 Le certificat est signé par une CA de dev, `deploy/nginx/certs/ca.crt`. Importez-la dans le navigateur, ou acceptez l'avertissement.
 
@@ -39,7 +38,7 @@ Toutes les valeurs ci-dessous sont publiques et réservées au dev.
 | `carol` | `carol` | `fake-app-users` | aucun au départ : à enregistrer dans l'admin avec `cdupont` / `dev-cdupont-app-password` |
 | `admin` | `admin` | `sesame-admins` (accès à l'administration) | aucun |
 
-Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le connaît pas : seul le proxy le lit dans le coffre (`secret/sesame/apps/fake-app/users/alice`).
+Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le connaît pas : seul le proxy le lit dans le coffre (table `app_secrets`, ADR 0021 ; `secret/sesame/apps/fake-app/users/alice` avec `docker-compose.openbao.yml`).
 
 ## Services
 
@@ -51,11 +50,17 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 | `postgres` | Magasin de sessions et registre des comptes (migrations appliquées au démarrage du portail et du proxy) |
 | `db-seed` | Déclare le compte d'alice sur l'appli factice dans le registre des comptes (raccourci de dev) |
 | `admin` | UI d'administration (Python) : registre des comptes et identifiants applicatifs |
-| `openbao` + `openbao-seed` | Coffre en mode dev. Le seed (idempotent) crée l'AppRole du proxy (lecture seule), celui de l'admin (écriture sans lecture) et les identifiants de test. |
+| `secrets-seed` | Coffre de secrets de dev (ADR 0021) : écrit le couple (fake-app, alice) chiffré dans `app_secrets`, avec la clé du proxy et de l'admin. |
 | `keycloak` | Fournisseur OIDC de dev, realm importé depuis `dev/keycloak/sesame-realm.json` |
 | `health` | Test de santé des formulaires de login (profil `tools`, lancé à la demande : `make health`) |
 | `recorder` | Service HTTP interne d'analyse d'une page de login (Chromium headless, image Playwright). Appelé par l'admin (« Analyser une page de login ») ; aussi `make record URL=…` en ligne de commande. Jeton de dev : `dev-recorder-token`. |
 | `fake-app` | Appli cible : formulaire de login, jeton CSRF à usage unique, champ caché, session serveur de 5 min. Aucun port publié. |
+
+Coffre de secrets : PostgreSQL par défaut (ci-dessus), sans service supplémentaire. Pour
+démontrer l'implémentation alternative OpenBao / Vault (ADR 0007, ADR 0021) :
+`docker compose -f docker-compose.yml -f docker-compose.openbao.yml up`, qui ajoute
+`openbao` + `openbao-seed` et bascule `proxy` / `admin` sur `SESAME_SECRET_STORE=openbao`
+(jeton root de dev sur http://127.0.0.1:8200 : `dev-root-token`).
 
 ## Parcours à essayer
 
