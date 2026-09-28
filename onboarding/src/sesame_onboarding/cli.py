@@ -184,7 +184,11 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="sesame-onboard", description="Embarquement des applis dans Sesame.")
     p.add_argument("--schema", default=str(descriptors.DEFAULT_SCHEMA), help="schéma JSON des descripteurs")
     p.add_argument("--ca-file", help="CA supplémentaire (PEM) pour joindre les applis")
-    p.add_argument("--insecure", action="store_true", help="ne pas vérifier TLS (dev uniquement)")
+    p.add_argument(
+        "--insecure",
+        action="store_true",
+        help="ne pas vérifier TLS (--ca-file ne couvre pas le navigateur de record)",
+    )
     p.add_argument("--timeout", type=float, default=15.0)
     sub = p.add_subparsers(dest="command", required=True)
 

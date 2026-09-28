@@ -91,8 +91,8 @@ Service HTTP **interne** d'analyse d'une page de login, appelé par l'administra
 | `SESAME_RECORDER_SCHEMA` | schéma par défaut | Schéma JSON de validation du descripteur proposé |
 | `SESAME_RECORDER_TIMEOUT` | `20` | Délai (s) d'analyse d'une page |
 | `SESAME_APPS_DOMAIN` | aucun | Domaine des applis exposées par Sesame (ex. `sesame.localhost:8443` en dev, `apps.example.org` en production) : l'hôte public proposé est `<id>.<domaine>`. Doit être résolu (DNS) vers Nginx. Absent : `<id>.sesame.example`, signalé à corriger. Lu aussi par `sesame-onboard record` |
-| `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre les applis en TLS |
-| `SESAME_RECORDER_INSECURE` | `false` | Ne pas vérifier TLS (dev uniquement) |
+| `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM), utilisée par les appels HTTP directs du recorder (sonde d'expiration, jeton CSRF `endpoint`) — **pas** par la navigation Chromium, qui a son propre magasin de confiance et ignore cette variable |
+| `SESAME_RECORDER_INSECURE` | `false` | Ne pas vérifier TLS, y compris pour Chromium (appels HTTP et navigation). À activer pour analyser une appli dont le certificat n'est pas signé par une CA publique ni par `SESAME_CA_FILE` (PKI interne, certificat auto-signé) : sinon `Page.goto` échoue en `net::ERR_CERT_AUTHORITY_INVALID`. Recorder déjà sans allowlist anti-SSRF (ADR 0016) : même exploitant, même périmètre (applis internes, déclenchement admin, audité) |
 | `SESAME_ONBOARD_CHROMIUM` | aucun | Exécutable Chromium, si ce n'est pas celui de l'image |
 
 Aucune allowlist anti-SSRF : le recorder ouvre l'URL fournie (choix de l'exploitant, voir ADR 0016). Garde-fous : service interne, jeton obligatoire, déclencheur réservé aux administrateurs, audit de chaque analyse.
@@ -104,7 +104,7 @@ Aucune allowlist anti-SSRF : le recorder ouvre l'URL fournie (choix de l'exploit
 | `SESAME_ONBOARD_<CLÉ>` 🔒 | Identifiants du compte de test pour `verify`, une variable par clé de `credentials.keys` (ex. `SESAME_ONBOARD_USERNAME`, `SESAME_ONBOARD_PASSWORD`). À défaut, saisie masquée |
 | `SESAME_ONBOARD_CHROMIUM` | Exécutable Chromium du recorder (`record`), si ce n'est pas celui installé par Playwright |
 
-Options : `--schema` (schéma JSON), `--ca-file`, `--insecure` (dev uniquement), `--timeout`. `health`, `fingerprint` et `record` n'utilisent aucun identifiant.
+Options : `--schema` (schéma JSON), `--ca-file`, `--insecure` (ne pas vérifier TLS), `--timeout`. `health`, `fingerprint` et `record` n'utilisent aucun identifiant.
 
 Options de `record` : `--base-url`, `--protected-path` (page protégée sondée, `/` par défaut), `--probe-failure` (envoie une connexion factice pour observer l'échec), `--id`, `--name`, `--public-host`, `--group` / `--user` (répétables), `--session-cookie`, `--chromium`, `-o` (fichier de sortie). Le recorder nécessite l'extra `capture` (`pip install 'sesame-onboarding[capture]'`, puis `playwright install chromium`) ou l'image `recorder` (`make record`). `--ca-file` ne s'applique pas au navigateur : utiliser le magasin de certificats du système ou, en dev, `--insecure`.
 
