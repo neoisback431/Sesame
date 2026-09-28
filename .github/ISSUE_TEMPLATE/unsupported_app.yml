@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+name: 🧩 Application non prise en charge
+description: Le login d'une application ne se rejoue pas, ou le recorder ne propose pas de descripteur utilisable.
+labels: [onboarding]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Anonymisez tout** : remplacez noms d'hôtes, URLs, identifiants et noms de cookies propres à votre organisation par des valeurs génériques (`app-interne.exemple`). Ne collez jamais de réponse brute contenant un jeton ou un cookie.
+
+        Hors périmètre pour l'instant : login en plusieurs étapes, captcha, MFA côté application.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Vérifications
+      options:
+        - label: Le descripteur et les extraits ci-dessous sont anonymisés.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version de Sesame
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: Type d'application
+      description: Produit (s'il est public, ex. un logiciel open source connu) ou technologie (SPA React, formulaire classique…).
+  - type: dropdown
+    id: login
+    attributes:
+      label: Page de login
+      multiple: true
+      options:
+        - Formulaire HTML classique
+        - Construite en JavaScript (SPA)
+        - Connexion par appel JSON / API
+        - Jeton CSRF
+        - Plusieurs étapes (identifiant puis mot de passe)
+        - Captcha ou MFA
+        - Je ne sais pas
+  - type: input
+    id: code
+    attributes:
+      label: Code d'échec
+      description: Ex. login_unexpected_response, login_rejected, submission_not_observed, login_form_not_found_in_raw_html.
+  - type: textarea
+    id: descriptor
+    attributes:
+      label: Descripteur (anonymisé)
+      render: yaml
+  - type: textarea
+    id: output
+    attributes:
+      label: Sortie du recorder ou de sesame-onboard verify (anonymisée)
+      render: text
+  - type: textarea
+    id: diagnostic
+    attributes:
+      label: Diagnostic du rejeu (anonymisé)
+      description: "Si SESAME_REPLAY_DEBUG est activé : « Voir la réponse de l'appli » dans l'administration (statut, en-têtes, extrait du corps). Relisez avant de coller."
+      render: text
