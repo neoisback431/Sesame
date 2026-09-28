@@ -135,6 +135,6 @@ Le portail compile contre `libxmlsec1` (SAML) : `libxmlsec1-dev`, `libxml2-dev`,
    Container Registry (`sesame-portal`, `sesame-proxy`, `sesame-admin`, `sesame-recorder`), puis
    crée la Release GitHub avec `docs/releases/vX.Y.Z.md` comme notes (notes générées depuis les
    commits si le fichier n'existe pas) et l'archive du kit de déploiement
-   (`sesame-deploy-vX.Y.Z.tar.gz`, `make release-kit`). Voir l'[ADR 0025](docs/decisions/0025-publication-images-github.md).
+   (`sesame-deploy-vX.Y.Z.tar.gz` et `sesame-aws-vX.Y.Z.tar.gz`, `make release-kit`). Voir l'[ADR 0025](docs/decisions/0025-publication-images-github.md).
 
 En local : `make release-images VERSION=vX.Y.Z [REGISTRY=ghcr.io/<organisation>/sesame]`.

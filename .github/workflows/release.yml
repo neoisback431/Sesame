@@ -31,20 +31,20 @@ jobs:
       - name: Construit et publie les images
         run: make release-images VERSION=${{ github.ref_name }} REGISTRY=${{ steps.registry.outputs.value }}
 
-      - name: Archive du kit de déploiement
+      - name: Archives des kits de déploiement
         run: make release-kit VERSION=${{ github.ref_name }} REGISTRY=${{ steps.registry.outputs.value }}
 
       # Notes rédigées dans docs/releases/<tag>.md si elles existent, sinon générées depuis
-      # les commits. L'archive du kit de déploiement est jointe à la Release.
+      # les commits. Les archives des kits de déploiement (Compose, AWS) sont jointes à la Release.
       - name: Crée la Release GitHub
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          kit="dist/sesame-deploy-${TAG}.tar.gz"
+          kits="dist/sesame-deploy-${TAG}.tar.gz dist/sesame-aws-${TAG}.tar.gz"
           notes="docs/releases/${TAG}.md"
           if [ -f "$notes" ]; then
-            gh release create "$TAG" "$kit" --title "Sesame ${TAG#v}" --notes-file "$notes"
+            gh release create "$TAG" $kits --title "Sesame ${TAG#v}" --notes-file "$notes"
           else
-            gh release create "$TAG" "$kit" --title "Sesame ${TAG#v}" --generate-notes
+            gh release create "$TAG" $kits --title "Sesame ${TAG#v}" --generate-notes
           fi

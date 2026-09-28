@@ -23,7 +23,7 @@ help:
 	@echo "deny                  licences des dépendances (Rust et Python)"
 	@echo "images                construit les images Docker (dev)"
 	@echo "release-images VERSION=vX.Y.Z [REGISTRY=…]  construit et publie les 4 images de release"
-	@echo "release-kit VERSION=vX.Y.Z   archive du kit de déploiement (deploy/release/)"
+	@echo "release-kit VERSION=vX.Y.Z   archives des kits de déploiement (deploy/release/, deploy/aws/)"
 
 $(CERTS)/sesame.crt:
 	mkdir -p $(CERTS)
@@ -157,4 +157,10 @@ release-kit:
 	    -e 's|^# SESAME_REGISTRY=.*|SESAME_REGISTRY=$(patsubst %/sesame,%,$(REGISTRY))|' \
 	    deploy/release/.env.example > dist/sesame/.env.example
 	tar -czf dist/sesame-deploy-$(VERSION).tar.gz -C dist sesame
-	@echo "dist/sesame-deploy-$(VERSION).tar.gz"
+	rm -rf dist/sesame-aws && mkdir -p dist/sesame-aws
+	cp deploy/aws/*.tf deploy/aws/terraform.tfvars.example deploy/aws/README.md deploy/aws/.gitignore dist/sesame-aws/
+	sed -i -e '/variable "sesame_version"/,/^}/s|default *= "latest"|default     = "$(VERSION)"|' \
+	    -e '/variable "image_registry"/,/^}/s|default *= ".*"|default     = "$(patsubst %/sesame,%,$(REGISTRY))"|' \
+	    dist/sesame-aws/variables.tf
+	tar -czf dist/sesame-aws-$(VERSION).tar.gz -C dist sesame-aws
+	@echo "dist/sesame-deploy-$(VERSION).tar.gz dist/sesame-aws-$(VERSION).tar.gz"

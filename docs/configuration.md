@@ -2,7 +2,7 @@
 
 Les services se configurent uniquement par variables d'environnement. Les variables marquées 🔒 sont sensibles : elles ne sont jamais journalisées. En production, injectez-les depuis votre gestionnaire de secrets.
 
-Pour un déploiement simple, le kit [`deploy/release/`](../deploy/release/) (voir le README) calcule la plupart de ces variables à partir d'un domaine et d'un fichier `.env` : cette page sert de référence pour aller plus loin (SAML, coffre OpenBao, réglages fins).
+Pour un déploiement simple, le kit [`deploy/release/`](../deploy/release/) (voir le README), ou sur AWS le kit [`deploy/aws/`](../deploy/aws/README.md), calcule la plupart de ces variables à partir d'un domaine et d'un fichier `.env` : cette page sert de référence pour aller plus loin (SAML, coffre OpenBao, réglages fins).
 
 Durées au format `30s`, `15m`, `8h`. Clés de chiffrement : 32 octets aléatoires encodés en base64 (`openssl rand -base64 32`).
 
