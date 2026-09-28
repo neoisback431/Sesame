@@ -69,6 +69,12 @@ démontrer l'implémentation alternative OpenBao / Vault (ADR 0007, ADR 0021) :
 `openbao` + `openbao-seed` et bascule `proxy` / `admin` sur `SESAME_SECRET_STORE=openbao`
 (jeton root de dev sur http://127.0.0.1:8200 : `dev-root-token`).
 
+Fournisseur d'identité : OIDC (Keycloak, ci-dessus) par défaut en dev. Le protocole SAML
+(`SESAME_IDP_PROTOCOL=saml`, [ADR 0024](decisions/0024-support-saml.md)) n'a pas d'IdP de dev
+dédié (décision de l'exploitant, couverture par tests unitaires uniquement) : le tester demande un
+IdP SAML réel ou local (ex. SimpleSAMLphp), non fourni par ce compose. Variables : voir
+`docs/configuration.md`.
+
 ## Parcours à essayer
 
 Nécessite `make up-demo` (appli factice, profil `demo`).

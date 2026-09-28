@@ -12,7 +12,7 @@ import httpx
 import uvicorn
 
 from .audit import StdoutAuditSink
-from .auth import OidcAuthenticator
+from .auth import Authenticator, OidcAuthenticator, SamlAuthenticator
 from .config import Settings
 from .crypto import SecretCipher
 from .descriptors import DescriptorValidator, load_dir
@@ -62,16 +62,29 @@ def main() -> None:
         DescriptorValidator(s.schema_file),
     )
     recorder = HttpRecorder(s.recorder_url, s.recorder_token) if s.recorder_url and s.recorder_token else None
+    authenticator: Authenticator
+    if s.idp_protocol == "saml":
+        assert s.saml is not None
+        authenticator = SamlAuthenticator(s.saml)
+        issuer = s.saml.idp_entity_id
+        user_key_claim = s.saml.user_key_attribute or "sub"
+        groups_claim = s.saml.groups_attribute or "groups"
+    else:
+        assert s.oidc is not None
+        authenticator = OidcAuthenticator(s.oidc, str(s.ca_file) if s.ca_file else None)
+        issuer = s.oidc.issuer
+        user_key_claim = s.oidc.user_key_claim
+        groups_claim = s.oidc.groups_claim
     app = create_app(
         service,
-        OidcAuthenticator(s.oidc, str(s.ca_file) if s.ca_file else None),
+        authenticator,
         audit,
         public_url=s.public_url,
         session_key=s.session_key,
         admin_group=s.admin_group,
-        issuer=s.oidc.issuer,
-        user_key_claim=s.oidc.user_key_claim,
-        groups_claim=s.oidc.groups_claim,
+        issuer=issuer,
+        user_key_claim=user_key_claim,
+        groups_claim=groups_claim,
         session_ttl_secs=s.session_ttl_secs,
         secure_cookies=s.public_url.startswith("https://"),
         recorder=recorder,

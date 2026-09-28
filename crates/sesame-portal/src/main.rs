@@ -8,7 +8,7 @@ use sesame_core::crypto::CookieCipher;
 use sesame_core::ports::DescriptorStore;
 use sesame_core::sources::{log_rejected, watch, DescriptorSource};
 use sesame_portal::config::PortalConfig;
-use sesame_portal::oidc::Oidc;
+use sesame_portal::idp::IdentityProvider;
 use sesame_portal::{router, Portal};
 use sesame_store_postgres::PgStore;
 
@@ -37,15 +37,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http = http.add_root_certificate(reqwest::Certificate::from_pem(&std::fs::read(ca)?)?);
     }
     let redirect = cfg.public_url.join("auth/callback")?.to_string();
-    let oidc = Oidc::discover(&cfg.oidc, redirect, http.build()?).await?;
-    tracing::info!(issuer = %cfg.oidc.issuer, "fournisseur d'identité découvert");
+    let idp = IdentityProvider::discover(&cfg, redirect, http.build()?).await?;
+    tracing::info!("fournisseur d'identité initialisé");
 
     let portal = Arc::new(Portal {
         public_url: cfg.public_url,
         cookie: cfg.cookie,
         session_ttl: cfg.session_ttl,
         descriptors: RwLock::new(Arc::new(catalog.descriptors)),
-        oidc,
+        idp,
         state_cipher: CookieCipher::from_base64(&cfg.state_key)?,
         sessions: store.clone(),
         accounts: store,

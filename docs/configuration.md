@@ -17,7 +17,15 @@ Durées au format `30s`, `15m`, `8h`. Clés de chiffrement : 32 octets aléatoir
 | `SESAME_DESCRIPTORS_RELOAD` | `10s` | Intervalle de vérification des descripteurs en base (créés dans l'administration). Le catalogue n'est rechargé que s'il a changé ; une appli créée, modifiée ou supprimée est prise en compte sans redémarrage |
 | `SESAME_DATABASE_URL` 🔒 | requis | Connexion PostgreSQL |
 | `SESAME_PORTAL_STATE_KEY` 🔒 | requis | Clé chiffrant l'état OIDC temporaire |
-| `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre le fournisseur d'identité |
+| `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre le fournisseur d'identité (OIDC uniquement) |
+| `SESAME_IDP_PROTOCOL` | `oidc` | Protocole du fournisseur d'identité : `oidc` ou `saml`. Un seul actif par déploiement, le même pour le portail et l'administration (ADR 0024) |
+| `SESAME_ADMIN_URL` | aucun | URL publique de l'UI d'administration. Absente : pas de lien « Administration » sur « Mes applications » |
+| `SESAME_ADMIN_GROUP` | `sesame-admins` | Groupe affiché avec le lien « Administration ». Doit correspondre au `SESAME_ADMIN_GROUP` de l'admin |
+
+### `SESAME_IDP_PROTOCOL=oidc` (défaut)
+
+| Variable | Défaut | Rôle |
+|---|---|---|
 | `SESAME_OIDC_ISSUER` | requis | URL de l'émetteur OIDC (discovery) |
 | `SESAME_OIDC_CLIENT_ID` | requis | Identifiant du client OIDC |
 | `SESAME_OIDC_CLIENT_SECRET` 🔒 | requis | Secret du client OIDC |
@@ -25,10 +33,30 @@ Durées au format `30s`, `15m`, `8h`. Clés de chiffrement : 32 octets aléatoir
 | `SESAME_OIDC_USER_KEY_CLAIM` | `sub` | Claim servant de clé utilisateur (coffre, registre). Pour Entra ID : `oid` |
 | `SESAME_OIDC_GROUPS_CLAIM` | `groups` | Claim portant les groupes. Absent = aucun groupe |
 | `SESAME_OIDC_LOGOUT` | `false` | `true` : la déconnexion ferme aussi la session chez le fournisseur d'identité (RP-Initiated Logout). Sans `end_session_endpoint` dans la discovery, déconnexion locale seulement (avertissement au démarrage) |
-| `SESAME_ADMIN_URL` | aucun | URL publique de l'UI d'administration. Absente : pas de lien « Administration » sur « Mes applications » |
-| `SESAME_ADMIN_GROUP` | `sesame-admins` | Groupe (claim) affiché avec le lien « Administration ». Doit correspondre au `SESAME_ADMIN_GROUP` de l'admin |
 
 URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_PUBLIC_URL>/auth/callback`. Avec `SESAME_OIDC_LOGOUT`, déclarer aussi l'URL de retour après déconnexion : `<SESAME_PUBLIC_URL>/auth/logged-out`.
+
+### `SESAME_IDP_PROTOCOL=saml`
+
+SAML 2.0 générique, SP-initiated (liaison Redirect pour l'aller, POST pour le retour). Pas de
+récupération dynamique d'un document de métadonnées IdP : tout vient de ces variables. La
+vérification de signature XML (`samael`, feature `xmlsec`) n'est jamais désactivable : sans
+certificat IdP valide, le portail refuse de démarrer.
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `SESAME_SAML_IDP_ENTITY_ID` | requis | `entityID` de l'IdP (`Issuer` attendu dans les réponses) |
+| `SESAME_SAML_IDP_SSO_URL` | requis | URL du service de SSO de l'IdP (liaison HTTP-Redirect) |
+| `SESAME_SAML_IDP_CERT_FILE` | requis | Certificat de signature de l'IdP (PEM, avec ou sans en-têtes), chemin dans le conteneur |
+| `SESAME_SAML_SP_ENTITY_ID` | requis | `entityID` de Sesame auprès de cet IdP |
+| `SESAME_SAML_USER_KEY_ATTRIBUTE` | aucun | Attribut portant la clé utilisateur (coffre, registre). Absent : `NameID` |
+| `SESAME_SAML_EMAIL_ATTRIBUTE` | aucun | Attribut portant l'e-mail (affichage seulement) |
+| `SESAME_SAML_GROUPS_ATTRIBUTE` | aucun | Attribut portant les groupes (habilitation). Absent = aucun groupe |
+
+Métadonnées SP à déclarer chez l'IdP : `<SESAME_PUBLIC_URL>/saml/metadata` (404 hors protocole
+SAML). URL de l'Assertion Consumer Service : `<SESAME_PUBLIC_URL>/auth/callback` (même chemin
+que le retour OIDC, distingué par la méthode HTTP : `GET` pour OIDC, `POST` pour SAML).
+Single Logout SAML hors périmètre initial : la déconnexion reste locale au portail.
 
 ## Moteur de proxy (`sesame-proxy`)
 
@@ -69,8 +97,11 @@ En mode `postgres` (par défaut), le rôle PostgreSQL du proxy n'a besoin que du
 | `SESAME_DESCRIPTORS_DIR` | `descriptors` | Dossier des descripteurs en fichiers, affichés en lecture seule |
 | `SESAME_SCHEMA_FILE` | `schemas/app-descriptor.schema.json` | Schéma JSON contre lequel sont validés les descripteurs saisis dans l'éditeur |
 | `SESAME_DATABASE_URL` 🔒 | requis | Connexion PostgreSQL (registre des comptes, descripteurs en base) |
-| `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre le fournisseur d'identité et le coffre |
-| `SESAME_OIDC_ISSUER`, `SESAME_OIDC_CLIENT_ID`, `SESAME_OIDC_CLIENT_SECRET` 🔒, `SESAME_OIDC_SCOPES`, `SESAME_OIDC_USER_KEY_CLAIM`, `SESAME_OIDC_GROUPS_CLAIM` | comme le portail | Client OIDC **dédié** à l'administration |
+| `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre le fournisseur d'identité et le coffre (OIDC uniquement) |
+| `SESAME_IDP_PROTOCOL` | `oidc` | Comme le portail : `oidc` ou `saml`, le même choix des deux côtés (ADR 0024) |
+| `SESAME_OIDC_ISSUER`, `SESAME_OIDC_CLIENT_ID`, `SESAME_OIDC_CLIENT_SECRET` 🔒, `SESAME_OIDC_SCOPES`, `SESAME_OIDC_USER_KEY_CLAIM`, `SESAME_OIDC_GROUPS_CLAIM` | comme le portail | Si `SESAME_IDP_PROTOCOL=oidc` : client OIDC **dédié** à l'administration (inscription séparée de celle du portail chez le fournisseur) |
+| `SESAME_SAML_IDP_ENTITY_ID`, `SESAME_SAML_IDP_SSO_URL`, `SESAME_SAML_IDP_CERT_FILE`, `SESAME_SAML_USER_KEY_ATTRIBUTE`, `SESAME_SAML_EMAIL_ATTRIBUTE`, `SESAME_SAML_GROUPS_ATTRIBUTE` | comme le portail | Si `SESAME_IDP_PROTOCOL=saml` : même IdP que le portail |
+| `SESAME_SAML_SP_ENTITY_ID` | requis si `saml` | `entityID` **dédié** à l'administration (différent de celui du portail) ; métadonnées SP publiées sur `<SESAME_ADMIN_PUBLIC_URL>/saml/metadata` |
 | `SESAME_SECRET_STORE` | `postgres` | Comme le proxy ; les deux doivent être configurés de la même façon |
 | `SESAME_SECRETS_ENCRYPTION_KEY` 🔒 | requis si `postgres` | **Identique** à celle du proxy (ADR 0021) : l'admin chiffre, le proxy déchiffre. En production, écrire avec un rôle PostgreSQL sans droit `SELECT` sur `app_secrets` (recommandé, non forcé par le code) |
 | `SESAME_OPENBAO_ADDR`, `SESAME_OPENBAO_MOUNT`, `SESAME_OPENBAO_PATH_PREFIX`, `SESAME_OPENBAO_NAMESPACE` | comme le proxy | Coffre, si `SESAME_SECRET_STORE=openbao`/`vault` |
@@ -78,7 +109,8 @@ En mode `postgres` (par défaut), le rôle PostgreSQL du proxy n'a besoin que du
 | `SESAME_RECORDER_URL` | aucun | URL du service recorder interne, ex. `http://recorder:8090`. Active le bouton « Analyser une page de login » |
 | `SESAME_RECORDER_TOKEN` 🔒 | aucun | Jeton partagé avec le recorder. Le bouton n'apparaît que si l'URL **et** le jeton sont fournis |
 
-URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_ADMIN_PUBLIC_URL>/auth/callback`.
+URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_ADMIN_PUBLIC_URL>/auth/callback`
+(Assertion Consumer Service en SAML aussi ; même chemin, méthode `POST`).
 
 ## Service recorder (`sesame-recorder`)
 
