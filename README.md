@@ -119,8 +119,15 @@ vérification TLS vers les applis amont, désactivée par défaut pour les PKI i
 
 Prérequis : Docker (Compose v2), `make`, `openssl`.
 
+`docker compose` ne lance que Sesame (portail, proxy, admin, recorder), avec PostgreSQL
+et Nginx ; le fournisseur d'identité est le vôtre (fichier `.env`, voir `.env.example`).
+Pour essayer Sesame sans IdP existant, une **version autonome** est fournie : un Keycloak
+de dev, commenté dans `docker-compose.yml`.
+
 ```sh
 git clone https://github.com/neoisback431/Sesame.git && cd Sesame
+# Version autonome : décommentez le service `keycloak` et la ligne `keycloak:` du
+# depends_on du portail dans docker-compose.yml, puis :
 make up-demo
 ```
 
