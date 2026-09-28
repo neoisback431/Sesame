@@ -454,6 +454,7 @@ Le recorder est aussi exposé comme **service HTTP interne** (`sesame-recorder`,
 | Accès direct aux applis sans passer par Sesame | Hors de Sesame : filtrage réseau recommandé (seul le proxy joint les applis) |
 | SSRF via le recorder (analyse d'une URL arbitraire) | **Aucune allowlist** (choix de l'exploitant, ADR 0016) ; atténué par : service interne, jeton partagé, déclencheur réservé aux administrateurs, audit. Amélioration possible : blocage des métadonnées cloud |
 | Coffre PostgreSQL (mode par défaut) compromis par un accès SQL direct | Valeurs chiffrées (AES-256-GCM), pas en clair dans la base ; la séparation lecture / écriture n'est plus garantie par un serveur de coffre dédié comme Vault, mais par l'application et, recommandé en production, par des rôles PostgreSQL distincts (ADR 0021) |
+| Interception réseau entre le proxy et une appli amont (identifiants de rejeu en clair pour l'attaquant) | `spec.upstream.tls.verify` à `false` par défaut (choix de l'exploitant, PKI internes sans CA connue de Sesame, ADR 0023) : aucune vérification du certificat de l'appli amont tant qu'elle n'est pas activée explicitement (avec `ca_file` si besoin). À activer appli par appli sur tout segment réseau moins maîtrisé, en particulier en périmètre PCI-DSS |
 
 ## Environnement de dev
 

@@ -23,6 +23,29 @@ Exemple complet : [`descriptors/fake-app.yaml`](../descriptors/fake-app.yaml). G
 | `spec.rewrite` | Réécriture de `Location` et des URLs absolues internes |
 | `spec.health` | Intervalle du test de santé, empreinte du formulaire validé |
 
+## Amont (`spec.upstream`)
+
+- `base_url` : URL interne de l'appli, telle que le proxy la joint.
+- `timeout` : délai maximal d'une requête vers l'appli (défaut `30s`).
+- `host_header` : en-tête `Host` envoyé à l'appli, si différent de l'hôte de `base_url`.
+- `tls.verify` : vérifier le certificat TLS de l'appli. **`false` par défaut** (choix de
+  l'exploitant) : beaucoup d'applis internes ont un certificat signé par une PKI privée
+  dont Sesame n'a pas la CA, et le rejeu échouerait sinon systématiquement
+  (`invalid peer certificate: UnknownIssuer`). Mettre `true` pour vérifier réellement,
+  avec `tls.ca_file` si le certificat n'est pas signé par une CA publique.
+- `tls.ca_file` : chemin (dans le conteneur du proxy) d'une CA supplémentaire à laquelle
+  faire confiance pour cette appli, en plus du magasin système. Sans effet si
+  `tls.verify` est `false`.
+
+```yaml
+spec:
+  upstream:
+    base_url: https://app-interne.exemple/
+    tls:
+      verify: true
+      ca_file: /etc/sesame/pki-interne-ca.crt
+```
+
 ## Champs du formulaire
 
 ```yaml

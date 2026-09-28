@@ -134,8 +134,9 @@
           "additionalProperties": false,
           "properties": {
             "verify": {
+              "description": "Vérifier le certificat TLS de l'appli. False par défaut (choix de l'exploitant) : les applis internes ont souvent un certificat signé par une PKI privée dont Sesame n'a pas la CA. Mettre true (avec ca_file si besoin) pour vérifier réellement.",
               "type": "boolean",
-              "default": true
+              "default": false
             },
             "ca_file": {
               "type": "string"
