@@ -31,6 +31,21 @@ use crate::matcher::{self, ResponseView};
 const MAX_LOGIN_BODY: usize = 2 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
 
+/// Message diagnostique d'une appli injoignable : jamais l'URL (celle-ci peut voyager
+/// vers des journaux moins sûrs), mais toute la chaîne de causes (TLS, DNS, connexion
+/// refusée…), sans quoi seul "error sending request" apparaît, inexploitable.
+pub(crate) fn describe_upstream_error(e: reqwest::Error) -> String {
+    let e = e.without_url();
+    let mut msg = e.to_string();
+    let mut source = std::error::Error::source(&e);
+    while let Some(s) = source {
+        msg.push_str(": ");
+        msg.push_str(&s.to_string());
+        source = s.source();
+    }
+    msg
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ReplayError {
     /// Pas de compte actif : refusé sans lire le coffre.
@@ -216,7 +231,12 @@ impl Replayer {
                 }
                 Ok(Outcome::Indeterminate(reason)) => last = ReplayError::Rejected(reason),
                 Err(e) => {
-                    tracing::warn!(app, correlation_id = cid, error = %e.without_url(), "appli injoignable pendant le rejeu");
+                    tracing::warn!(
+                        app,
+                        correlation_id = cid,
+                        error = %describe_upstream_error(e),
+                        "appli injoignable pendant le rejeu"
+                    );
                     last = ReplayError::Upstream;
                 }
             }
@@ -542,5 +562,28 @@ impl Replayer {
                 .as_ref()
                 .is_some_and(|h| !h.local_storage.is_empty());
         Ok(Outcome::Success(jar, keep_body.then_some(body)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn upstream_error_never_carries_the_url_but_keeps_the_real_cause() {
+        // Port 1 : privilégié, presque toujours refusé, sans dépendre du réseau externe.
+        let err = reqwest::Client::new()
+            .get("http://127.0.0.1:1/secret-path?token=abc")
+            .send()
+            .await
+            .unwrap_err();
+        let msg = describe_upstream_error(err);
+        assert!(
+            !msg.contains("127.0.0.1") && !msg.contains("secret-path"),
+            "{msg}"
+        );
+        // La seule Display du message de haut niveau ("error sending request") est
+        // inexploitable ; la chaîne de causes doit donner un détail en plus.
+        assert!(msg.len() > "error sending request".len(), "{msg}");
     }
 }
