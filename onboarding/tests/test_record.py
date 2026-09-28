@@ -264,6 +264,57 @@ def test_client_side_validation_blocks_dummy_but_test_account_still_completes(cl
     assert rec.login is not None and "SID" in rec.login.session_cookies
 
 
+def delayed_redirect_json_app() -> Flask:
+    """Connexion par JSON, redirection décidée par le script après un court délai une fois la
+    réponse reçue (ex. transition d'interface) : reproduit un cas réel où la connexion réussissait
+    bien (200, cookie de session posé) mais où `logged_in` était constaté à tort à `False` faute
+    d'avoir attendu cette redirection différée."""
+    app = Flask(__name__)
+
+    @app.get("/login")
+    def page():
+        return (
+            "<html><body><form id=f><input name=user><input type=password name=pw>"
+            "<button>Go</button></form><script>"
+            "document.getElementById('f').addEventListener('submit', e => { e.preventDefault();"
+            "fetch('/api/session', {method: 'POST', headers: {'Content-Type': 'application/json'},"
+            "body: JSON.stringify({user: e.target.user.value, pw: e.target.pw.value})})"
+            ".then(r => r.json()).then(data => {"
+            "setTimeout(() => { window.location = data.redirect_url; }, 300);"
+            "}); });</script></body></html>"
+        )
+
+    @app.post("/api/session")
+    def session():
+        from flask import request
+
+        body = request.get_json(silent=True) or {}
+        if (body.get("user"), body.get("pw")) != ("alice", "Pw-real"):
+            return Response('{"error":"bad"}', status=401, content_type="application/json")
+        resp = Response('{"redirect_url":"/ui","token":"tok"}', status=200, content_type="application/json")
+        resp.set_cookie("token", "tok-value")
+        return resp
+
+    @app.get("/ui")
+    def ui():
+        return "<html><body>Bienvenue</body></html>"
+
+    return app
+
+
+def test_delayed_client_side_redirect_after_json_login_is_detected(client, browser):
+    app = Recorder(delayed_redirect_json_app())
+    try:
+        rec = run(f"{app.base}/login", client, browser, credentials=("alice", "Pw-real"))
+    finally:
+        app.srv.shutdown()
+    assert rec.login is not None and rec.login.logged_in is True
+    assert rec.login.status == 200 and "token" in rec.login.cookies_set
+    draft = proposal.to_descriptor(rec, app_id="gw")
+    success = draft.document["spec"]["login"]["success"]["any_of"][0]
+    assert success.get("status") == [200], "un statut 200 réel ne doit pas céder la place au repli 302/303"
+
+
 def test_login_page_on_another_origin_is_blocking(client, browser):
     target = Recorder(spa_app())
     app = Flask(__name__)

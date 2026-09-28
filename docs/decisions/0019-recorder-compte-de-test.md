@@ -36,7 +36,9 @@ champ identifiant introuvable…) empêchent encore la tentative. Il en déduit 
   page de login ; jeton lu dans un champ JSON pointé ou par `pattern`), refaite par le
   proxy et par `sesame-onboard verify` ;
 - réponse : statut, redirection, cookies posés ; cookie(s) de session ; connexion réussie
-  si plus aucun champ mot de passe n'est visible.
+  si plus aucun champ mot de passe n'est visible — attendu explicitement (même budget que
+  l'attente de la requête), une connexion par appel JSON pouvant décider la redirection
+  côté client après un court délai (ex. transition d'interface) une fois la réponse reçue.
 
 Le descripteur proposé porte alors `login.success` et `session.cookies` observés, et
 `public.start_path` (page atteinte après connexion) quand ce n'est pas la racine.
