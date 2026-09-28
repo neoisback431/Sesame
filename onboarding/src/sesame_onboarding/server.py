@@ -38,7 +38,16 @@ class Config:
         self.port = int(port)
         self.token = os.environ.get("SESAME_RECORDER_TOKEN", "").strip()
         self.schema = Path(os.environ.get("SESAME_RECORDER_SCHEMA", str(descriptors.DEFAULT_SCHEMA)))
-        self.insecure = os.environ.get("SESAME_RECORDER_INSECURE", "").lower() in ("1", "true", "yes")
+        # Par défaut activé : la navigation Chromium ignore SESAME_CA_FILE (son propre
+        # magasin de confiance), donc une appli interne signée par une CA privée y
+        # échoue sinon en permanence (net::ERR_CERT_AUTHORITY_INVALID). Explicitement
+        # désactivable (`false`/`0`/`no`) si toutes les applis analysées ont un
+        # certificat public ou signé par SESAME_CA_FILE.
+        self.insecure = os.environ.get("SESAME_RECORDER_INSECURE", "true").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+        )
         self.ca_file = os.environ.get("SESAME_CA_FILE") or None
         self.chromium = os.environ.get("SESAME_ONBOARD_CHROMIUM") or None
         self.timeout = float(os.environ.get("SESAME_RECORDER_TIMEOUT", "20"))
