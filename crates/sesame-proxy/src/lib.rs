@@ -762,7 +762,12 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
 
 impl Proxy {
     fn upstream_error(&self, ctx: &Ctx<'_>, e: reqwest::Error) -> Response {
-        tracing::warn!(app = ctx.app.id(), correlation_id = %ctx.cid, error = %e.without_url(), "appli injoignable");
+        tracing::warn!(
+            app = ctx.app.id(),
+            correlation_id = %ctx.cid,
+            error = %replay::describe_upstream_error(e),
+            "appli injoignable"
+        );
         self.replay_error(&ReplayError::Upstream, &ctx.cid)
     }
 
