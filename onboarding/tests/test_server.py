@@ -79,3 +79,15 @@ def test_analyze_passes_the_test_account_without_echoing_it(monkeypatch):
     # Sans mot de passe : aucune connexion réelle.
     server.analyze(cfg, None, None, {"login_url": "http://x/login", "username": "testeur"})
     assert seen["credentials"] is None
+
+
+def test_insecure_defaults_to_true(monkeypatch):
+    monkeypatch.setenv("SESAME_RECORDER_TOKEN", "t")
+    monkeypatch.delenv("SESAME_RECORDER_INSECURE", raising=False)
+    assert server.Config().insecure is True
+    for value in ("false", "0", "no", "FALSE"):
+        monkeypatch.setenv("SESAME_RECORDER_INSECURE", value)
+        assert server.Config().insecure is False
+    for value in ("true", "1", "yes", "anything-else"):
+        monkeypatch.setenv("SESAME_RECORDER_INSECURE", value)
+        assert server.Config().insecure is True
