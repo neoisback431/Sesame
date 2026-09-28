@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 [project]
 name = "sesame-e2e"
 version = "0.1.0"

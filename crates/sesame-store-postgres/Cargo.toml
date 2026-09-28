@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 [package]
 name = "sesame-store-postgres"
 description = "Implémentation PostgreSQL du magasin de sessions et du registre des comptes Sesame."

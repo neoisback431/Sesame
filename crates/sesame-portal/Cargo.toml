@@ -1,6 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
 [package]
 name = "sesame-portal"
-description = "Portail d'authentification Sesame : OIDC, session portail, page « Mes applications »."
+description = "Portail d'authentification Sesame : OIDC ou SAML, session portail, page « Mes applications »."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

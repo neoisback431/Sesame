@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 [package]
 name = "sesame-proxy"
 description = "Moteur de proxy Sesame : relais, rejeu des connexions, injection de session."
