@@ -621,8 +621,15 @@ def record(
     finally:
         sources.clear()
         context.close()
-    if credentials and rec.password_field and not rec.blocking:
+    # « Aucune soumission observée » n'empêche pas d'essayer un compte de test : la
+    # soumission factice échoue parfois à déclencher une requête (validation cliente sur
+    # des valeurs factices, connexion attendue avant tout appel) alors qu'une connexion
+    # réelle y parvient. Les autres blocages (captcha, plusieurs étapes, formulaire hors
+    # d'un <form>…) restent définitifs : inutile d'y tenter une vraie connexion.
+    if credentials and rec.password_field and not (set(rec.blocking) - {"submission_not_observed"}):
         observe_login(rec, browser, credentials, timeout=timeout, ignore_https_errors=ignore_https_errors)
+        if rec.submission is not None:
+            rec.blocking = [b for b in rec.blocking if b != "submission_not_observed"]
     check_raw_html(rec, client)
     probe_protected(rec, client)
     return rec

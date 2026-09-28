@@ -214,6 +214,56 @@ def test_form_built_by_javascript_without_submission_is_blocking(client, browser
     assert "login_form_not_found_in_raw_html" in rec.blocking
 
 
+def client_validated_login_app() -> Flask:
+    """Validation JavaScript avant tout appel réseau : la soumission est annulée
+    (`preventDefault`) si l'identifiant ne contient pas « @ ». Le champ est un
+    `<input type=text>` (pas `type=email`) : le recorder n'y ajoute donc pas de domaine
+    factice, et la soumission factice (`sesame-recorder-...`, sans « @ ») échoue à
+    déclencher la moindre requête — comme des applis réelles vues en pratique."""
+    app = Flask(__name__)
+
+    @app.get("/login")
+    def page():
+        return (
+            "<html><body><form id=f method=post action=/session>"
+            "<input name=user><input type=password name=password><button>Go</button></form>"
+            "<script>document.getElementById('f').addEventListener('submit', e => {"
+            "if (!document.querySelector('[name=user]').value.includes('@')) e.preventDefault();"
+            "});</script></body></html>"
+        )
+
+    @app.post("/session")
+    def session():
+        from flask import request
+
+        if (request.form.get("user"), request.form.get("password")) != ("alice@example.org", "Pw-real"):
+            return Response("bad", 401)
+        resp = Response("", 204)
+        resp.set_cookie("SID", "ok-session")
+        return resp
+
+    return app
+
+
+def test_client_side_validation_blocks_dummy_but_test_account_still_completes(client, browser):
+    app = Recorder(client_validated_login_app())
+    try:
+        # Sans compte de test : bloquant, comme documenté (le formulaire existe bien dans
+        # le HTML brut ici, contrairement à test_form_built_by_javascript_without_submission_is_blocking).
+        blocked = run(f"{app.base}/login", client, browser, timeout=3)
+        assert blocked.blocking == ["submission_not_observed"]
+
+        # Avec un compte de test : la connexion réelle contourne la validation cliente qui
+        # bloquait la soumission factice, et les blocages qui en découlaient disparaissent.
+        rec = run(f"{app.base}/login", client, browser, credentials=("alice@example.org", "Pw-real"))
+    finally:
+        app.srv.shutdown()
+    assert rec.blocking == []
+    assert rec.submission is not None and rec.submission.url.endswith("/session")
+    assert rec.raw_form_found is True
+    assert rec.login is not None and "SID" in rec.login.session_cookies
+
+
 def test_login_page_on_another_origin_is_blocking(client, browser):
     target = Recorder(spa_app())
     app = Flask(__name__)
