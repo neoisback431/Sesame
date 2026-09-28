@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 [project]
 name = "sesame-fake-app"
 version = "0.1.0"

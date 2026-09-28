@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 [package]
 name = "sesame-core"
 description = "Cœur de Sesame : modèle des descripteurs, interfaces des briques externes, types secrets, audit."
