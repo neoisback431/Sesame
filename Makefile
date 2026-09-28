@@ -4,7 +4,7 @@
 CERTS := deploy/nginx/certs
 PY_PROJECTS := dev/fake-app admin onboarding
 
-.PHONY: help dev-certs up up-demo down logs health record test test-full test-rust test-python test-python-full test-postgres e2e lint lint-rust lint-python validate-descriptors images deny deny-python
+.PHONY: help dev-certs up up-demo down logs health record test test-full test-rust test-python test-python-full test-postgres e2e lint lint-rust lint-python validate-descriptors check-dev-keys images deny deny-python
 
 help:
 	@echo "dev-certs             certificat TLS de dev pour *.sesame.localhost"
@@ -89,7 +89,7 @@ test-postgres:
 e2e:
 	cd tests/e2e && uv run --group dev playwright install chromium && uv run --group dev pytest -q
 
-lint: lint-rust lint-python validate-descriptors
+lint: lint-rust lint-python validate-descriptors check-dev-keys
 
 lint-rust:
 	cargo fmt --all --check
@@ -101,6 +101,11 @@ lint-python:
 
 validate-descriptors:
 	uv run -q scripts/validate_descriptors.py
+
+# Une clé de chiffrement de dev mal générée (mauvaise longueur) ne casse rien au
+# chargement de Compose, seulement au démarrage du service qui la lit (502 via Nginx).
+check-dev-keys:
+	uv run -q scripts/check_dev_keys.py
 
 deny: deny-python
 	cargo deny check licenses

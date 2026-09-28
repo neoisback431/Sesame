@@ -41,7 +41,7 @@ lint:licenses-python:
 lint:python:
   extends: .python
   stage: lint
-  script: [make lint-python validate-descriptors]
+  script: [make lint-python validate-descriptors check-dev-keys]
 
 test:rust:
   extends: .rust
