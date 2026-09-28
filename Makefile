@@ -4,17 +4,18 @@
 CERTS := deploy/nginx/certs
 PY_PROJECTS := dev/fake-app admin onboarding
 
-.PHONY: help dev-certs up down logs health record test test-full test-rust test-python test-python-full test-postgres e2e lint lint-rust lint-python validate-descriptors images deny deny-python
+.PHONY: help dev-certs up up-demo down logs health record test test-full test-rust test-python test-python-full test-postgres e2e lint lint-rust lint-python validate-descriptors images deny deny-python
 
 help:
 	@echo "dev-certs             certificat TLS de dev pour *.sesame.localhost"
-	@echo "up / down / logs      environnement Docker Compose de dev"
-	@echo "health                test de santé des formulaires de login (après make up)"
+	@echo "up / down / logs      environnement Docker Compose de dev (sans l'appli factice)"
+	@echo "up-demo               comme up, avec en plus l'appli factice de démo (profil demo)"
+	@echo "health                test de santé des formulaires de login (après make up-demo)"
 	@echo "record URL=… [ARGS=…] analyse une page de login et propose un descripteur (après make up)"
 	@echo "test                  tests rapides (défaut) : Rust + Python, sans navigateur"
 	@echo "test-full             tests complets : test + navigateur (recorder) + PostgreSQL (si Docker)"
 	@echo "test-postgres         tests de contrat sur une base PostgreSQL jetable (Docker)"
-	@echo "e2e                   tests bout en bout Playwright (après make up)"
+	@echo "e2e                   tests bout en bout Playwright (après make up-demo)"
 	@echo "lint                  fmt, clippy, ruff, validation des descripteurs"
 	@echo "deny                  licences des dépendances (Rust et Python)"
 	@echo "images                construit les images Docker"
@@ -37,14 +38,19 @@ dev-certs: $(CERTS)/sesame.crt
 up: dev-certs
 	docker compose up -d --build
 
+# Ajoute l'appli factice (profil « demo », facultative) : login OIDC de bout en bout à
+# essayer, e2e, test de santé. Sans elle, `make up` suffit pour le cœur de Sesame.
+up-demo: dev-certs
+	docker compose --profile demo up -d --build
+
 down:
-	docker compose down
+	docker compose --profile demo down
 
 logs:
 	docker compose logs -f
 
 health:
-	docker compose run --rm --build health
+	docker compose --profile demo run --rm --build health
 
 # Ex. : make record URL=http://fake-app:8000/login ARGS="--id fake-app --probe-failure"
 record:
