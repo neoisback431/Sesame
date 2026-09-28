@@ -5,6 +5,7 @@ PostgreSQL : activé si ``SESAME_TEST_DATABASE_URL`` est définie ; le schéma e
 créé à partir des migrations Rust s'il est absent.
 """
 
+import base64
 import json
 import os
 import uuid
@@ -230,3 +231,61 @@ async def test_diagnostic_contract(store):
     assert d.sent_fields == ("username", "password") and d.at.year == 2027
     await store.delete_account(app, user)
     assert await store.get_diagnostic(app, user) is None
+
+
+@pytest.fixture(params=["memory", "postgres"])
+async def secrets(request):
+    from sesame_admin.crypto import SecretCipher
+    from sesame_admin.memory import MemorySecretWriter
+    from sesame_admin.store_postgres import PostgresSecretWriter
+
+    if request.param == "memory":
+        yield MemorySecretWriter()
+        return
+    accounts = await postgres_store()  # crée le schéma si besoin
+    await accounts.close()
+    key = base64.b64encode(bytes(range(32))).decode()
+    s = PostgresSecretWriter(os.environ["SESAME_TEST_DATABASE_URL"], SecretCipher(key))
+    yield s
+    await s.close()
+
+
+async def test_secret_writer_contract(secrets):
+    """Coffre en écriture seule (ADR 0021) : aucune méthode de lecture n'existe, mais on
+    peut vérifier ici, en test, que l'écriture, le remplacement et la suppression sont
+    corrects — via l'accès direct à la table réservé aux tests."""
+    from sesame_admin.crypto import field_aad
+    from sesame_admin.memory import MemorySecretWriter
+
+    app, user = f"app-{uuid.uuid4().hex[:8]}", "carol"
+    await secrets.write_credential(app, user, {"username": "cdupont", "password": "pw-1"})
+
+    if isinstance(secrets, MemorySecretWriter):
+        assert secrets.entries[(app, user)] == {"username": "cdupont", "password": "pw-1"}
+    else:
+        rows = await (await secrets.pool()).fetch(
+            "SELECT key, ciphertext FROM app_secrets WHERE app_id = $1 AND user_key = $2", app, user
+        )
+        values = {
+            r["key"]: secrets._cipher.decrypt(r["ciphertext"], field_aad(app, user, r["key"])) for r in rows
+        }
+        assert values == {"username": "cdupont", "password": "pw-1"}
+
+    # Remplace l'ensemble des champs (comme un PUT KV v2 de Vault).
+    await secrets.write_credential(app, user, {"password": "pw-2"})
+    if isinstance(secrets, MemorySecretWriter):
+        assert secrets.entries[(app, user)] == {"password": "pw-2"}
+    else:
+        rows = await (await secrets.pool()).fetch(
+            "SELECT key FROM app_secrets WHERE app_id = $1 AND user_key = $2", app, user
+        )
+        assert {r["key"] for r in rows} == {"password"}
+
+    await secrets.delete_credential(app, user)
+    if isinstance(secrets, MemorySecretWriter):
+        assert (app, user) not in secrets.entries
+    else:
+        rows = await (await secrets.pool()).fetch(
+            "SELECT key FROM app_secrets WHERE app_id = $1 AND user_key = $2", app, user
+        )
+        assert rows == []

@@ -52,13 +52,20 @@ class Settings:
     recorder_url: str | None
     recorder_token: str | None = field(repr=False)
     oidc: OidcSettings
-    openbao: OpenBaoConfig
+    # Coffre de secrets : "postgres" par défaut (ADR 0021, pas de brique externe
+    # supplémentaire) ou "openbao" / "vault".
+    secret_store: str
+    secrets_encryption_key: str | None = field(repr=False)
+    openbao: OpenBaoConfig | None
 
     @classmethod
     def from_env(cls) -> Settings:
         listen = _or("SESAME_ADMIN_LISTEN", "0.0.0.0:8000")
         host, _, port = listen.rpartition(":")
         ca = os.environ.get("SESAME_CA_FILE", "").strip()
+        secret_store = _or("SESAME_SECRET_STORE", "postgres")
+        if secret_store not in ("postgres", "openbao", "vault"):
+            raise ConfigError(f"SESAME_SECRET_STORE inconnu : {secret_store}")
         return cls(
             listen_host=host,
             listen_port=int(port),
@@ -80,12 +87,22 @@ class Settings:
                 user_key_claim=_or("SESAME_OIDC_USER_KEY_CLAIM", "sub"),
                 groups_claim=_or("SESAME_OIDC_GROUPS_CLAIM", "groups"),
             ),
-            openbao=OpenBaoConfig(
-                addr=_required("SESAME_OPENBAO_ADDR"),
-                mount=_or("SESAME_OPENBAO_MOUNT", "secret"),
-                path_prefix=_or("SESAME_OPENBAO_PATH_PREFIX", "sesame/apps"),
-                role_id=_required("SESAME_OPENBAO_ROLE_ID"),
-                secret_id=_required("SESAME_OPENBAO_SECRET_ID"),
-                namespace=os.environ.get("SESAME_OPENBAO_NAMESPACE") or None,
+            secret_store=secret_store,
+            secrets_encryption_key=(
+                _required("SESAME_SECRETS_ENCRYPTION_KEY")
+                if secret_store == "postgres"  # noqa: S105 (nom de la brique, pas un mot de passe)
+                else None
+            ),
+            openbao=(
+                OpenBaoConfig(
+                    addr=_required("SESAME_OPENBAO_ADDR"),
+                    mount=_or("SESAME_OPENBAO_MOUNT", "secret"),
+                    path_prefix=_or("SESAME_OPENBAO_PATH_PREFIX", "sesame/apps"),
+                    role_id=_required("SESAME_OPENBAO_ROLE_ID"),
+                    secret_id=_required("SESAME_OPENBAO_SECRET_ID"),
+                    namespace=os.environ.get("SESAME_OPENBAO_NAMESPACE") or None,
+                )
+                if secret_store in ("openbao", "vault")
+                else None
             ),
         )

@@ -11,6 +11,8 @@ from typing import Any
 
 import asyncpg
 
+from .crypto import SecretCipher, field_aad
+from .identity import valid_user_key
 from .ports import (
     Account,
     Conflict,
@@ -23,6 +25,10 @@ from .ports import (
 )
 
 _COLUMNS = "app_id, user_key, status, status_reason, last_login_at, updated_at"
+
+
+def _segment_ok(s: str) -> bool:
+    return bool(s) and s not in {".", ".."} and "/" not in s
 
 
 def _account(r: asyncpg.Record) -> Account:
@@ -296,3 +302,67 @@ class PostgresDescriptorStore:
             )
             for r in rows
         ]
+
+
+class PostgresSecretWriter:
+    """Coffre de secrets PostgreSQL (ADR 0021), implémentation par défaut : écrit des
+    valeurs chiffrées (AES-256-GCM, `crypto.SecretCipher`) dans `app_secrets`. Ne relit
+    jamais un secret : ni ici, ni ailleurs dans l'admin (aucune méthode de lecture).
+
+    Séparation lecture / écriture : contrairement à l'AppRole de Vault (garantie par le
+    serveur du coffre), elle repose ici sur l'application (aucune API n'expose un
+    secret déchiffré) et, en production, sur un rôle PostgreSQL dédié à l'admin sans
+    droit `SELECT` sur `app_secrets` (voir ADR 0021 et `docs/configuration.md`).
+    """
+
+    def __init__(self, db: str | PgPool, cipher: SecretCipher) -> None:
+        self._db = db if isinstance(db, PgPool) else PgPool(db)
+        self._cipher = cipher
+
+    def __repr__(self) -> str:
+        return "PostgresSecretWriter()"
+
+    async def pool(self) -> asyncpg.Pool:
+        return await self._db.get()
+
+    async def close(self) -> None:
+        await self._db.close()
+
+    def _check(self, app_id: str, user_key: str) -> None:
+        if not _segment_ok(app_id) or not valid_user_key(user_key):
+            raise ValueError("identifiant d'appli ou d'utilisateur invalide")
+
+    async def write_credential(self, app_id: str, user_key: str, fields: dict[str, str]) -> None:
+        self._check(app_id, user_key)
+        pool = await self.pool()
+        try:
+            async with pool.acquire() as conn, conn.transaction():
+                await conn.execute(
+                    """DELETE FROM app_secrets
+                       WHERE app_id = $1 AND user_key = $2 AND NOT (key = ANY($3::text[]))""",
+                    app_id,
+                    user_key,
+                    list(fields.keys()),
+                )
+                for key, value in fields.items():
+                    ciphertext = self._cipher.encrypt(value, field_aad(app_id, user_key, key))
+                    await conn.execute(
+                        """INSERT INTO app_secrets (app_id, user_key, key, ciphertext) VALUES ($1, $2, $3, $4)
+                           ON CONFLICT (app_id, user_key, key)
+                           DO UPDATE SET ciphertext = $4, updated_at = now()""",
+                        app_id,
+                        user_key,
+                        key,
+                        ciphertext,
+                    )
+        except (OSError, asyncpg.PostgresError) as e:
+            raise Unavailable(f"coffre injoignable ({type(e).__name__})") from None
+
+    async def delete_credential(self, app_id: str, user_key: str) -> None:
+        self._check(app_id, user_key)
+        try:
+            await (await self.pool()).execute(
+                "DELETE FROM app_secrets WHERE app_id = $1 AND user_key = $2", app_id, user_key
+            )
+        except (OSError, asyncpg.PostgresError) as e:
+            raise Unavailable(f"coffre injoignable ({type(e).__name__})") from None
