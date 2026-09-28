@@ -15,6 +15,7 @@ use sesame_core::identity::{validate_user_key, UserIdentity};
 use sesame_core::secret::ExposeSecret;
 
 use crate::config::OidcConfig;
+use crate::idp::PendingLogin;
 
 type Client = CoreClient<
     EndpointSet,
@@ -49,15 +50,11 @@ pub struct Oidc {
     groups_claim: String,
 }
 
-/// État d'une connexion en cours, conservé chiffré dans un cookie le temps de l'aller-retour.
+/// Partie de `PendingLogin` propre à OIDC.
 #[derive(Serialize, Deserialize)]
-pub struct PendingLogin {
-    pub state: String,
+pub struct OidcPending {
     pub nonce: String,
     pub pkce_verifier: String,
-    pub return_to: String,
-    /// Échéance (secondes Unix).
-    pub expires_at: u64,
 }
 
 impl Oidc {
@@ -120,22 +117,29 @@ impl Oidc {
         }
         let (url, state, nonce) = req.url();
         let pending = PendingLogin {
-            state: state.secret().clone(),
-            nonce: nonce.secret().clone(),
-            pkce_verifier: verifier.secret().clone(),
+            csrf: state.secret().clone(),
             return_to,
             expires_at,
+            oidc: Some(OidcPending {
+                nonce: nonce.secret().clone(),
+                pkce_verifier: verifier.secret().clone(),
+            }),
+            saml: None,
         };
         (url.to_string(), pending)
     }
 
     /// Échange le code, vérifie l'ID token (signature, iss, aud, exp, nonce) et construit l'identité.
     pub async fn finish(&self, code: String, pending: &PendingLogin) -> Result<UserIdentity, OidcError> {
+        let oidc_pending = pending
+            .oidc
+            .as_ref()
+            .ok_or_else(|| OidcError::Token("état de connexion inattendu".into()))?;
         let response = self
             .client
             .exchange_code(AuthorizationCode::new(code))
             .map_err(|e| OidcError::Exchange(e.to_string()))?
-            .set_pkce_verifier(PkceCodeVerifier::new(pending.pkce_verifier.clone()))
+            .set_pkce_verifier(PkceCodeVerifier::new(oidc_pending.pkce_verifier.clone()))
             .request_async(&self.http)
             .await
             .map_err(|e| OidcError::Exchange(e.to_string()))?;
@@ -145,7 +149,7 @@ impl Oidc {
         id_token
             .claims(
                 &self.client.id_token_verifier(),
-                &Nonce::new(pending.nonce.clone()),
+                &Nonce::new(oidc_pending.nonce.clone()),
             )
             .map_err(|e| OidcError::Token(e.to_string()))?;
         // Jeton vérifié : on relit ses claims bruts pour appliquer le mapping configurable.

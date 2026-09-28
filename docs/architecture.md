@@ -1,6 +1,6 @@
 # Architecture de Sesame
 
-Sesame est un portail SSO placé devant des applications web qui n'offrent qu'un formulaire login / mot de passe. L'utilisateur s'authentifie une seule fois auprès du fournisseur d'identité de l'organisation (OIDC). Sesame rejoue ensuite côté serveur la connexion à chaque application, avec des identifiants que l'utilisateur ne voit jamais.
+Sesame est un portail SSO placé devant des applications web qui n'offrent qu'un formulaire login / mot de passe. L'utilisateur s'authentifie une seule fois auprès du fournisseur d'identité de l'organisation (OIDC ou SAML 2.0, ADR 0024). Sesame rejoue ensuite côté serveur la connexion à chaque application, avec des identifiants que l'utilisateur ne voit jamais.
 
 Ce document décrit l'architecture cible. Les principes non négociables et les décisions sont dans [`CLAUDE.md`](../CLAUDE.md) et [`docs/decisions/`](decisions/).
 
@@ -19,7 +19,7 @@ flowchart LR
         O[Embarquement<br/>Python + Playwright]
     end
     subgraph "Briques externes (interchangeables)"
-        IDP[(Fournisseur d'identité<br/>OIDC)]
+        IDP[(Fournisseur d'identité<br/>OIDC ou SAML 2.0)]
         S[(Coffre de secrets<br/>PostgreSQL par défaut, ou OpenBao / Vault…)]
         DB[(Magasin de sessions<br/>PostgreSQL)]
         AU[(Journal d'audit)]
@@ -47,7 +47,7 @@ flowchart LR
 | Composant | Rôle | Accès aux secrets applicatifs |
 |---|---|---|
 | Nginx | Terminaison TLS, routage par nom d'hôte | Aucun |
-| Portail | OIDC, session portail, page « Mes applications », déconnexion, ressources statiques de la charte (`/static/`) | Aucun |
+| Portail | OIDC ou SAML, session portail, page « Mes applications », déconnexion, ressources statiques de la charte (`/static/`) | Aucun |
 | Moteur de proxy | Relais, rejeu du login, injection de session (ou remise au navigateur en mode handoff), détection d'expiration | **Seul lecteur du coffre** |
 | Magasin de sessions | Session portail → sessions applicatives (cookies chiffrés), registre des comptes, descripteurs en base, diagnostics de rejeu | Cookies applicatifs (chiffrés) |
 | UI d'administration | Applis, descripteurs, habilitations, registre des comptes, diagnostics | Écriture seule, sans relecture (voir plus bas) |
@@ -161,6 +161,12 @@ sequenceDiagram
     A-->>X: 200
     X-->>U: 200 (sans Set-Cookie applicatif, URLs réécrites)
 ```
+
+En protocole SAML (`SESAME_IDP_PROTOCOL=saml`), les échanges 132-138 sont remplacés par un flux
+SP-initiated équivalent : `P` redirige vers l'IdP avec un `AuthnRequest` (liaison Redirect),
+l'utilisateur s'authentifie, l'IdP répond par un `POST /auth/callback` (liaison HTTP-POST,
+Assertion Consumer Service) portant une assertion signée que `P` vérifie lui-même (pas
+d'échange back-channel comme l'échange de code OIDC) ; la suite du parcours est identique.
 
 ### Formulaire de login
 
@@ -323,12 +329,33 @@ Champs : horodatage UTC, action, résultat, acteur (`issuer` + `subject`), appli
 
 ## Fournisseur d'identité
 
-- OIDC générique : discovery (`/.well-known/openid-configuration`), flux *authorization code* avec PKCE, vérification de `state`, `nonce`, `iss`, `aud` et de la signature.
-- L'état de la connexion en cours (`state`, `nonce`, vérificateur PKCE, `return_to`) voyage dans un cookie chiffré (AES-256-GCM, 10 minutes, `Path=/auth`) : le portail reste sans état et peut être répliqué.
-- `return_to` n'accepte que le portail et les hôtes publics déclarés dans les descripteurs, avec le même schéma : pas de redirection ouverte.
+Un seul protocole actif par déploiement, choisi par `SESAME_IDP_PROTOCOL` (`oidc` par défaut ou
+`saml`), le même pour le portail et l'administration ([ADR 0024](decisions/0024-support-saml.md)).
+
+**OIDC** :
+- Discovery (`/.well-known/openid-configuration`), flux *authorization code* avec PKCE, vérification de `state`, `nonce`, `iss`, `aud` et de la signature.
 - Mapping de claims configurable : `user_key` (défaut `sub`), `groups` (défaut `groups`), libellé (`email`, `name`). Un claim `groups` absent vaut « aucun groupe ».
 - Particularités d'Entra ID gérées par configuration : `oid` comme clé, identifiants de groupes (GUID) dans le claim `groups`, *groups overage* au-delà de 200 groupes. Ce dernier cas relève d'un module optionnel, hors du cœur.
 - En dev : Keycloak (realm `sesame`, voir `dev/keycloak/`).
+
+**SAML 2.0** :
+- SP-initiated, liaison Redirect pour l'`AuthnRequest`, POST pour la réponse (Assertion Consumer
+  Service sur `/auth/callback`, même chemin que le retour OIDC, distingué par la méthode HTTP).
+- Vérification de signature XML déléguée à des bibliothèques matures (`samael`+`xmlsec` en Rust,
+  `python3-saml` en Python), jamais réimplémentée ; jamais désactivable (sans certificat IdP
+  valide, le service refuse de démarrer ou de traiter la réponse).
+- Pas de récupération dynamique d'un document de métadonnées IdP : URL de SSO, émetteur,
+  certificat viennent de la configuration (`SESAME_SAML_IDP_*`). Métadonnées SP publiées sur
+  `/saml/metadata`.
+- Mapping d'attributs configurable : `user_key` (défaut `NameID`), `groups`, `email` — même rôle
+  que le mapping de claims OIDC.
+- Single Logout SAML hors périmètre initial : la déconnexion reste locale au portail.
+- Pas d'IdP SAML de test en dev/CI (décision de l'exploitant) : couverture par tests unitaires
+  (assertions signées construites avec les mêmes bibliothèques), pas d'e2e.
+
+Dans les deux cas :
+- L'état de la connexion en cours (jetons OIDC, ou identifiant de l'`AuthnRequest` SAML, et `return_to`) voyage dans un cookie chiffré (AES-256-GCM, 10 minutes, `Path=/auth`) : le portail reste sans état et peut être répliqué.
+- `return_to` n'accepte que le portail et les hôtes publics déclarés dans les descripteurs, avec le même schéma : pas de redirection ouverte.
 
 ## UI d'administration
 
@@ -349,7 +376,7 @@ Application Python (FastAPI, pages rendues côté serveur) sur son propre nom d'
 | Supprimer l'application | Applis en base uniquement, et seulement sans compte restant : les identifiants resteraient sinon dans le coffre sans apparaître nulle part |
 | Applis décrites par un fichier | Lecture seule : modification par merge request, rechargées au redémarrage |
 
-- **Accès** : OIDC auprès du même fournisseur d'identité, avec un client dédié. Membres du groupe d'administrateurs uniquement (`SESAME_ADMIN_GROUP`) ; les autres reçoivent `access_denied`.
+- **Accès** : même protocole et même fournisseur d'identité que le portail, avec un client (OIDC) ou un `entityID` (SAML) dédié. Membres du groupe d'administrateurs uniquement (`SESAME_ADMIN_GROUP`) ; les autres reçoivent `access_denied`.
 - **Coffre** : écriture sans lecture, quelle que soit l'implémentation (PostgreSQL par défaut, AppRole d'écriture pour OpenBao / Vault). Un identifiant saisi ne peut jamais être relu, ni dans l'UI ni par l'API du coffre.
 - **Protections web** : jeton CSRF sur chaque action, cookie de session signé (`HttpOnly`, `Secure`, `SameSite=Lax`, 1 h) régénéré à la connexion, redirection après connexion limitée aux chemins locaux.
 - **Audit** : `admin_login`, `credential_written`, `credential_deleted`, `account_status_changed`, `access_denied`, `descriptor_created`, `descriptor_updated`, `descriptor_deleted`, `descriptor_recorded`, avec l'administrateur comme acteur et le compte visé dans `target_user`.
@@ -455,6 +482,7 @@ Le recorder est aussi exposé comme **service HTTP interne** (`sesame-recorder`,
 | SSRF via le recorder (analyse d'une URL arbitraire) | **Aucune allowlist** (choix de l'exploitant, ADR 0016) ; atténué par : service interne, jeton partagé, déclencheur réservé aux administrateurs, audit. Amélioration possible : blocage des métadonnées cloud |
 | Coffre PostgreSQL (mode par défaut) compromis par un accès SQL direct | Valeurs chiffrées (AES-256-GCM), pas en clair dans la base ; la séparation lecture / écriture n'est plus garantie par un serveur de coffre dédié comme Vault, mais par l'application et, recommandé en production, par des rôles PostgreSQL distincts (ADR 0021) |
 | Interception réseau entre le proxy et une appli amont (identifiants de rejeu en clair pour l'attaquant) | `spec.upstream.tls.verify` à `false` par défaut (choix de l'exploitant, PKI internes sans CA connue de Sesame, ADR 0023) : aucune vérification du certificat de l'appli amont tant qu'elle n'est pas activée explicitement (avec `ca_file` si besoin). À activer appli par appli sur tout segment réseau moins maîtrisé, en particulier en périmètre PCI-DSS |
+| Assertion SAML forgée ou rejouée (usurpation d'identité auprès du portail ou de l'admin) | Vérification de signature XML jamais désactivable (`samael`/`python3-saml`, ADR 0024) ; émetteur, audience et fenêtre de validité vérifiés par la bibliothèque ; anti-rejeu par l'identifiant de l'`AuthnRequest`, conservé côté serveur (cookie chiffré ou session admin), comparé à `InResponseTo` |
 
 ## Environnement de dev
 

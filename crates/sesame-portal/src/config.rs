@@ -22,11 +22,17 @@ pub struct PortalConfig {
     /// Clé (base64, 32 octets) chiffrant l'état OIDC temporaire porté par cookie.
     pub state_key: SecretString,
     pub ca_file: Option<PathBuf>,
-    pub oidc: OidcConfig,
+    pub idp: IdpConfig,
     /// URL publique de l'UI d'administration, si elle existe : affiche un lien
     /// « Administration » sur la page « Mes applications » aux membres d'`admin_group`.
     pub admin_url: Option<Url>,
     pub admin_group: String,
+}
+
+/// Un seul protocole actif par déploiement, choisi par `SESAME_IDP_PROTOCOL` (ADR 0024).
+pub enum IdpConfig {
+    Oidc(OidcConfig),
+    Saml(SamlConfig),
 }
 
 pub struct OidcConfig {
@@ -39,6 +45,58 @@ pub struct OidcConfig {
     pub groups_claim: String,
     /// Déconnexion aussi chez le fournisseur d'identité (RP-initiated logout).
     pub idp_logout: bool,
+}
+
+/// SAML 2.0 générique (SP-initiated, liaison Redirect/POST). Pas de récupération dynamique
+/// d'un document de métadonnées IdP : tout vient de variables d'environnement.
+pub struct SamlConfig {
+    /// `entityID` de l'IdP (`Issuer` attendu dans les réponses).
+    pub idp_entity_id: String,
+    /// URL du service de SSO de l'IdP (liaison HTTP-Redirect).
+    pub idp_sso_url: String,
+    /// Certificat de signature de l'IdP, au format PEM (avec ou sans en-têtes).
+    pub idp_cert_pem: String,
+    /// `entityID` de Sesame auprès de cet IdP.
+    pub sp_entity_id: String,
+    /// Attribut portant la clé utilisateur (coffre, registre). Absent : `NameID`.
+    pub user_key_attribute: Option<String>,
+    pub email_attribute: Option<String>,
+    pub groups_attribute: Option<String>,
+}
+
+/// `SESAME_IDP_PROTOCOL` choisit le protocole ; `oidc` par défaut (compatibilité).
+fn idp_config_from_env() -> Result<IdpConfig, ConfigError> {
+    match config::or("SESAME_IDP_PROTOCOL", "oidc").as_str() {
+        "oidc" => Ok(IdpConfig::Oidc(OidcConfig {
+            issuer: config::required("SESAME_OIDC_ISSUER")?,
+            client_id: config::required("SESAME_OIDC_CLIENT_ID")?,
+            client_secret: config::secret("SESAME_OIDC_CLIENT_SECRET")?,
+            scopes: config::or("SESAME_OIDC_SCOPES", "openid profile email")
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect(),
+            user_key_claim: config::or("SESAME_OIDC_USER_KEY_CLAIM", "sub"),
+            groups_claim: config::or("SESAME_OIDC_GROUPS_CLAIM", "groups"),
+            idp_logout: config::flag("SESAME_OIDC_LOGOUT"),
+        })),
+        "saml" => {
+            let cert_file = config::required("SESAME_SAML_IDP_CERT_FILE")?;
+            let idp_cert_pem = std::fs::read_to_string(&cert_file)
+                .map_err(|e| ConfigError(format!("SESAME_SAML_IDP_CERT_FILE ({cert_file}) : {e}")))?;
+            Ok(IdpConfig::Saml(SamlConfig {
+                idp_entity_id: config::required("SESAME_SAML_IDP_ENTITY_ID")?,
+                idp_sso_url: config::required("SESAME_SAML_IDP_SSO_URL")?,
+                idp_cert_pem,
+                sp_entity_id: config::required("SESAME_SAML_SP_ENTITY_ID")?,
+                user_key_attribute: config::optional("SESAME_SAML_USER_KEY_ATTRIBUTE"),
+                email_attribute: config::optional("SESAME_SAML_EMAIL_ATTRIBUTE"),
+                groups_attribute: config::optional("SESAME_SAML_GROUPS_ATTRIBUTE"),
+            }))
+        }
+        other => Err(ConfigError(format!(
+            "SESAME_IDP_PROTOCOL : « {other} » inconnu (oidc, saml)"
+        ))),
+    }
 }
 
 impl PortalConfig {
@@ -59,18 +117,7 @@ impl PortalConfig {
             database_url: config::secret("SESAME_DATABASE_URL")?,
             state_key: config::secret("SESAME_PORTAL_STATE_KEY")?,
             ca_file: config::optional("SESAME_CA_FILE").map(PathBuf::from),
-            oidc: OidcConfig {
-                issuer: config::required("SESAME_OIDC_ISSUER")?,
-                client_id: config::required("SESAME_OIDC_CLIENT_ID")?,
-                client_secret: config::secret("SESAME_OIDC_CLIENT_SECRET")?,
-                scopes: config::or("SESAME_OIDC_SCOPES", "openid profile email")
-                    .split_whitespace()
-                    .map(str::to_owned)
-                    .collect(),
-                user_key_claim: config::or("SESAME_OIDC_USER_KEY_CLAIM", "sub"),
-                groups_claim: config::or("SESAME_OIDC_GROUPS_CLAIM", "groups"),
-                idp_logout: config::flag("SESAME_OIDC_LOGOUT"),
-            },
+            idp: idp_config_from_env()?,
             admin_url: config::optional("SESAME_ADMIN_URL")
                 .map(|s| Url::parse(&s).map_err(|e| ConfigError(format!("SESAME_ADMIN_URL : {e}"))))
                 .transpose()?,

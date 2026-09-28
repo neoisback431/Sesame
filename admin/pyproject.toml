@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6",
     "jsonschema>=4.21",
     "cryptography>=42",
+    "python3-saml>=1.16.0",
 ]
 
 [dependency-groups]
