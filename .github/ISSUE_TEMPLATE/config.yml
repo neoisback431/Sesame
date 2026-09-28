@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Signaler une vulnérabilité
+    url: https://github.com/neoisback431/Sesame/security/advisories/new
+    about: Jamais en issue publique. Signalement privé, visible des seuls mainteneurs (voir SECURITY.md).
+  - name: 📚 Documentation
+    url: https://github.com/neoisback431/Sesame/tree/main/docs
+    about: Architecture, configuration, descripteur d'appli, environnement de dev, décisions.
