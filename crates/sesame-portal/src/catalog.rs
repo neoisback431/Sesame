@@ -47,12 +47,26 @@ fn initial(name: &str) -> String {
         .unwrap_or_else(|| "?".into())
 }
 
-pub fn render(user: &UserIdentity, tiles: &[Tile<'_>], scheme: &str, portal_url: &str) -> String {
+/// `admin_url` : lien « Administration » affiché aux membres du groupe d'administrateurs
+/// (`SESAME_ADMIN_URL` configurée et utilisateur dans `SESAME_ADMIN_GROUP`), `None` sinon.
+pub fn render(
+    user: &UserIdentity,
+    tiles: &[Tile<'_>],
+    scheme: &str,
+    portal_url: &str,
+    admin_url: Option<&str>,
+) -> String {
     let name = user.display_name.as_deref().unwrap_or(&user.user_key);
     let mut body = format!(
         "<h1>Mes applications</h1><p class=\"muted\">Connecté en tant que {}</p>",
         escape(name)
     );
+    if let Some(url) = admin_url {
+        body.push_str(&format!(
+            "<p><a class=\"button\" href=\"{}\">Administration</a></p>",
+            escape(url)
+        ));
+    }
     if tiles.is_empty() {
         body.push_str("<p>Aucune application ne vous est attribuée pour le moment.</p>");
     } else {
@@ -139,17 +153,46 @@ mod tests {
         let ds = vec![AppDescriptor::from_yaml(FAKE_APP).unwrap()];
         let u = user(&["fake-app-users"]);
         let active = [account(AccountStatus::Active)];
-        let html = render(&u, &tiles(&ds, &u, &active), "https", "https://sesame.test/");
+        let html = render(
+            &u,
+            &tiles(&ds, &u, &active),
+            "https",
+            "https://sesame.test/",
+            None,
+        );
         assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/\""));
+        assert!(!html.contains("Administration"));
 
         // Page d'arrivée : la tuile y mène directement (échappée).
         let mut d = AppDescriptor::from_yaml(FAKE_APP).unwrap();
         d.spec.public.start_path = "/chat?a=1&b=\"x".into();
         let ds = vec![d];
-        let html = render(&u, &tiles(&ds, &u, &active), "https", "https://sesame.test/");
+        let html = render(
+            &u,
+            &tiles(&ds, &u, &active),
+            "https",
+            "https://sesame.test/",
+            None,
+        );
         assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/chat?a=1&amp;b=&quot;x\""));
         assert!(html.contains("<span class=\"ico\" aria-hidden=\"true\">A</span>"));
         assert!(html.contains("https://sesame.test/static/logo-64.png"));
         assert!(html.contains("Alice &lt;admin&gt;"));
+    }
+
+    #[test]
+    fn shows_admin_link_only_when_given() {
+        let ds = vec![AppDescriptor::from_yaml(FAKE_APP).unwrap()];
+        let u = user(&["fake-app-users"]);
+        let active = [account(AccountStatus::Active)];
+        let t = tiles(&ds, &u, &active);
+        let html = render(
+            &u,
+            &t,
+            "https",
+            "https://sesame.test/",
+            Some("https://admin.sesame.test/"),
+        );
+        assert!(html.contains("<a class=\"button\" href=\"https://admin.sesame.test/\">Administration</a>"));
     }
 }
