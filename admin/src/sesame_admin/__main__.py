@@ -14,11 +14,12 @@ import uvicorn
 from .audit import StdoutAuditSink
 from .auth import OidcAuthenticator
 from .config import Settings
+from .crypto import SecretCipher
 from .descriptors import DescriptorValidator, load_dir
 from .openbao import OpenBaoSecretWriter
 from .recorder import HttpRecorder
 from .service import AdminService
-from .store_postgres import PgPool, PostgresAccountStore, PostgresDescriptorStore
+from .store_postgres import PgPool, PostgresAccountStore, PostgresDescriptorStore, PostgresSecretWriter
 from .web import create_app
 
 
@@ -44,11 +45,14 @@ def main() -> None:
     if s.ca_file:
         verify = ssl.create_default_context()
         verify.load_verify_locations(cafile=str(s.ca_file))
-    secrets = OpenBaoSecretWriter(
-        s.openbao, httpx.AsyncClient(timeout=10, verify=verify, follow_redirects=False)
-    )
     audit = StdoutAuditSink()
     db = PgPool(s.database_url)
+    if s.secret_store == "postgres":  # noqa: S105 (nom de la brique, pas un mot de passe)
+        secrets = PostgresSecretWriter(db, SecretCipher(s.secrets_encryption_key))
+    else:
+        secrets = OpenBaoSecretWriter(
+            s.openbao, httpx.AsyncClient(timeout=10, verify=verify, follow_redirects=False)
+        )
     service = AdminService(
         apps,
         secrets,
