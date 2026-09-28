@@ -43,6 +43,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(count = apps.len(), "descripteurs chargés");
 
     let secrets: Arc<dyn SecretStore> = match cfg.secret_store {
+        SecretStoreConfig::Postgres { key } => {
+            let cipher = CookieCipher::from_base64(&key)?;
+            Arc::new(store.secrets(cipher))
+        }
         SecretStoreConfig::OpenBao {
             addr,
             mount,

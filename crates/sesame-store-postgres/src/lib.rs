@@ -27,7 +27,10 @@ pub struct PgStore {
     cipher: Option<Arc<CookieCipher>>,
 }
 
-fn db_err(e: sqlx::Error) -> PortError {
+pub mod secrets;
+pub use secrets::PgSecretStore;
+
+pub(crate) fn db_err(e: sqlx::Error) -> PortError {
     match e {
         sqlx::Error::PoolTimedOut | sqlx::Error::Io(_) | sqlx::Error::PoolClosed => {
             PortError::Unavailable("base de données".into())
@@ -95,6 +98,12 @@ impl PgStore {
         .await
         .map_err(db_err)?;
         Ok(())
+    }
+
+    /// Coffre de secrets sur ce même pool, avec sa propre clé (ADR 0021). Indépendante du
+    /// chiffrement des sessions applicatives : deux clés, deux domaines d'exposition.
+    pub fn secrets(&self, cipher: CookieCipher) -> PgSecretStore {
+        PgSecretStore::new(self.pool.clone(), cipher)
     }
 
     fn cipher(&self) -> PortResult<&CookieCipher> {

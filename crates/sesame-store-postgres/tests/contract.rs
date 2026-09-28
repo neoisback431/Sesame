@@ -4,7 +4,7 @@
 use base64::Engine;
 use sesame_core::contract;
 use sesame_core::crypto::CookieCipher;
-use sesame_core::secret::SecretString;
+use sesame_core::secret::{ExposeSecret, SecretString};
 use sesame_store_postgres::PgStore;
 
 async fn store() -> Option<PgStore> {
@@ -64,4 +64,45 @@ async fn diagnostic_store_contract() {
     let user = unique("diag");
     store.seed_account("app1", &user).await.unwrap();
     contract::diagnostic_store(&store, "app1", &user).await;
+}
+
+// Coffre de secrets PostgreSQL (ADR 0021). SecretStore n'expose que la lecture (seul
+// le proxy le lit) : le seed passe par `put_credential`, réservé aux tests et au dev.
+#[tokio::test]
+async fn postgres_secret_store() {
+    use sesame_core::ports::{PortError, SecretStore};
+    let Some(store) = store().await else {
+        eprintln!("SESAME_TEST_DATABASE_URL absente : test ignoré");
+        return;
+    };
+    let key = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
+    let secrets = store.secrets(CookieCipher::from_base64(&SecretString::from(key)).unwrap());
+    let user = unique("secret-user");
+
+    assert!(matches!(
+        secrets.get_credential("app1", &user).await,
+        Err(PortError::NotFound)
+    ));
+
+    let fields = std::collections::BTreeMap::from([
+        ("username".to_string(), "amartin".to_string()),
+        ("password".to_string(), "s3cret-pw".to_string()),
+    ]);
+    secrets.put_credential("app1", &user, &fields).await.unwrap();
+    let cred = secrets.get_credential("app1", &user).await.unwrap();
+    assert_eq!(cred.get("username").unwrap().expose_secret(), "amartin");
+    assert_eq!(cred.get("password").unwrap().expose_secret(), "s3cret-pw");
+
+    // Remplace l'ensemble des champs (comme un PUT KV v2) : « username » disparaît.
+    let fields2 = std::collections::BTreeMap::from([("password".to_string(), "new-pw".to_string())]);
+    secrets.put_credential("app1", &user, &fields2).await.unwrap();
+    let cred2 = secrets.get_credential("app1", &user).await.unwrap();
+    assert!(cred2.get("username").is_none());
+    assert_eq!(cred2.get("password").unwrap().expose_secret(), "new-pw");
+
+    secrets.delete_credential("app1", &user).await.unwrap();
+    assert!(matches!(
+        secrets.get_credential("app1", &user).await,
+        Err(PortError::NotFound)
+    ));
 }
