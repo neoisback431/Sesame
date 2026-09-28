@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 [package]
 name = "sesame-secrets-openbao"
 description = "Implémentation OpenBao / Vault (KV v2, AppRole) du coffre de secrets Sesame."

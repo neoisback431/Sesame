@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # Descripteur de l'appli factice de dev (dev/fake-app).
 # Aucun secret ici : username et password sont lus dans le coffre
 # sous le couple (fake-app, utilisateur).

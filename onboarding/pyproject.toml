@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 [project]
 name = "sesame-onboarding"
 version = "0.1.0"
