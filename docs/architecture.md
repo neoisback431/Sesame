@@ -20,7 +20,7 @@ flowchart LR
     end
     subgraph "Briques externes (interchangeables)"
         IDP[(Fournisseur d'identité<br/>OIDC)]
-        S[(Coffre de secrets<br/>OpenBao / Vault…)]
+        S[(Coffre de secrets<br/>PostgreSQL par défaut, ou OpenBao / Vault…)]
         DB[(Magasin de sessions<br/>PostgreSQL)]
         AU[(Journal d'audit)]
         OT[(Observabilité<br/>OpenTelemetry)]
@@ -263,10 +263,30 @@ Schéma : [`crates/sesame-store-postgres/migrations/`](../crates/sesame-store-po
 
 ## Coffre de secrets
 
-- Interface `SecretStore::get_credential(app_id, user_key)`. Implémentation de référence : OpenBao / Vault (KV v2).
-- Chemin : `<mount>/sesame/apps/<app_id>/users/<user_key>`. Les clés (`username`, `password`…) sont celles listées dans `spec.credentials.keys`.
-- Le moteur de proxy s'authentifie par AppRole et sa policy se limite à la lecture de `sesame/apps/*`. L'UI d'admin a une policy d'écriture sans lecture (`create`, `update`, `delete`) : un administrateur peut définir un mot de passe sans pouvoir le relire.
-- `user_key` provient d'un claim configurable. On privilégie un identifiant immuable (`sub`, ou `oid` pour Entra ID) plutôt que l'e-mail ou le nom d'utilisateur, qui peuvent être réattribués.
+- Interface `SecretStore::get_credential(app_id, user_key)`, écriture par une interface
+  séparée côté admin (`SecretWriter`, `write_credential` / `delete_credential`, jamais de
+  lecture). Deux implémentations interchangeables (`SESAME_SECRET_STORE`) :
+  - **PostgreSQL, par défaut** (`postgres`, [ADR 0021](decisions/0021-coffre-postgresql-par-defaut.md)) : table `app_secrets`
+    du même PostgreSQL que les sessions et le registre des comptes, une ligne par champ,
+    valeur chiffrée AES-256-GCM (liée par AAD au triplet appli / utilisateur / champ),
+    clé `SESAME_SECRETS_ENCRYPTION_KEY` **identique** entre le proxy (`PgSecretStore`,
+    déchiffre) et l'admin (`PostgresSecretWriter`, chiffre), **distincte** de la clé de
+    chiffrement des sessions. Aucune brique externe supplémentaire, mais la séparation
+    lecture / écriture n'est plus garantie par le serveur du coffre : elle repose sur
+    l'application (aucune méthode de lecture côté admin) et, recommandé en production,
+    sur des rôles PostgreSQL distincts (proxy en lecture seule, admin sans `SELECT` sur
+    `app_secrets`).
+  - **OpenBao / Vault** (`openbao` / `vault`, KV v2) : chemin
+    `<mount>/sesame/apps/<app_id>/users/<user_key>`. Le proxy s'authentifie par AppRole,
+    policy limitée à la lecture de `sesame/apps/*` ; l'admin a une policy d'écriture sans
+    lecture (`create`, `update`, `delete`) garantie par le serveur du coffre lui-même.
+    Utile aux organisations qui en ont déjà un (rotation automatique, HSM…).
+- Dans les deux cas : les clés (`username`, `password`…) sont celles listées dans
+  `spec.credentials.keys` ; écrire un identifiant **remplace l'ensemble des champs**
+  (comme un `PUT` KV v2).
+- `user_key` provient d'un claim configurable. On privilégie un identifiant immuable
+  (`sub`, ou `oid` pour Entra ID) plutôt que l'e-mail ou le nom d'utilisateur, qui
+  peuvent être réattribués.
 - En mémoire, les identifiants sont portés par des types qui ne s'affichent jamais et sont effacés à la destruction (`secrecy` / `zeroize`). Ils vivent le temps du rejeu uniquement.
 
 ## Hygiène des en-têtes dans le proxy
@@ -328,7 +348,7 @@ Application Python (FastAPI, pages rendues côté serveur) sur son propre nom d'
 | Applis décrites par un fichier | Lecture seule : modification par merge request, rechargées au redémarrage |
 
 - **Accès** : OIDC auprès du même fournisseur d'identité, avec un client dédié. Membres du groupe d'administrateurs uniquement (`SESAME_ADMIN_GROUP`) ; les autres reçoivent `access_denied`.
-- **Coffre** : AppRole de l'admin avec une policy d'écriture sans lecture. Un identifiant saisi ne peut jamais être relu, ni dans l'UI ni par l'API du coffre.
+- **Coffre** : écriture sans lecture, quelle que soit l'implémentation (PostgreSQL par défaut, AppRole d'écriture pour OpenBao / Vault). Un identifiant saisi ne peut jamais être relu, ni dans l'UI ni par l'API du coffre.
 - **Protections web** : jeton CSRF sur chaque action, cookie de session signé (`HttpOnly`, `Secure`, `SameSite=Lax`, 1 h) régénéré à la connexion, redirection après connexion limitée aux chemins locaux.
 - **Audit** : `admin_login`, `credential_written`, `credential_deleted`, `account_status_changed`, `access_denied`, `descriptor_created`, `descriptor_updated`, `descriptor_deleted`, `descriptor_recorded`, avec l'administrateur comme acteur et le compte visé dans `target_user`.
 
@@ -431,6 +451,7 @@ Le recorder est aussi exposé comme **service HTTP interne** (`sesame-recorder`,
 | Élévation via l'UI d'admin | Groupe d'administrateurs dédié, audit de chaque action (y compris les descripteurs : un administrateur peut changer l'hôte ou l'URL amont d'une appli), écriture sans relecture des secrets, historique des révisions |
 | Accès direct aux applis sans passer par Sesame | Hors de Sesame : filtrage réseau recommandé (seul le proxy joint les applis) |
 | SSRF via le recorder (analyse d'une URL arbitraire) | **Aucune allowlist** (choix de l'exploitant, ADR 0016) ; atténué par : service interne, jeton partagé, déclencheur réservé aux administrateurs, audit. Amélioration possible : blocage des métadonnées cloud |
+| Coffre PostgreSQL (mode par défaut) compromis par un accès SQL direct | Valeurs chiffrées (AES-256-GCM), pas en clair dans la base ; la séparation lecture / écriture n'est plus garantie par un serveur de coffre dédié comme Vault, mais par l'application et, recommandé en production, par des rôles PostgreSQL distincts (ADR 0021) |
 
 ## Environnement de dev
 

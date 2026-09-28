@@ -1,6 +1,6 @@
 # 0007. OpenBao en dev
 
-**Statut** : acceptée (2026-09-27)
+**Statut** : acceptée (2026-09-27). Remplacée en partie par [0021](0021-coffre-postgresql-par-defaut.md) : OpenBao n'est plus la brique de coffre par défaut de l'environnement de dev, mais reste démontrable (`docker-compose.openbao.yml`) et cette fiche continue de s'appliquer quand on l'active.
 
 ## Contexte
 

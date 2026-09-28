@@ -43,13 +43,17 @@ URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_PUBLI
 | `SESAME_SESSION_ENCRYPTION_KEY` 🔒 | requis | Clé chiffrant les cookies applicatifs au repos |
 | `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre les applis et le coffre |
 | `SESAME_MAX_BODY_BYTES` | `33554432` | Taille maximale d'un corps de requête relayé |
-| `SESAME_SECRET_STORE` | `openbao` | Implémentation du coffre : `openbao` ou `vault` (même API) |
-| `SESAME_OPENBAO_ADDR` | requis | URL du coffre |
+| `SESAME_SECRET_STORE` | `postgres` | Implémentation du coffre : `postgres` (ADR 0021, table `app_secrets` du même PostgreSQL, pas de brique externe supplémentaire), ou `openbao` / `vault` (même API) |
+| `SESAME_SECRETS_ENCRYPTION_KEY` 🔒 | requis si `postgres` | Clé (32 octets, base64) chiffrant les secrets dans `app_secrets`. **Identique** à celle de l'admin (`SESAME_SECRETS_ENCRYPTION_KEY`), **distincte** de `SESAME_SESSION_ENCRYPTION_KEY` |
+| `SESAME_OPENBAO_ADDR` | requis si `openbao`/`vault` | URL du coffre |
 | `SESAME_OPENBAO_MOUNT` | `secret` | Point de montage KV v2 |
 | `SESAME_OPENBAO_PATH_PREFIX` | `sesame/apps` | Préfixe : `<mount>/<prefix>/<app_id>/users/<user_key>` |
-| `SESAME_OPENBAO_ROLE_ID` | requis | AppRole du proxy |
-| `SESAME_OPENBAO_SECRET_ID` 🔒 | requis | Secret de l'AppRole |
+| `SESAME_OPENBAO_ROLE_ID` | requis si `openbao`/`vault` | AppRole du proxy |
+| `SESAME_OPENBAO_SECRET_ID` 🔒 | requis si `openbao`/`vault` | Secret de l'AppRole |
 | `SESAME_OPENBAO_NAMESPACE` | aucun | Espace de noms, le cas échéant |
+
+En mode `postgres` (par défaut), le rôle PostgreSQL du proxy n'a besoin que du droit
+`SELECT` sur `app_secrets` ; recommandé en production, non forcé par le code (ADR 0021).
 
 ## UI d'administration (`sesame-admin`)
 
@@ -65,8 +69,10 @@ URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_PUBLI
 | `SESAME_DATABASE_URL` 🔒 | requis | Connexion PostgreSQL (registre des comptes, descripteurs en base) |
 | `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre le fournisseur d'identité et le coffre |
 | `SESAME_OIDC_ISSUER`, `SESAME_OIDC_CLIENT_ID`, `SESAME_OIDC_CLIENT_SECRET` 🔒, `SESAME_OIDC_SCOPES`, `SESAME_OIDC_USER_KEY_CLAIM`, `SESAME_OIDC_GROUPS_CLAIM` | comme le portail | Client OIDC **dédié** à l'administration |
-| `SESAME_OPENBAO_ADDR`, `SESAME_OPENBAO_MOUNT`, `SESAME_OPENBAO_PATH_PREFIX`, `SESAME_OPENBAO_NAMESPACE` | comme le proxy | Coffre |
-| `SESAME_OPENBAO_ROLE_ID`, `SESAME_OPENBAO_SECRET_ID` 🔒 | requis | AppRole **de l'admin** (écriture sans lecture) |
+| `SESAME_SECRET_STORE` | `postgres` | Comme le proxy ; les deux doivent être configurés de la même façon |
+| `SESAME_SECRETS_ENCRYPTION_KEY` 🔒 | requis si `postgres` | **Identique** à celle du proxy (ADR 0021) : l'admin chiffre, le proxy déchiffre. En production, écrire avec un rôle PostgreSQL sans droit `SELECT` sur `app_secrets` (recommandé, non forcé par le code) |
+| `SESAME_OPENBAO_ADDR`, `SESAME_OPENBAO_MOUNT`, `SESAME_OPENBAO_PATH_PREFIX`, `SESAME_OPENBAO_NAMESPACE` | comme le proxy | Coffre, si `SESAME_SECRET_STORE=openbao`/`vault` |
+| `SESAME_OPENBAO_ROLE_ID`, `SESAME_OPENBAO_SECRET_ID` 🔒 | requis si `openbao`/`vault` | AppRole **de l'admin** (écriture sans lecture) |
 | `SESAME_RECORDER_URL` | aucun | URL du service recorder interne, ex. `http://recorder:8090`. Active le bouton « Analyser une page de login » |
 | `SESAME_RECORDER_TOKEN` 🔒 | aucun | Jeton partagé avec le recorder. Le bouton n'apparaît que si l'URL **et** le jeton sont fournis |
 
