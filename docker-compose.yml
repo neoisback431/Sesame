@@ -72,7 +72,7 @@ services:
       SESAME_SESSION_ENCRYPTION_KEY: c2VzYW1lLWRldi1hcHAtc2Vzc2lvbi1rZXktMDAwMDE=
       # Coffre de secrets : PostgreSQL par défaut (ADR 0021, pas de brique externe
       # supplémentaire). Clé de dev (base64, 32 octets), distincte de celle des sessions.
-      SESAME_SECRETS_ENCRYPTION_KEY: c2VzYW1lLWRldi1zZWNyZXRzLWtleS0wMDAwMDAwMQ==
+      SESAME_SECRETS_ENCRYPTION_KEY: c2VzYW1lLWRldi1zZWNyZXRzLWtleS0wMDAwMDAwMTI=
       SESAME_CA_FILE: /etc/sesame/ca.crt
       # Dev : réponse de l'appli conservée en cas d'échec de rejeu, visible dans l'admin (ADR 0018).
       SESAME_REPLAY_DEBUG: "true"
@@ -101,7 +101,7 @@ services:
       SESAME_OIDC_USER_KEY_CLAIM: preferred_username
       SESAME_OIDC_GROUPS_CLAIM: groups
       # Même clé que le proxy : l'admin chiffre, le proxy déchiffre (ADR 0021).
-      SESAME_SECRETS_ENCRYPTION_KEY: c2VzYW1lLWRldi1zZWNyZXRzLWtleS0wMDAwMDAwMQ==
+      SESAME_SECRETS_ENCRYPTION_KEY: c2VzYW1lLWRldi1zZWNyZXRzLWtleS0wMDAwMDAwMTI=
       SESAME_CA_FILE: /etc/sesame/ca.crt
       # Service recorder interne, pour le bouton « Analyser une page de login ».
       SESAME_RECORDER_URL: http://recorder:8090
@@ -149,7 +149,7 @@ services:
     entrypoint: ["python", "/seed/seed_secret.py"]
     environment:
       SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
-      SESAME_SECRETS_ENCRYPTION_KEY: c2VzYW1lLWRldi1zZWNyZXRzLWtleS0wMDAwMDAwMQ==
+      SESAME_SECRETS_ENCRYPTION_KEY: c2VzYW1lLWRldi1zZWNyZXRzLWtleS0wMDAwMDAwMTI=
     volumes: [./dev/postgres/seed_secret.py:/seed/seed_secret.py:ro]
     depends_on:
       db-seed: { condition: service_completed_successfully }
