@@ -124,9 +124,11 @@ services:
       interval: 2s
       retries: 30
 
-  # Registre des comptes de dev (en production : l'UI d'administration).
+  # Registre des comptes de dev (en production : l'UI d'administration). Provisionne le
+  # seul compte de l'appli factice : facultatif, profil « demo » (voir `fake-app`).
   db-seed:
     image: postgres:17-alpine
+    profiles: [demo]
     environment:
       PGPASSWORD: dev-db-password
     volumes: [./dev/postgres/seed.sh:/seed.sh:ro]
@@ -137,9 +139,11 @@ services:
 
   # Coffre de secrets de dev (ADR 0021) : le couple (fake-app, alice) est déclaré ici,
   # chiffré avec la même clé que le proxy et l'admin. Réutilise l'image de l'admin
-  # (dépendances Python déjà présentes : cryptography, asyncpg).
+  # (dépendances Python déjà présentes : cryptography, asyncpg). Facultatif, profil
+  # « demo » (voir `fake-app`).
   secrets-seed:
     build: ./admin
+    profiles: [demo]
     entrypoint: ["python", "/seed/seed_secret.py"]
     environment:
       SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
@@ -198,8 +202,12 @@ services:
       - ./deploy/nginx/certs/ca.crt:/etc/sesame/ca.crt:ro
     restart: on-failure
 
+  # Appli cible de démo (login / mot de passe, CSRF), utile pour essayer Sesame ou
+  # lancer les tests e2e / de santé. Facultative, profil « demo » :
+  # `docker compose --profile demo up` (ou `make up-demo`).
   fake-app:
     build: ./dev/fake-app
+    profiles: [demo]
     environment:
       FAKE_APP_USERS: amartin:dev-amartin-app-password,cdupont:dev-cdupont-app-password
       FAKE_APP_SESSION_TTL: "300"

@@ -19,9 +19,12 @@ L'utilisateur s'authentifie une fois auprès du fournisseur d'identité de son o
 ## Démarrage rapide
 
 ```sh
-make up
+make up-demo
 # puis https://sesame.localhost:8443 (alice / alice)
 ```
+
+`make up-demo` ajoute l'appli factice de démo (profil Compose facultatif) à
+`make up`, qui suffit pour le cœur de Sesame sans elle. Voir [`docs/dev.md`](docs/dev.md).
 
 ## Structure du dépôt
 
