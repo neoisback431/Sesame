@@ -31,7 +31,16 @@ jobs:
       - name: Construit et publie les images
         run: make release-images VERSION=${{ github.ref_name }} REGISTRY=${{ steps.registry.outputs.value }}
 
+      # Notes rédigées dans docs/releases/<tag>.md si elles existent, sinon générées depuis
+      # les commits.
       - name: Crée la Release GitHub
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create ${{ github.ref_name }} --generate-notes
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes="docs/releases/${TAG}.md"
+          if [ -f "$notes" ]; then
+            gh release create "$TAG" --title "Sesame ${TAG#v}" --notes-file "$notes"
+          else
+            gh release create "$TAG" --title "Sesame ${TAG#v}" --generate-notes
+          fi

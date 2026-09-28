@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+name: ✨ Fonctionnalité
+description: Proposer une amélioration ou un nouveau besoin.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Décrivez d'abord **le besoin** (le problème à résoudre), puis la solution envisagée. Les changements structurants (nouvelle brique externe, modèle de sécurité, format du descripteur) font l'objet d'une discussion puis d'une [décision d'architecture](https://github.com/neoisback431/Sesame/tree/main/docs/decisions) avant d'être codés.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Vérifications
+      options:
+        - label: J'ai cherché parmi les issues existantes et les décisions d'architecture (docs/decisions).
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Besoin
+      description: Quel problème rencontrez-vous ? Qui est concerné ?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solution envisagée
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considérées
+  - type: textarea
+    id: security
+    attributes:
+      label: Impact sur la sécurité
+      description: La proposition touche-t-elle aux secrets, aux cookies, à l'audit ou aux habilitations ? Remet-elle en cause un des principes du projet (aucun secret vers le navigateur, cookies applicatifs côté serveur, audit de chaque accès) ?
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - Je peux proposer une pull request
+        - Je peux aider à tester
+        - Non, je signale seulement le besoin

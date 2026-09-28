@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: Apache-2.0
+name: 🐛 Bug
+description: Un comportement incorrect et reproductible.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de prendre le temps de signaler ce problème.
+
+        **Cette issue est publique.** N'y collez jamais de mot de passe, jeton, cookie, clé, secret client, ni de donnée propre à votre organisation (noms d'hôtes ou URLs internes, tenant, groupes ou utilisateurs réels). Remplacez-les par `***` ou des valeurs génériques.
+
+        Une vulnérabilité ? **N'ouvrez pas d'issue** : voir [SECURITY.md](https://github.com/neoisback431/Sesame/blob/main/SECURITY.md).
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Vérifications
+      options:
+        - label: J'ai cherché parmi les issues existantes (ouvertes et fermées).
+          required: true
+        - label: Cette issue ne contient aucun secret ni donnée propre à une organisation.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version de Sesame
+      description: Tag de release, image utilisée ou commit.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Composant
+      multiple: true
+      options:
+        - Portail (connexion, « Mes applications »)
+        - Proxy (rejeu, relais, expiration)
+        - Administration
+        - Embarquement (recorder, sesame-onboard)
+        - Déploiement / images / configuration
+        - Documentation
+        - Je ne sais pas
+    validations:
+      required: true
+  - type: dropdown
+    id: idp
+    attributes:
+      label: Protocole d'identité
+      options: [OIDC, SAML, Sans objet]
+  - type: dropdown
+    id: store
+    attributes:
+      label: Coffre de secrets
+      options: [PostgreSQL (défaut), OpenBao / Vault, Sans objet]
+  - type: textarea
+    id: what
+    attributes:
+      label: Description
+      description: Ce qui se passe, en quelques phrases.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Étapes pour reproduire
+      placeholder: |
+        1. make up-demo
+        2. Se connecter avec alice / alice
+        3. Cliquer sur…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Résultat attendu / obtenu
+    validations:
+      required: true
+  - type: input
+    id: correlation
+    attributes:
+      label: Identifiant de corrélation
+      description: Affiché sur la page d'erreur de Sesame, s'il y en a une.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Extraits de logs (masqués)
+      description: "Ex. : docker compose logs proxy | grep <identifiant de corrélation>. Relisez avant de coller."
+      render: text
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexte
+      description: Environnement (Docker Compose, Kubernetes, VM…), fournisseur d'identité, frontal TLS, tout ce qui peut aider.
