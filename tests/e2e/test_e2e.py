@@ -25,7 +25,7 @@ PORTAL = "https://sesame.localhost:8443/"
 APP = "https://fake-app.sesame.localhost:8443/"
 APP_BIS = "https://fake-app-bis.sesame.localhost:8443/"  # appli créée dans l'administration
 ADMIN = "https://admin.sesame.localhost:8443/"
-APP_PASSWORD = "dev-amartin-app-password"  # valeur de dev, voir dev/openbao/seed.sh
+APP_PASSWORD = "dev-amartin-app-password"  # valeur de dev, voir dev/postgres/seed_secret.py, ADR 0021
 CAROL_APP_PASSWORD = "dev-cdupont-app-password"  # compte de carol dans l'appli factice
 
 

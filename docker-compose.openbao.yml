@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+# Coffre OpenBao / Vault (implémentation alternative de SecretStore), en plus du
+# PostgreSQL par défaut (ADR 0021) : `docker compose -f docker-compose.yml -f
+# docker-compose.openbao.yml up`. Démontre l'indépendance vis-à-vis des briques
+# externes : ni le portail, ni le cœur ne changent, seuls le proxy et l'admin
+# basculent de coffre.
+name: sesame
+
+services:
+  proxy:
+    environment:
+      SESAME_SECRET_STORE: openbao
+      SESAME_OPENBAO_ADDR: http://openbao:8200
+      SESAME_OPENBAO_MOUNT: secret
+      SESAME_OPENBAO_PATH_PREFIX: sesame/apps
+      SESAME_OPENBAO_ROLE_ID: dev-proxy-role-id
+      SESAME_OPENBAO_SECRET_ID: dev-proxy-secret-id
+    depends_on:
+      openbao-seed: { condition: service_completed_successfully }
+
+  admin:
+    environment:
+      SESAME_SECRET_STORE: openbao
+      SESAME_OPENBAO_ADDR: http://openbao:8200
+      SESAME_OPENBAO_MOUNT: secret
+      SESAME_OPENBAO_PATH_PREFIX: sesame/apps
+      SESAME_OPENBAO_ROLE_ID: dev-admin-role-id
+      SESAME_OPENBAO_SECRET_ID: dev-admin-secret-id
+    depends_on:
+      openbao-seed: { condition: service_completed_successfully }
+
+  openbao:
+    image: openbao/openbao:2.4.1
+    command: server -dev -dev-listen-address=0.0.0.0:8200
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: dev-root-token
+    cap_add: [IPC_LOCK]
+    ports: ["127.0.0.1:8200:8200"]
+
+  openbao-seed:
+    image: openbao/openbao:2.4.1
+    # Lancé via sh : ne dépend pas du bit d'exécution du fichier monté.
+    entrypoint: ["sh", "/seed/seed.sh"]
+    environment:
+      BAO_ADDR: http://openbao:8200
+      BAO_TOKEN: dev-root-token
+      PROXY_ROLE_ID: dev-proxy-role-id
+      PROXY_SECRET_ID: dev-proxy-secret-id
+      ADMIN_ROLE_ID: dev-admin-role-id
+      ADMIN_SECRET_ID: dev-admin-secret-id
+    volumes: [./dev/openbao:/seed:ro]
+    depends_on: [openbao]
+    restart: "no"
