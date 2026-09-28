@@ -20,7 +20,12 @@ login ») ou fourni à `sesame-onboard record --test-account` (variables
 
 Après l'analyse habituelle, le recorder ouvre un contexte de navigateur neuf, remplit le
 formulaire avec le compte de test et laisse partir **la seule requête qui transporte le
-mot de passe** (même origine uniquement ; toute autre écriture est bloquée). Il en déduit :
+mot de passe** (même origine uniquement ; toute autre écriture est bloquée). Tenté même
+si la soumission factice n'a déclenché aucune requête (`submission_not_observed`) : une
+validation côté client (format d'identifiant attendu, par exemple) rejette souvent des
+valeurs factices avant tout appel réseau sans empêcher une connexion réelle d'aboutir ;
+seuls les blocages structurels (captcha, plusieurs étapes, formulaire hors d'un `<form>`,
+champ identifiant introuvable…) empêchent encore la tentative. Il en déduit :
 
 - cible, méthode, encodage, noms réels des champs identifiant / mot de passe, constantes
   simples envoyées, envoi ou non des champs cachés ;
