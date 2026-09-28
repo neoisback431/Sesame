@@ -23,6 +23,10 @@ pub struct PortalConfig {
     pub state_key: SecretString,
     pub ca_file: Option<PathBuf>,
     pub oidc: OidcConfig,
+    /// URL publique de l'UI d'administration, si elle existe : affiche un lien
+    /// « Administration » sur la page « Mes applications » aux membres d'`admin_group`.
+    pub admin_url: Option<Url>,
+    pub admin_group: String,
 }
 
 pub struct OidcConfig {
@@ -67,6 +71,10 @@ impl PortalConfig {
                 groups_claim: config::or("SESAME_OIDC_GROUPS_CLAIM", "groups"),
                 idp_logout: config::flag("SESAME_OIDC_LOGOUT"),
             },
+            admin_url: config::optional("SESAME_ADMIN_URL")
+                .map(|s| Url::parse(&s).map_err(|e| ConfigError(format!("SESAME_ADMIN_URL : {e}"))))
+                .transpose()?,
+            admin_group: config::or("SESAME_ADMIN_GROUP", "sesame-admins"),
         })
     }
 }

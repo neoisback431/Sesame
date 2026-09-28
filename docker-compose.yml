@@ -41,6 +41,8 @@ services:
       SESAME_OIDC_GROUPS_CLAIM: groups
       # Déconnexion aussi chez Keycloak (désactivée par défaut, activée en dev pour la tester).
       SESAME_OIDC_LOGOUT: "true"
+      # Lien « Administration » sur « Mes applications », pour le groupe sesame-admins.
+      SESAME_ADMIN_URL: https://admin.sesame.localhost:8443
       SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
       # Clé de dev (base64, 32 octets) : chiffre l'état OIDC temporaire.
       SESAME_PORTAL_STATE_KEY: c2VzYW1lLWRldi1wb3J0YWwtc3RhdGUta2V5LTAwMDE=
