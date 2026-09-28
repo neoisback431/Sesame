@@ -50,6 +50,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         sessions: store.clone(),
         accounts: store,
         audit: Arc::new(StdoutAuditSink::default()),
+        admin_url: cfg.admin_url,
+        admin_group: cfg.admin_group,
     });
     // Rechargement à chaud des descripteurs créés ou modifiés dans l'UI d'administration.
     let reloaded = portal.clone();

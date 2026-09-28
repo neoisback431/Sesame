@@ -26,6 +26,8 @@ make up-demo
 `make up-demo` ajoute l'appli factice de démo (profil Compose facultatif) à
 `make up`, qui suffit pour le cœur de Sesame sans elle. Voir [`docs/dev.md`](docs/dev.md).
 
+L'UI d'administration est sur https://admin.sesame.localhost:8443 (compte de dev : `admin` / `admin`). Un membre du groupe d'administrateurs (`SESAME_ADMIN_GROUP`, `sesame-admins` par défaut) y accède aussi par un bouton **« Administration »** sur « Mes applications », dès que `SESAME_ADMIN_URL` est configurée.
+
 ## Structure du dépôt
 
 | Dossier | Contenu |

@@ -50,6 +50,9 @@ pub struct Portal {
     pub sessions: Arc<dyn SessionStore>,
     pub accounts: Arc<dyn AccountRegistry>,
     pub audit: Arc<dyn AuditSink>,
+    /// Lien « Administration » sur la page « Mes applications », pour `admin_group`.
+    pub admin_url: Option<Url>,
+    pub admin_group: String,
 }
 
 type AppState = Arc<Portal>;
@@ -164,11 +167,17 @@ async fn home(State(p): State<AppState>, headers: HeaderMap) -> Response {
     };
     let descriptors = p.descriptors();
     let tiles = catalog::tiles(&descriptors, &session.user, &accounts);
+    let admin_url = p
+        .admin_url
+        .as_ref()
+        .filter(|_| session.user.groups.contains(&p.admin_group))
+        .map(Url::as_str);
     let html = catalog::render(
         &session.user,
         &tiles,
         p.public_url.scheme(),
         p.public_url.as_str(),
+        admin_url,
     );
     ([(CACHE_CONTROL, "no-store")], Html(html)).into_response()
 }

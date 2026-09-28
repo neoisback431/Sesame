@@ -43,7 +43,7 @@ Toutes les valeurs ci-dessous sont publiques et réservées au dev. Le compte ap
 | `alice` | `alice` | `fake-app-users` | `amartin` / `dev-amartin-app-password` |
 | `bob` | `bob` | aucun (accès refusé à l'appli factice) | aucun |
 | `carol` | `carol` | `fake-app-users` | aucun au départ : à enregistrer dans l'admin avec `cdupont` / `dev-cdupont-app-password` |
-| `admin` | `admin` | `sesame-admins` (accès à l'administration) | aucun |
+| `admin` | `admin` | `sesame-admins` (accès à l'administration ; lien « Administration » sur « Mes applications ») | aucun |
 
 Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le connaît pas : seul le proxy le lit dans le coffre (table `app_secrets`, ADR 0021 ; `secret/sesame/apps/fake-app/users/alice` avec `docker-compose.openbao.yml`).
 
@@ -76,12 +76,13 @@ Nécessite `make up-demo` (appli factice, profil `demo`).
 1. Ouvrez https://sesame.localhost:8443 et connectez-vous avec `alice` / `alice`.
 2. La page « Mes applications » affiche « Appli factice ». Cliquez dessus : vous arrivez connecté en tant qu'`amartin`, sans avoir saisi ce compte.
 3. Avec `bob` / `bob`, aucune tuile n'apparaît et l'accès direct à l'appli est refusé.
-4. `docker compose restart fake-app` fait perdre ses sessions à l'appli. Rechargez la page : Sesame rejoue le login sans que vous le voyiez.
-5. Avec `carol` / `carol`, aucune tuile : elle est habilitée mais n'a pas de compte. Dans https://admin.sesame.localhost:8443 (`admin` / `admin`), ouvrez « Appli factice » et enregistrez `carol` avec `cdupont` / `dev-cdupont-app-password`. Rechargez le portail de carol : la tuile apparaît.
-6. Dans l'administration, « Nouvelle application » crée une appli sans redémarrage : par exemple `fake-app-bis`, hôte public `fake-app-bis.sesame.localhost:8443`, URL `http://fake-app:8000`, groupe `fake-app-users` (facultatif : sans groupe, le compte suffit), sélecteur `form#login-form`, champ CSRF `csrf_token`, cookie `FAKEAPPSESSID`. Après un compte enregistré pour `alice`, la tuile apparaît dans son portail sous une dizaine de secondes (`SESAME_DESCRIPTORS_RELOAD`).
-7. Dans « Nouvelle application », le bouton **« Analyser une page de login »** avec `http://fake-app:8000/login` interroge le service recorder et pré-remplit l'éditeur avec un descripteur proposé (à relire, notamment le cookie de session). Avec le compte de test `amartin` / `dev-amartin-app-password`, le recorder se connecte réellement et propose un descripteur complet (cookie de session et succès observés). La case « Mode handoff » rédige un descripteur en mode remise (ADR 0020). En ligne de commande : `make record URL=http://fake-app:8000/login ARGS="--id fake-app --probe-failure"` (ajouter `--test-account` pour le compte de test, `--handoff` pour le mode remise).
-8. Enregistrez pour carol un mot de passe erroné : à son clic, le rejeu échoue (page neutre, compte `failed`). Dans l'administration, « Voir la réponse de l'appli » sur la ligne du compte montre la réponse de l'appli, identifiants et cookies masqués (ADR 0018).
-9. `docker compose logs proxy admin | grep audit` montre les événements d'audit (lecture du coffre, rejeu, expiration, actions d'administration).
+4. Connectez-vous avec `admin` / `admin` : un bouton **« Administration »** apparaît en haut de la page (groupe `sesame-admins`), absent pour `alice` et `bob`. Il mène à https://admin.sesame.localhost:8443.
+5. `docker compose restart fake-app` fait perdre ses sessions à l'appli. Rechargez la page : Sesame rejoue le login sans que vous le voyiez.
+6. Avec `carol` / `carol`, aucune tuile : elle est habilitée mais n'a pas de compte. Dans https://admin.sesame.localhost:8443 (`admin` / `admin`), ouvrez « Appli factice » et enregistrez `carol` avec `cdupont` / `dev-cdupont-app-password`. Rechargez le portail de carol : la tuile apparaît.
+7. Dans l'administration, « Nouvelle application » crée une appli sans redémarrage : par exemple `fake-app-bis`, hôte public `fake-app-bis.sesame.localhost:8443`, URL `http://fake-app:8000`, groupe `fake-app-users` (facultatif : sans groupe, le compte suffit), sélecteur `form#login-form`, champ CSRF `csrf_token`, cookie `FAKEAPPSESSID`. Après un compte enregistré pour `alice`, la tuile apparaît dans son portail sous une dizaine de secondes (`SESAME_DESCRIPTORS_RELOAD`).
+8. Dans « Nouvelle application », le bouton **« Analyser une page de login »** avec `http://fake-app:8000/login` interroge le service recorder et pré-remplit l'éditeur avec un descripteur proposé (à relire, notamment le cookie de session). Avec le compte de test `amartin` / `dev-amartin-app-password`, le recorder se connecte réellement et propose un descripteur complet (cookie de session et succès observés). La case « Mode handoff » rédige un descripteur en mode remise (ADR 0020). En ligne de commande : `make record URL=http://fake-app:8000/login ARGS="--id fake-app --probe-failure"` (ajouter `--test-account` pour le compte de test, `--handoff` pour le mode remise).
+9. Enregistrez pour carol un mot de passe erroné : à son clic, le rejeu échoue (page neutre, compte `failed`). Dans l'administration, « Voir la réponse de l'appli » sur la ligne du compte montre la réponse de l'appli, identifiants et cookies masqués (ADR 0018).
+10. `docker compose logs proxy admin | grep audit` montre les événements d'audit (lecture du coffre, rejeu, expiration, actions d'administration).
 
 ## Commandes
 

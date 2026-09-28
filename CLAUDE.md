@@ -62,6 +62,7 @@ Règles :
 - Émet et valide la session portail (cookie sécurisé, `HttpOnly`, `Secure`, `SameSite`).
 - Résout les habilitations : quel utilisateur / groupe (issu des claims) accède à quelle appli.
 - Affiche la page « Mes applications » : applis pour lesquelles l'utilisateur a un compte actif dans le registre **et** (si le descripteur définit `spec.access`) y est habilité. `spec.access` est facultatif : sans lui, le compte suffit (ADR 0017). N'accède jamais au coffre.
+- Affiche un lien « Administration » (`SESAME_ADMIN_URL`) aux membres du groupe d'administrateurs (`SESAME_ADMIN_GROUP`, même défaut `sesame-admins` que l'admin).
 
 ### 2. Moteur de proxy (plan de données)
 
