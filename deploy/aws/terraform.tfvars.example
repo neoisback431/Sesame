@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copier en terraform.tfvars et renseigner. Ne pas versionner terraform.tfvars
+# (secrets OIDC) ni l'état Terraform (clés de chiffrement).
+
+# ── 1. À renseigner ──────────────────────────────────────────────────────────────
+
+region = "eu-west-3"
+domain = "sesame.example.com" # portail ; admin.<domain> ; <appli>.<domain>
+
+vpc_id             = "vpc-0123456789abcdef0"
+private_subnet_ids = ["subnet-aaaa", "subnet-bbbb"] # tâches ECS + base (sortie NAT requise)
+alb_subnet_ids     = ["subnet-aaaa", "subnet-bbbb"] # privés si ALB interne, publics sinon
+
+# Certificat : l'un ou l'autre.
+route53_zone_id = "Z0123456789ABCDEFGHIJ" # certificat ACM + DNS créés automatiquement
+# certificate_arn = "arn:aws:acm:eu-west-3:123456789012:certificate/…" # couvre <domain> et *.<domain>
+
+# Fournisseur d'identité (Entra ID : https://login.microsoftonline.com/<tenant-id>/v2.0)
+oidc_issuer               = "https://idp.example.com/realms/sesame"
+oidc_portal_client_id     = "sesame-portal"
+oidc_portal_client_secret = "à-remplacer"
+oidc_admin_client_id      = "sesame-admin"
+oidc_admin_client_secret  = "à-remplacer"
+
+# ── 2. Facultatif ────────────────────────────────────────────────────────────────
+
+# sesame_version      = "v0.1.1"
+# admin_group         = "sesame-admins" # Entra ID : GUID du groupe
+# oidc_user_key_claim = "oid"           # Entra ID
+# alb_internal        = true
+# allowed_cidrs       = ["10.0.0.0/8"]
+# db_multi_az         = true            # production
+# replay_debug        = false
+# recorder_enabled    = true
