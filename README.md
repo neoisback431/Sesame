@@ -120,6 +120,10 @@ docker compose up -d
 **Mettre à jour** : changez `SESAME_VERSION` dans `.env`, puis
 `docker compose pull && docker compose up -d`.
 
+> ☁️ **Sur AWS** (ECS Fargate + RDS + ALB, en Terraform) : suivez plutôt le
+> [kit AWS](deploy/aws/README.md). Les étapes 2 (fournisseur d'identité) et « Ajouter une
+> application » restent les mêmes.
+
 ---
 
 ## Ajouter une application
@@ -191,6 +195,7 @@ en SAML, pas de déconnexion unique (Single Logout) ; projet en 0.x.
 | Documentation | |
 |---|---|
 | [Configuration](docs/configuration.md) | toutes les variables, dont SAML |
+| [Kit AWS](deploy/aws/README.md) | ECS Fargate, RDS, ALB (Terraform) |
 | [Descripteur d'appli](docs/descriptor.md) | décrire une application à la main |
 | [Architecture](docs/architecture.md) | composants, flux, modèle de menace |
 | [Décisions](docs/decisions/) | le pourquoi de chaque choix |

@@ -9,6 +9,7 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- ☁️ **Kit AWS** `deploy/aws/` (aussi joint à chaque Release) : Terraform / OpenTofu, ECS Fargate, RDS PostgreSQL, ALB + certificat ACM, clés générées dans Secrets Manager, dans un VPC existant.
 - 🐳 **Kit de déploiement** `deploy/release/` (aussi joint à chaque Release) : images publiées, un domaine, un fournisseur d'identité, clés générées par `generate-keys.sh`, Nginx configuré automatiquement. Installation en cinq étapes décrite dans le README.
 - 🐳 Images de l'admin et du recorder autonomes : schéma des descripteurs intégré.
 - 📚 README réécrit autour de l'installation, de la configuration minimale et de l'ajout d'une application.
