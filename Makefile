@@ -44,7 +44,12 @@ up: dev-certs
 
 # Ajoute l'appli factice (profil « demo », facultative) : login OIDC de bout en bout à
 # essayer, e2e, test de santé. Sans elle, `make up` suffit pour le cœur de Sesame.
+# Les comptes de démo (alice, carol, admin…) vivent dans le Keycloak de dev, facultatif
+# et commenté par défaut dans docker-compose.yml.
 up-demo: dev-certs
+	@docker compose config --services | grep -qx keycloak || { \
+	  echo "make up-demo exige le Keycloak de dev : décommentez le service keycloak et la"; \
+	  echo "ligne 'keycloak:' du depends_on du portail dans docker-compose.yml."; exit 2; }
 	docker compose --profile demo up -d --build
 
 down:
