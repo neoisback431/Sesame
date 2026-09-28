@@ -15,6 +15,11 @@ metadata:
 spec:
   upstream:
     base_url: http://mon-appli.interne:8080   # adresse jointe par le proxy
+    # En HTTPS avec un certificat signé par une PKI privée (le cas le plus courant en
+    # interne) : tls.verify est FACULTATIF, false par défaut (docs/descriptor.md).
+    # tls:
+    #   verify: true                          # vérifier réellement le certificat
+    #   ca_file: /etc/sesame/pki-interne.crt  # CA à ajouter (chemin dans le conteneur du proxy)
   public:
     host: mon-appli.sesame.example            # adresse exposée par Sesame
     # start_path: /accueil                    # page ouverte par la tuile (défaut /) : utile si

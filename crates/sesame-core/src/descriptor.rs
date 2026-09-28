@@ -78,22 +78,16 @@ pub struct Upstream {
     pub host_header: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tls {
-    #[serde(default = "yes")]
+    /// `false` par défaut (choix de l'exploitant) : beaucoup d'applis internes ont un
+    /// certificat signé par une PKI privée dont Sesame n'a pas la CA. Mettre `true` (avec
+    /// `ca_file` si besoin) pour vérifier réellement le certificat de cette appli.
+    #[serde(default)]
     pub verify: bool,
     #[serde(default)]
     pub ca_file: Option<String>,
-}
-
-impl Default for Tls {
-    fn default() -> Self {
-        Self {
-            verify: true,
-            ca_file: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -634,6 +628,16 @@ mod tests {
         assert_eq!(d.spec.session.idle_ttl, Duration::from_secs(1800));
         assert!(matches!(d.spec.login.fields["password"], FormField::FromSecret(ref k) if k == "password"));
         assert_eq!(d.spec.login.csrf[0].source, CsrfSource::HiddenInput);
+    }
+
+    #[test]
+    fn tls_verification_is_opt_in() {
+        // Beaucoup d'applis internes ont un certificat signé par une PKI privée : vérifier
+        // par défaut casserait leur rejeu (choix de l'exploitant). fake-app ne déclare pas
+        // `upstream.tls` : le défaut s'applique.
+        let d = AppDescriptor::from_yaml(FAKE_APP).unwrap();
+        assert!(!d.spec.upstream.tls.verify);
+        assert!(d.spec.upstream.tls.ca_file.is_none());
     }
 
     #[test]
