@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: Apache-2.0
+# Placez ici fullchain.pem et privkey.pem (certificat couvrant <domaine> et *.<domaine>).

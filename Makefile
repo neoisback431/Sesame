@@ -7,7 +7,7 @@ PY_PROJECTS := dev/fake-app admin onboarding
 # REGISTRY=ghcr.io/<son-organisation>/sesame à `make release-images`.
 REGISTRY ?= ghcr.io/neoisback431/sesame
 
-.PHONY: help dev-certs up up-demo down logs health record test test-full test-rust test-python test-python-full test-postgres e2e lint lint-rust lint-python validate-descriptors check-dev-keys images release-images deny deny-python
+.PHONY: help dev-certs up up-demo down logs health record test test-full test-rust test-python test-python-full test-postgres e2e lint lint-rust lint-python validate-descriptors check-dev-keys images release-images release-kit deny deny-python
 
 help:
 	@echo "dev-certs             certificat TLS de dev pour *.sesame.localhost"
@@ -23,6 +23,7 @@ help:
 	@echo "deny                  licences des dépendances (Rust et Python)"
 	@echo "images                construit les images Docker (dev)"
 	@echo "release-images VERSION=vX.Y.Z [REGISTRY=…]  construit et publie les 4 images de release"
+	@echo "release-kit VERSION=vX.Y.Z   archive du kit de déploiement (deploy/release/)"
 
 $(CERTS)/sesame.crt:
 	mkdir -p $(CERTS)
@@ -137,9 +138,23 @@ release-images:
 	  -t $(REGISTRY)-portal:$(VERSION) -t $(REGISTRY)-portal:latest .
 	docker build -f deploy/docker/rust.Dockerfile --build-arg BIN=sesame-proxy --target runtime-proxy \
 	  -t $(REGISTRY)-proxy:$(VERSION) -t $(REGISTRY)-proxy:latest .
-	docker build admin -t $(REGISTRY)-admin:$(VERSION) -t $(REGISTRY)-admin:latest
-	docker build onboarding -f onboarding/recorder.Dockerfile \
+	docker build -f admin/Dockerfile . -t $(REGISTRY)-admin:$(VERSION) -t $(REGISTRY)-admin:latest
+	docker build -f onboarding/recorder.Dockerfile . \
 	  -t $(REGISTRY)-recorder:$(VERSION) -t $(REGISTRY)-recorder:latest
 	@for name in portal proxy admin recorder; do \
 	  docker push $(REGISTRY)-$$name:$(VERSION) && docker push $(REGISTRY)-$$name:latest; \
 	done
+
+# Archive du kit de déploiement (deploy/release/), jointe à la Release GitHub : version et
+# registre des images figés dans .env.example, sans .env ni certificat local.
+release-kit:
+	@test -n "$(VERSION)" || (echo "usage : make release-kit VERSION=vX.Y.Z [REGISTRY=…]" && exit 2)
+	rm -rf dist/sesame && mkdir -p dist/sesame/certs
+	cp deploy/release/docker-compose.yml deploy/release/generate-keys.sh dist/sesame/
+	cp -r deploy/release/nginx dist/sesame/
+	cp deploy/release/certs/README dist/sesame/certs/
+	sed -e 's|^SESAME_VERSION=.*|SESAME_VERSION=$(VERSION)|' \
+	    -e 's|^# SESAME_REGISTRY=.*|SESAME_REGISTRY=$(patsubst %/sesame,%,$(REGISTRY))|' \
+	    deploy/release/.env.example > dist/sesame/.env.example
+	tar -czf dist/sesame-deploy-$(VERSION).tar.gz -C dist sesame
+	@echo "dist/sesame-deploy-$(VERSION).tar.gz"
