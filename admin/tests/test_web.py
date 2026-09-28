@@ -9,7 +9,8 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 from sesame_admin.audit import MemoryAuditSink
-from sesame_admin.auth import AuthError
+from sesame_admin.auth import AuthError, SamlAuthenticator
+from sesame_admin.config import SamlSettings
 from sesame_admin.ports import Account, Unavailable
 from sesame_admin.web import create_app
 from starlette.responses import RedirectResponse
@@ -115,6 +116,40 @@ def test_oidc_failure(ctx):
     client.get("/login")
     assert client.get("/auth/callback").status_code == 401
     assert audit.events[-1].outcome == "failure"
+
+
+def test_saml_metadata_is_404_outside_saml_protocol(ctx):
+    client, *_ = ctx
+    assert client.get("/saml/metadata").status_code == 404
+
+
+def test_saml_metadata_advertises_entity_id_when_saml_active(apps):
+    audit = MemoryAuditSink()
+    service = make_service(apps, audit)
+    saml_cfg = SamlSettings(
+        idp_entity_id="https://idp.example/saml",
+        idp_sso_url="https://idp.example/sso",
+        idp_cert_pem="MIIB",
+        sp_entity_id="https://admin.test/saml/metadata",
+        user_key_attribute=None,
+        email_attribute=None,
+        groups_attribute=None,
+    )
+    app = create_app(
+        service,
+        SamlAuthenticator(saml_cfg),
+        audit,
+        public_url="https://admin.test",
+        session_key="k" * 32,
+        admin_group="sesame-admins",
+        issuer=saml_cfg.idp_entity_id,
+        user_key_claim="sub",
+        groups_claim="groups",
+    )
+    client = TestClient(app, base_url="https://admin.test", follow_redirects=False)
+    r = client.get("/saml/metadata")
+    assert r.status_code == 200
+    assert saml_cfg.sp_entity_id in r.text
 
 
 def test_provision_disable_delete_flow(ctx):

@@ -3,7 +3,9 @@
 //!
 //! - `GET /` : page « Mes applications » (connexion OIDC si nécessaire) ;
 //! - `GET /auth/login?return_to=…` : départ vers le fournisseur d'identité ;
-//! - `GET /auth/callback` : retour OIDC, création de la session portail ;
+//! - `GET /auth/callback` : retour OIDC, création de la session portail
+//!   (`POST /auth/callback` : retour SAML, Assertion Consumer Service) ;
+//!   `GET /saml/metadata` : métadonnées SP, seulement en protocole SAML ;
 //! - `POST /auth/logout` : destruction de la session portail et des sessions applicatives,
 //!   puis, si activée, déconnexion chez le fournisseur d'identité ;
 //! - `GET /auth/logged-out` : page de confirmation (retour du fournisseur).
@@ -12,7 +14,9 @@
 
 pub mod catalog;
 pub mod config;
+pub mod idp;
 pub mod oidc;
+pub mod saml;
 
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -22,18 +26,19 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, LOCATION, SET_COOK
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Form, Json, Router};
 use serde::Deserialize;
 use sesame_core::audit::{AuditAction, AuditEvent, AuditOutcome};
 use sesame_core::cookies::{self, PortalCookie};
 use sesame_core::crypto::{hash_token, new_token, CookieCipher};
 use sesame_core::descriptor::AppDescriptor;
 use sesame_core::html::error_page;
+use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{AccountRegistry, AuditSink, PortalSession, SessionStore};
 use sesame_core::secret::ExposeSecret;
 use url::Url;
 
-use crate::oidc::{Oidc, PendingLogin};
+use crate::idp::{Callback, IdentityProvider, PendingLogin};
 
 const LOGIN_COOKIE: &str = "sesame_oidc";
 const LOGIN_TTL: Duration = Duration::from_secs(600);
@@ -45,7 +50,7 @@ pub struct Portal {
     pub session_ttl: Duration,
     /// Catalogue des applis, remplacé d'un bloc au rechargement à chaud.
     pub descriptors: RwLock<Arc<Vec<AppDescriptor>>>,
-    pub oidc: Oidc,
+    pub idp: IdentityProvider,
     pub state_cipher: CookieCipher,
     pub sessions: Arc<dyn SessionStore>,
     pub accounts: Arc<dyn AccountRegistry>,
@@ -61,7 +66,8 @@ pub fn router(portal: Arc<Portal>) -> Router {
     Router::new()
         .route("/", get(home))
         .route("/auth/login", get(login))
-        .route("/auth/callback", get(callback))
+        .route("/auth/callback", get(callback).post(saml_acs))
+        .route("/saml/metadata", get(saml_metadata))
         .route("/auth/logout", post(logout))
         .route("/auth/logged-out", get(logged_out))
         .route("/apps/{app_id}/disconnect", post(disconnect_app))
@@ -136,16 +142,80 @@ impl Portal {
     }
 
     fn start_login(&self, return_to: String) -> Response {
-        let (url, pending) = self.oidc.start(return_to, now_secs() + LOGIN_TTL.as_secs());
-        match seal(&self.state_cipher, &pending) {
-            Some(sealed) => redirect(&url, &[self.login_cookie(&sealed, LOGIN_TTL.as_secs())]),
-            None => self.error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Erreur",
-                "Connexion impossible.",
-                "-",
-            ),
+        match self.idp.start(return_to, now_secs() + LOGIN_TTL.as_secs()) {
+            Ok((url, pending)) => match seal(&self.state_cipher, &pending) {
+                Some(sealed) => redirect(&url, &[self.login_cookie(&sealed, LOGIN_TTL.as_secs())]),
+                None => self.error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Erreur",
+                    "Connexion impossible.",
+                    "-",
+                ),
+            },
+            Err(e) => {
+                tracing::error!(error = %e, "départ de connexion impossible");
+                self.error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Erreur",
+                    "Connexion impossible.",
+                    "-",
+                )
+            }
         }
+    }
+
+    /// Session portail créée après vérification réussie de l'identité, quel que soit le
+    /// protocole. Partagé par le retour OIDC (`callback`) et le retour SAML (`saml_acs`).
+    async fn finish_login(&self, user: UserIdentity, return_to: &str, cid: &str) -> Response {
+        let token = new_token();
+        let now = SystemTime::now();
+        let session = PortalSession {
+            id: hash_token(token.expose_secret()),
+            user: user.clone(),
+            created_at: now,
+            expires_at: now + self.session_ttl,
+        };
+        let event = AuditEvent::new(AuditAction::PortalLogin, AuditOutcome::Success)
+            .actor(&user)
+            .correlation(cid);
+        // L'audit fait partie de l'opération : pas de session sans trace.
+        let stored = async {
+            self.audit.record(event).await?;
+            self.sessions.create_portal_session(session).await
+        };
+        if let Err(e) = stored.await {
+            tracing::error!(correlation_id = %cid, error = %e, "création de la session portail impossible");
+            return self.error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Service indisponible",
+                "Réessayez dans quelques instants.",
+                cid,
+            );
+        }
+        tracing::info!(correlation_id = %cid, user = %user.user_key, "session portail créée");
+        let set = self.cookie.set(token.expose_secret(), self.session_ttl.as_secs());
+        redirect(return_to, &[set, self.login_cookie("", 0)])
+    }
+
+    async fn reject_login(&self, cid: &str, reason: &str) -> Response {
+        let _ = self
+            .audit
+            .record(
+                AuditEvent::new(AuditAction::PortalLogin, AuditOutcome::Failure)
+                    .correlation(cid)
+                    .reason(reason),
+            )
+            .await;
+        let mut resp = self.error(
+            StatusCode::UNAUTHORIZED,
+            "Connexion refusée",
+            "Votre identité n'a pas pu être vérifiée.",
+            cid,
+        );
+        if let Ok(v) = HeaderValue::from_str(&self.login_cookie("", 0)) {
+            resp.headers_mut().append(SET_COOKIE, v);
+        }
+        resp
     }
 }
 
@@ -238,11 +308,10 @@ struct CallbackQuery {
 
 async fn callback(State(p): State<AppState>, headers: HeaderMap, Query(q): Query<CallbackQuery>) -> Response {
     let cid = correlation_id(&headers);
-    let clear_login = p.login_cookie("", 0);
     let values = headers.get_all(COOKIE).iter().filter_map(|v| v.to_str().ok());
     let pending = cookies::find(values, LOGIN_COOKIE).and_then(|v| unseal(&p.state_cipher, v, now_secs()));
     let state_ok = match (&pending, &q.state) {
-        (Some(pending), Some(state)) => constant_time_eq(pending.state.as_bytes(), state.as_bytes()),
+        (Some(pending), Some(state)) => constant_time_eq(pending.csrf.as_bytes(), state.as_bytes()),
         _ => false,
     };
     let (Some(pending), Some(code), true, None) = (pending, q.code, state_ok, q.error.as_ref()) else {
@@ -261,61 +330,88 @@ async fn callback(State(p): State<AppState>, headers: HeaderMap, Query(q): Query
             "La connexion n'a pas pu aboutir. Réessayez depuis la page d'accueil.",
             &cid,
         );
-        if let Ok(v) = HeaderValue::from_str(&clear_login) {
+        if let Ok(v) = HeaderValue::from_str(&p.login_cookie("", 0)) {
             resp.headers_mut().append(SET_COOKIE, v);
         }
         return resp;
     };
 
-    let user = match p.oidc.finish(code, &pending).await {
-        Ok(user) => user,
+    match p.idp.finish(Callback::Oidc { code }, &pending).await {
+        Ok(user) => p.finish_login(user, &pending.return_to, &cid).await,
         Err(e) => {
             tracing::warn!(correlation_id = %cid, error = %e, "authentification OIDC échouée");
-            let _ = p
-                .audit
-                .record(
-                    AuditEvent::new(AuditAction::PortalLogin, AuditOutcome::Failure)
-                        .correlation(&cid)
-                        .reason("oidc_error"),
-                )
-                .await;
-            return p.error(
-                StatusCode::UNAUTHORIZED,
-                "Connexion refusée",
-                "Votre identité n'a pas pu être vérifiée.",
-                &cid,
-            );
+            p.reject_login(&cid, "oidc_error").await
         }
-    };
+    }
+}
 
-    let token = new_token();
-    let now = SystemTime::now();
-    let session = PortalSession {
-        id: hash_token(token.expose_secret()),
-        user: user.clone(),
-        created_at: now,
-        expires_at: now + p.session_ttl,
+#[derive(Deserialize)]
+struct SamlAcsForm {
+    #[serde(rename = "SAMLResponse")]
+    saml_response: String,
+    #[serde(rename = "RelayState")]
+    relay_state: Option<String>,
+}
+
+/// Assertion Consumer Service : retour SAML (liaison HTTP-POST).
+async fn saml_acs(State(p): State<AppState>, headers: HeaderMap, Form(form): Form<SamlAcsForm>) -> Response {
+    let cid = correlation_id(&headers);
+    let values = headers.get_all(COOKIE).iter().filter_map(|v| v.to_str().ok());
+    let pending = cookies::find(values, LOGIN_COOKIE).and_then(|v| unseal(&p.state_cipher, v, now_secs()));
+    let relay_ok = match (&pending, &form.relay_state) {
+        (Some(pending), Some(relay)) => constant_time_eq(pending.csrf.as_bytes(), relay.as_bytes()),
+        _ => false,
     };
-    let event = AuditEvent::new(AuditAction::PortalLogin, AuditOutcome::Success)
-        .actor(&user)
-        .correlation(&cid);
-    // L'audit fait partie de l'opération : pas de session sans trace.
-    let stored = async {
-        p.audit.record(event).await?;
-        p.sessions.create_portal_session(session).await
-    };
-    if let Err(e) = stored.await {
-        tracing::error!(correlation_id = %cid, error = %e, "création de la session portail impossible");
-        return p.error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Service indisponible",
-            "Réessayez dans quelques instants.",
+    let Some(pending) = pending.filter(|_| relay_ok) else {
+        tracing::warn!(correlation_id = %cid, "retour SAML refusé (RelayState invalide ou absent)");
+        let _ = p
+            .audit
+            .record(
+                AuditEvent::new(AuditAction::PortalLogin, AuditOutcome::Failure)
+                    .correlation(&cid)
+                    .reason("invalid_callback"),
+            )
+            .await;
+        let mut resp = p.error(
+            StatusCode::BAD_REQUEST,
+            "Connexion refusée",
+            "La connexion n'a pas pu aboutir. Réessayez depuis la page d'accueil.",
             &cid,
         );
+        if let Ok(v) = HeaderValue::from_str(&p.login_cookie("", 0)) {
+            resp.headers_mut().append(SET_COOKIE, v);
+        }
+        return resp;
+    };
+
+    match p
+        .idp
+        .finish(
+            Callback::Saml {
+                saml_response: form.saml_response,
+            },
+            &pending,
+        )
+        .await
+    {
+        Ok(user) => p.finish_login(user, &pending.return_to, &cid).await,
+        Err(e) => {
+            tracing::warn!(correlation_id = %cid, error = %e, "authentification SAML échouée");
+            p.reject_login(&cid, "saml_error").await
+        }
     }
-    tracing::info!(correlation_id = %cid, user = %user.user_key, "session portail créée");
-    let set = p.cookie.set(token.expose_secret(), p.session_ttl.as_secs());
-    redirect(&pending.return_to, &[set, clear_login])
+}
+
+/// Métadonnées SP à déclarer chez l'IdP, seulement en protocole SAML.
+async fn saml_metadata(State(p): State<AppState>) -> Response {
+    match p.idp.saml_metadata_xml() {
+        Some(Ok(xml)) => ([(CONTENT_TYPE, "application/samlmetadata+xml")], xml).into_response(),
+        Some(Err(e)) => {
+            tracing::error!(error = %e, "génération des métadonnées SAML impossible");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn logout(State(p): State<AppState>, headers: HeaderMap) -> Response {
@@ -325,7 +421,7 @@ async fn logout(State(p): State<AppState>, headers: HeaderMap) -> Response {
         .join("auth/logged-out")
         .map(|u| u.to_string())
         .unwrap_or_else(|_| p.public_url.to_string());
-    let idp_logout = p.oidc.logout_url(&back);
+    let idp_logout = p.idp.logout_url(&back);
     if let Some(session) = p.current_session(&headers).await {
         let event = AuditEvent::new(AuditAction::PortalLogout, AuditOutcome::Success)
             .actor(&session.user)
@@ -479,15 +575,18 @@ mod tests {
         let key = base64::engine::general_purpose::STANDARD.encode([3u8; 32]);
         let cipher = CookieCipher::from_base64(&SecretString::from(key)).unwrap();
         let pending = PendingLogin {
-            state: "st".into(),
-            nonce: "no".into(),
-            pkce_verifier: "verifier-secret".into(),
+            csrf: "st".into(),
             return_to: "https://x/".into(),
             expires_at: 1_000,
+            oidc: Some(crate::oidc::OidcPending {
+                nonce: "no".into(),
+                pkce_verifier: "verifier-secret".into(),
+            }),
+            saml: None,
         };
         let sealed = seal(&cipher, &pending).unwrap();
         assert!(!sealed.contains("verifier"));
-        assert_eq!(unseal(&cipher, &sealed, 999).unwrap().state, "st");
+        assert_eq!(unseal(&cipher, &sealed, 999).unwrap().csrf, "st");
         assert!(unseal(&cipher, &sealed, 1_000).is_none(), "expiré");
         let mut tampered = sealed.clone();
         tampered.replace_range(20..21, if &sealed[20..21] == "A" { "B" } else { "A" });

@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .audit import AuditEvent, AuditSink
-from .auth import Authenticator, AuthError
+from .auth import Authenticator, AuthError, SamlAuthenticator
 from .descriptors import draft
 from .identity import AdminUser, ClaimsError, identity_from_claims
 from .ports import NotFound, Unavailable
@@ -140,6 +140,14 @@ def create_app(
     async def login(request: Request, next: str = "/") -> Response:
         request.session["next"] = next if next.startswith("/") and not next.startswith("//") else "/"
         return await authenticator.login_redirect(request, f"{public_url}/auth/callback")
+
+    @app.get("/saml/metadata")
+    async def saml_metadata() -> Response:
+        """Métadonnées SP à déclarer chez l'IdP, seulement en protocole SAML."""
+        if not isinstance(authenticator, SamlAuthenticator):
+            return Response(status_code=404)
+        xml = authenticator.metadata_xml(f"{public_url}/auth/callback")
+        return Response(xml, media_type="application/samlmetadata+xml")
 
     @app.get("/auth/callback")
     async def callback(request: Request) -> Response:

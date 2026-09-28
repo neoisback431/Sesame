@@ -28,6 +28,7 @@ services:
       context: .
       dockerfile: deploy/docker/rust.Dockerfile
       args: { BIN: sesame-portal }
+      target: runtime-portal
     environment:
       SESAME_PORTAL_LISTEN: 0.0.0.0:8080
       SESAME_PUBLIC_URL: https://sesame.localhost:8443
@@ -62,6 +63,7 @@ services:
       context: .
       dockerfile: deploy/docker/rust.Dockerfile
       args: { BIN: sesame-proxy }
+      target: runtime-proxy
     environment:
       SESAME_PROXY_LISTEN: 0.0.0.0:8081
       SESAME_DESCRIPTORS_DIR: /etc/sesame/descriptors
