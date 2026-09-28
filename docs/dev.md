@@ -9,22 +9,31 @@
 ## Démarrer
 
 ```sh
-make up           # génère le certificat de dev puis lance docker compose (sans l'appli factice)
+make up           # génère le certificat de dev puis lance docker compose
 make up-demo      # comme make up, avec en plus l'appli factice de démo (profil demo)
 ```
 
-`make up` suffit pour le cœur de Sesame (portail, proxy, admin, coffre, IdP). L'appli
-factice, le compte de dev d'alice et sa connexion applicative sont **facultatifs**
-(profil Compose `demo`) : `make up-demo`, ou `docker compose --profile demo up`. Le
-« Parcours à essayer » ci-dessous, `make health`, `make e2e` et `make record` en
-supposent le démarrage.
+`make up` ne lance que **Sesame** (portail, proxy, admin, recorder), avec PostgreSQL et
+Nginx. Le fournisseur d'identité n'en fait pas partie : deux possibilités.
+
+- **Votre IdP** : copiez `.env.example` en `.env` et renseignez-y l'émetteur OIDC, les deux
+  clients (portail et administration) et le groupe d'administrateurs. Aucune modification
+  de `docker-compose.yml` n'est nécessaire.
+- **Version autonome (Keycloak de dev)** : dans `docker-compose.yml`, décommentez le service
+  `keycloak` et la ligne `keycloak:` du `depends_on` du portail. Sans `.env`, Sesame
+  utilise alors ce Keycloak et ses comptes de dev (ci-dessous).
+
+L'appli factice, le compte applicatif d'alice et sa connexion sont eux aussi
+**facultatifs** (profil Compose `demo`) : `make up-demo`, qui **exige le Keycloak de dev**
+(il s'arrête avec un message sinon). Le « Parcours à essayer » ci-dessous, `make health`,
+`make e2e` et `make record` en supposent le démarrage.
 
 | URL | Service |
 |---|---|
 | https://sesame.localhost:8443 | Portail : page « Mes applications » |
 | https://fake-app.sesame.localhost:8443 | Appli factice, via le moteur de proxy (`make up-demo`) |
 | https://admin.sesame.localhost:8443 | Administration (compte `admin`) |
-| https://idp.sesame.localhost:8443 | Keycloak (admin de la console : `kcadmin` / `kcadmin`) |
+| https://idp.sesame.localhost:8443 | Keycloak, si décommenté (admin de la console : `kcadmin` / `kcadmin`) |
 
 Le certificat est signé par une CA de dev, `deploy/nginx/certs/ca.crt`. Importez-la dans le navigateur, ou acceptez l'avertissement.
 
@@ -58,7 +67,7 @@ Le compte applicatif d'alice (`amartin`) diffère de son compte SSO. alice ne le
 | `db-seed` | Facultatif (profil `demo`) : déclare le compte d'alice sur l'appli factice dans le registre des comptes (raccourci de dev) |
 | `admin` | UI d'administration (Python) : registre des comptes et identifiants applicatifs |
 | `secrets-seed` | Facultatif (profil `demo`) : écrit le couple (fake-app, alice) chiffré dans `app_secrets`, avec la clé du proxy et de l'admin. |
-| `keycloak` | Fournisseur OIDC de dev, realm importé depuis `dev/keycloak/sesame-realm.json` |
+| `keycloak` | Facultatif, **commenté par défaut** : fournisseur OIDC de dev (version autonome), realm importé depuis `dev/keycloak/sesame-realm.json` |
 | `health` | Test de santé des formulaires de login (profils `tools` + `demo`, lancé à la demande : `make health`) |
 | `recorder` | Service HTTP interne d'analyse d'une page de login (Chromium headless, image Playwright). Appelé par l'admin (« Analyser une page de login ») ; aussi `make record URL=…` en ligne de commande. Jeton de dev : `dev-recorder-token`. |
 | `fake-app` | Facultatif (profil `demo`) : appli cible, formulaire de login, jeton CSRF à usage unique, champ caché, session serveur de 5 min. Aucun port publié. |

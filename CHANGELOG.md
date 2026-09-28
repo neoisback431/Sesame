@@ -9,6 +9,9 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- 🐳 `docker compose` ne lance plus que Sesame (portail, proxy, admin, recorder) avec PostgreSQL et Nginx : le Keycloak de dev devient facultatif (commenté dans `docker-compose.yml`, version autonome), et le fournisseur d'identité se branche par un fichier `.env` (voir `.env.example`).
+- 🧰 Workflow de release : `actions/checkout@v5` (Node.js 24).
+
 ## [0.1.0] - 2026-09-28
 
 Première version publique. Notes complètes : [docs/releases/v0.1.0.md](docs/releases/v0.1.0.md).

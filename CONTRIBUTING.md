@@ -97,7 +97,7 @@ que votre contribution soit publiée sous licence [Apache-2.0](LICENSE).
 Voir [docs/dev.md](docs/dev.md). En résumé :
 
 ```sh
-make up-demo   # environnement complet (Docker Compose) avec l'appli factice
+make up-demo   # environnement complet avec l'appli factice (Keycloak de dev décommenté dans docker-compose.yml)
 make test      # tests rapides
 make e2e       # parcours bout en bout dans un navigateur (après make up-demo)
 ```

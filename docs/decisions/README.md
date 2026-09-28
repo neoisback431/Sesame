@@ -29,3 +29,4 @@ Une fiche par décision structurante : contexte, décision, conséquences. Une d
 | [0023](0023-tls-amont-non-verifie-par-defaut.md) | `spec.upstream.tls.verify` à `false` par défaut | 2026-09-28 |
 | [0024](0024-support-saml.md) | Support SAML 2.0, en plus d'OIDC | 2026-09-28 |
 | [0025](0025-publication-images-github.md) | Publication des images Docker sur GitHub (Releases + GHCR) | 2026-09-28 |
+| [0026](0026-compose-sesame-seul-keycloak-facultatif.md) | Docker Compose : Sesame seul par défaut, Keycloak facultatif | 2026-09-28 |

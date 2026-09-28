@@ -5,6 +5,13 @@
 # Prérequis : make dev-certs   (certificat TLS auto-signé pour *.sesame.localhost)
 # Entrées   : https://sesame.localhost:8443        (page « Mes applications »)
 #             https://admin.sesame.localhost:8443  (administration)
+#
+# Par défaut : services Sesame (portail, proxy, admin, recorder) + PostgreSQL + Nginx.
+# Le fournisseur d'identité est le vôtre : renseignez SESAME_OIDC_* dans un fichier
+# .env (voir .env.example). Facultatif :
+#   - Keycloak de dev (version autonome, sans IdP existant) : décommentez le service
+#     `keycloak` plus bas et la ligne `keycloak:` du `depends_on` du portail ;
+#   - appli factice de démo : profil `demo` (make up-demo, qui exige aussi Keycloak).
 
 name: sesame
 
@@ -20,7 +27,9 @@ services:
         # Les services joignent le portail et l'IdP par les mêmes URLs que le
         # navigateur : l'issuer OIDC est identique des deux côtés.
         aliases: [sesame.localhost, idp.sesame.localhost, fake-app.sesame.localhost]
-    depends_on: [portal, proxy, admin, keycloak]
+    # Pas de dépendance à keycloak : Nginx résout ses cibles à la volée et démarre
+    # sans lui (idp.sesame.localhost répond alors 502).
+    depends_on: [portal, proxy, admin]
     restart: unless-stopped
 
   portal:
@@ -34,16 +43,18 @@ services:
       SESAME_PUBLIC_URL: https://sesame.localhost:8443
       SESAME_COOKIE_DOMAIN: sesame.localhost
       SESAME_DESCRIPTORS_DIR: /etc/sesame/descriptors
-      SESAME_OIDC_ISSUER: https://idp.sesame.localhost:8443/realms/sesame
-      SESAME_OIDC_CLIENT_ID: sesame-portal
-      SESAME_OIDC_CLIENT_SECRET: dev-portal-client-secret
+      # Fournisseur d'identité : valeurs du .env, à défaut celles du Keycloak de dev.
+      SESAME_OIDC_ISSUER: ${SESAME_OIDC_ISSUER:-https://idp.sesame.localhost:8443/realms/sesame}
+      SESAME_OIDC_CLIENT_ID: ${SESAME_OIDC_PORTAL_CLIENT_ID:-sesame-portal}
+      SESAME_OIDC_CLIENT_SECRET: ${SESAME_OIDC_PORTAL_CLIENT_SECRET:-dev-portal-client-secret}
       # En dev, clé coffre lisible ; en production préférer sub (ou oid pour Entra ID).
-      SESAME_OIDC_USER_KEY_CLAIM: preferred_username
-      SESAME_OIDC_GROUPS_CLAIM: groups
-      # Déconnexion aussi chez Keycloak (désactivée par défaut, activée en dev pour la tester).
-      SESAME_OIDC_LOGOUT: "true"
-      # Lien « Administration » sur « Mes applications », pour le groupe sesame-admins.
+      SESAME_OIDC_USER_KEY_CLAIM: ${SESAME_OIDC_USER_KEY_CLAIM:-preferred_username}
+      SESAME_OIDC_GROUPS_CLAIM: ${SESAME_OIDC_GROUPS_CLAIM:-groups}
+      # Déconnexion aussi chez l'IdP (désactivée par défaut, activée en dev pour la tester).
+      SESAME_OIDC_LOGOUT: ${SESAME_OIDC_LOGOUT:-true}
+      # Lien « Administration » sur « Mes applications », pour le groupe d'administrateurs.
       SESAME_ADMIN_URL: https://admin.sesame.localhost:8443
+      SESAME_ADMIN_GROUP: ${SESAME_ADMIN_GROUP:-sesame-admins}
       SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
       # Clé de dev (base64, 32 octets) : chiffre l'état OIDC temporaire.
       SESAME_PORTAL_STATE_KEY: c2VzYW1lLWRldi1wb3J0YWwtc3RhdGUta2V5LTAwMDE=
@@ -54,8 +65,10 @@ services:
       - ./deploy/nginx/certs/ca.crt:/etc/sesame/ca.crt:ro
     depends_on:
       postgres: { condition: service_healthy }
-      keycloak: { condition: service_healthy }
-    # La discovery OIDC passe par Nginx, qui peut démarrer après le portail.
+      # À décommenter avec le service keycloak (version autonome) :
+      # keycloak: { condition: service_healthy }
+    # La discovery OIDC passe par Nginx, qui peut démarrer après le portail ; sans IdP
+    # joignable, le portail redémarre jusqu'à ce qu'il le soit.
     restart: on-failure
 
   proxy:
@@ -93,15 +106,16 @@ services:
       SESAME_ADMIN_PUBLIC_URL: https://admin.sesame.localhost:8443
       # Clé de dev : signe le cookie de session de l'administration.
       SESAME_ADMIN_SESSION_KEY: dev-admin-session-key-not-for-production
-      SESAME_ADMIN_GROUP: sesame-admins
+      SESAME_ADMIN_GROUP: ${SESAME_ADMIN_GROUP:-sesame-admins}
       SESAME_DESCRIPTORS_DIR: /etc/sesame/descriptors
       SESAME_SCHEMA_FILE: /etc/sesame/app-descriptor.schema.json
       SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
-      SESAME_OIDC_ISSUER: https://idp.sesame.localhost:8443/realms/sesame
-      SESAME_OIDC_CLIENT_ID: sesame-admin
-      SESAME_OIDC_CLIENT_SECRET: dev-admin-client-secret
-      SESAME_OIDC_USER_KEY_CLAIM: preferred_username
-      SESAME_OIDC_GROUPS_CLAIM: groups
+      # Même IdP que le portail, client dédié à l'administration.
+      SESAME_OIDC_ISSUER: ${SESAME_OIDC_ISSUER:-https://idp.sesame.localhost:8443/realms/sesame}
+      SESAME_OIDC_CLIENT_ID: ${SESAME_OIDC_ADMIN_CLIENT_ID:-sesame-admin}
+      SESAME_OIDC_CLIENT_SECRET: ${SESAME_OIDC_ADMIN_CLIENT_SECRET:-dev-admin-client-secret}
+      SESAME_OIDC_USER_KEY_CLAIM: ${SESAME_OIDC_USER_KEY_CLAIM:-preferred_username}
+      SESAME_OIDC_GROUPS_CLAIM: ${SESAME_OIDC_GROUPS_CLAIM:-groups}
       # Même clé que le proxy : l'admin chiffre, le proxy déchiffre (ADR 0021).
       SESAME_SECRETS_ENCRYPTION_KEY: c2VzYW1lLWRldi1zZWNyZXRzLWtleS0wMDAwMDAwMTI=
       SESAME_CA_FILE: /etc/sesame/ca.crt
@@ -157,25 +171,29 @@ services:
       db-seed: { condition: service_completed_successfully }
     restart: "no"
 
-  keycloak:
-    image: keycloak/keycloak:26.0
-    command: start-dev --import-realm
-    environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: kcadmin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: kcadmin
-      KC_HOSTNAME: https://idp.sesame.localhost:8443
-      KC_PROXY_HEADERS: xforwarded
-      KC_HTTP_ENABLED: "true"
-      KC_HEALTH_ENABLED: "true"
-    volumes:
-      - ./dev/keycloak/sesame-realm.json:/opt/keycloak/data/import/sesame-realm.json:ro
-    healthcheck:
-      # Pas de curl dans l'image : requête HTTP brute sur le port de management.
-      test:
-        - CMD-SHELL
-        - "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"
-      interval: 5s
-      retries: 60
+  # Fournisseur d'identité de dev (version autonome, FACULTATIF) : Keycloak avec le realm
+  # `sesame` (comptes alice / bob / carol / admin, voir docs/dev.md). Ne fait pas partie de
+  # Sesame : à décommenter seulement sans IdP existant, avec la ligne `keycloak:` du
+  # `depends_on` du portail. Exigé par make up-demo et make e2e.
+  # keycloak:
+  #   image: keycloak/keycloak:26.0
+  #   command: start-dev --import-realm
+  #   environment:
+  #     KC_BOOTSTRAP_ADMIN_USERNAME: kcadmin
+  #     KC_BOOTSTRAP_ADMIN_PASSWORD: kcadmin
+  #     KC_HOSTNAME: https://idp.sesame.localhost:8443
+  #     KC_PROXY_HEADERS: xforwarded
+  #     KC_HTTP_ENABLED: "true"
+  #     KC_HEALTH_ENABLED: "true"
+  #   volumes:
+  #     - ./dev/keycloak/sesame-realm.json:/opt/keycloak/data/import/sesame-realm.json:ro
+  #   healthcheck:
+  #     # Pas de curl dans l'image : requête HTTP brute sur le port de management.
+  #     test:
+  #       - CMD-SHELL
+  #       - "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"
+  #     interval: 5s
+  #     retries: 60
 
   # Test de santé des formulaires de login (à planifier : cron, CI…).
   # Lancement ponctuel : docker compose run --rm health
