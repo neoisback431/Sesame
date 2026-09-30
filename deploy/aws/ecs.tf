@@ -24,6 +24,8 @@ locals {
       SESAME_OIDC_CLIENT_ID      = var.oidc_portal_client_id
       SESAME_OIDC_USER_KEY_CLAIM = var.oidc_user_key_claim
       SESAME_OIDC_GROUPS_CLAIM   = var.oidc_groups_claim
+      # Service interne du proxy (Service Connect) : demandes d'accès avec identifiants.
+      SESAME_PROXY_INTERNAL_URL = "http://proxy-internal:8082"
     }
     proxy = {
       SESAME_PORTAL_URL    = "https://${var.domain}"
@@ -49,11 +51,13 @@ locals {
       SESAME_DATABASE_URL       = "database_url"
       SESAME_PORTAL_STATE_KEY   = "portal_state_key"
       SESAME_OIDC_CLIENT_SECRET = "oidc_portal_client_secret"
+      SESAME_INTERNAL_TOKEN     = "internal_token"
     }
     proxy = {
       SESAME_DATABASE_URL           = "database_url"
       SESAME_SESSION_ENCRYPTION_KEY = "session_encryption_key"
       SESAME_SECRETS_ENCRYPTION_KEY = "secrets_encryption_key"
+      SESAME_INTERNAL_TOKEN         = "internal_token"
     }
     admin = merge({
       SESAME_DATABASE_URL           = "database_url"
@@ -161,12 +165,18 @@ resource "aws_ecs_task_definition" "service" {
     image     = local.image[each.key]
     essential = true
 
-    portMappings = [{
+    # Le proxy expose en plus son service interne (8082), joint par le portail seulement.
+    portMappings = concat([{
       name          = each.key
       containerPort = local.ports[each.key]
       protocol      = "tcp"
       appProtocol   = "http"
-    }]
+      }], each.key == "proxy" ? [{
+      name          = "internal"
+      containerPort = 8082
+      protocol      = "tcp"
+      appProtocol   = "http"
+    }] : [])
 
     environment = [for k, v in local.env[each.key] : { name = k, value = v }]
     secrets     = [for k, v in local.secrets[each.key] : { name = k, valueFrom = "${local.secret}:${v}::" }]
@@ -217,9 +227,21 @@ resource "aws_ecs_service" "service" {
   # Migrations de la base au premier démarrage.
   health_check_grace_period_seconds = contains(keys(local.web_services), each.key) ? 60 : null
 
-  # Seul le recorder est appelé en interne (par l'administration) : « recorder:8090 ».
+  # Appels internes : le recorder par l'administration (« recorder:8090 »), le service des
+  # demandes d'accès du proxy par le portail (« proxy-internal:8082 »).
   service_connect_configuration {
     enabled = true
+
+    dynamic "service" {
+      for_each = each.key == "proxy" ? [1] : []
+      content {
+        port_name = "internal"
+        client_alias {
+          dns_name = "proxy-internal"
+          port     = 8082
+        }
+      }
+    }
 
     dynamic "service" {
       for_each = each.key == "recorder" ? [1] : []

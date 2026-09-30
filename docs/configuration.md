@@ -23,6 +23,8 @@ Durées au format `30s`, `15m`, `8h`. Clés de chiffrement : 32 octets aléatoir
 | `SESAME_IDP_PROTOCOL` | `oidc` | Protocole du fournisseur d'identité : `oidc` ou `saml`. Un seul actif par déploiement, le même pour le portail et l'administration (ADR 0024) |
 | `SESAME_ADMIN_URL` | aucun | URL publique de l'UI d'administration. Absente : pas de lien « Administration » sur « Mes applications » |
 | `SESAME_ADMIN_GROUP` | `sesame-admins` | Groupe affiché avec le lien « Administration ». Doit correspondre au `SESAME_ADMIN_GROUP` de l'admin |
+| `SESAME_PROXY_INTERNAL_URL` | aucun | URL du service interne du proxy (ex. `http://proxy:8082`). Avec `SESAME_INTERNAL_TOKEN`, active l'option « J'ai déjà un compte » des demandes d'accès (ADR 0029) ; sans eux, seule « Je n'ai pas de compte » est proposée. Les deux vont ensemble |
+| `SESAME_INTERNAL_TOKEN` 🔒 | aucun | Jeton partagé avec le proxy (`Authorization: Bearer`) pour ce service interne |
 
 ### `SESAME_IDP_PROTOCOL=oidc` (défaut)
 
@@ -71,6 +73,8 @@ Single Logout SAML hors périmètre initial : la déconnexion reste locale au po
 | `SESAME_DESCRIPTORS_DIR` | `descriptors` | Identique au portail |
 | `SESAME_DESCRIPTORS_RELOAD` | `10s` | Identique au portail |
 | `SESAME_REPLAY_DEBUG` | `false` | Conserve, pour chaque compte, la dernière réponse de l'appli lors d'un rejeu en échec (statut, en-têtes, corps tronqué à 64 Ko), consultable dans l'administration (« Voir la réponse de l'appli »). Valeurs du coffre (brutes et encodées) et valeurs des cookies masquées. Activé en dev ; à n'activer en production qu'en connaissance de cause (ADR 0018) |
+| `SESAME_INTERNAL_TOKEN` 🔒 | aucun | Active le **service interne** des demandes d'accès avec identifiants (ADR 0029) : jeton attendu (`Authorization: Bearer`), partagé avec le portail. Absent : service désactivé. Le service écoute sur `SESAME_PROXY_INTERNAL_LISTEN` et n'est **jamais** à exposer par Nginx. Nécessite le coffre PostgreSQL (le proxy y écrit) : avec OpenBao / Vault il répond « non pris en charge » |
+| `SESAME_PROXY_INTERNAL_LISTEN` | `0.0.0.0:8082` | Adresse d'écoute du service interne (seulement si `SESAME_INTERNAL_TOKEN` est défini) |
 | `SESAME_DATABASE_URL` 🔒 | requis | Connexion PostgreSQL |
 | `SESAME_SESSION_ENCRYPTION_KEY` 🔒 | requis | Clé chiffrant les cookies applicatifs au repos |
 | `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre les applis et le coffre |
@@ -110,6 +114,8 @@ En mode `postgres` (par défaut), le rôle PostgreSQL du proxy n'a besoin que du
 | `SESAME_OPENBAO_ROLE_ID`, `SESAME_OPENBAO_SECRET_ID` 🔒 | requis si `openbao`/`vault` | AppRole **de l'admin** (écriture sans lecture) |
 | `SESAME_RECORDER_URL` | aucun | URL du service recorder interne, ex. `http://recorder:8090`. Active le bouton « Analyser une page de login » |
 | `SESAME_RECORDER_TOKEN` 🔒 | aucun | Jeton partagé avec le recorder. Le bouton n'apparaît que si l'URL **et** le jeton sont fournis |
+| `SESAME_SMTP_PASSWORD` 🔒 | aucun | Mot de passe SMTP des notifications par mail (ADR 0030). Le serveur, le port, la sécurité, l'identifiant, l'expéditeur, les destinataires et les événements se règlent dans la console (« Notifications »). Jamais stocké en base ; refusé sans connexion chiffrée |
+| `SESAME_NOTIFY_INTERVAL_SECS` | `30` | Période du worker qui expédie la boîte d'envoi des notifications |
 
 URL de redirection à déclarer chez le fournisseur d'identité : `<SESAME_ADMIN_PUBLIC_URL>/auth/callback`
 (Assertion Consumer Service en SAML aussi ; même chemin, méthode `POST`).

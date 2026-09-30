@@ -25,6 +25,12 @@ resource "random_password" "recorder_token" {
   special = false
 }
 
+# Jeton du service interne du proxy (demandes d'accès avec identifiants, ADR 0029).
+resource "random_password" "internal_token" {
+  length  = 64
+  special = false
+}
+
 resource "aws_secretsmanager_secret" "config" {
   name                    = "${var.name}/config"
   description             = "Sesame : cles de chiffrement, connexion a la base, secrets OIDC"
@@ -40,6 +46,7 @@ resource "aws_secretsmanager_secret_version" "config" {
     secrets_encryption_key    = random_bytes.secrets_encryption_key.base64
     admin_session_key         = random_password.admin_session_key.result
     recorder_token            = random_password.recorder_token.result
+    internal_token            = random_password.internal_token.result
     oidc_portal_client_secret = var.oidc_portal_client_secret
     oidc_admin_client_secret  = var.oidc_admin_client_secret
   })
