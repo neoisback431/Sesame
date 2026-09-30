@@ -110,7 +110,11 @@ color:#fff;font:inherit;text-decoration:none;cursor:pointer}button:hover,a.butto
 form.disconnect{text-align:right;margin-top:4px}\
 button.link{background:none;padding:0;color:var(--muted);font-size:.85em;text-decoration:underline}\
 button.link:hover{background:none;color:var(--navy)}\
-form.logout{margin-top:32px}";
+form.logout{margin-top:32px}\
+.notice{background:#e8f4fb;border:1px solid var(--cyan);border-radius:8px;padding:10px 14px}\
+.card+.card{margin-top:16px}label{display:block;margin:12px 0 4px;font-weight:600}\
+input[type=text],input[type=password],textarea{width:100%;box-sizing:border-box;padding:8px;\
+border:1px solid var(--line);border-radius:6px;font:inherit}.error{color:#a03c00;font-weight:600}";
 
 #[cfg(test)]
 mod tests {

@@ -16,6 +16,8 @@ pub enum AuditAction {
     AppSessionExpired,
     AppLogout,
     AccountStatusChanged,
+    /// Demande d'accès déposée depuis « Mes applications » (ADR 0029).
+    AccessRequested,
     /// Émis par l'UI d'administration.
     AdminLogin,
     CredentialWritten,

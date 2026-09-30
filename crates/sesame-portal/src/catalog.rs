@@ -4,7 +4,7 @@
 use sesame_core::descriptor::AppDescriptor;
 use sesame_core::html::{escape, page};
 use sesame_core::identity::UserIdentity;
-use sesame_core::ports::{AccountStatus, AppAccount};
+use sesame_core::ports::{AccessRequest, AccessRequestKind, AccountStatus, AppAccount};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileState {
@@ -12,8 +12,12 @@ pub enum TileState {
     Active,
     /// Dernier rejeu en échec : tuile affichée mais signalée, non cliquable.
     Failed,
-    /// Habilité mais sans compte : tuile grisée, non cliquable.
+    /// Habilité mais sans compte : tuile grisée, non cliquable, avec « Demander l'accès » (ADR 0029).
     NoAccount,
+    /// Identifiants fournis, en attente d'activation par un administrateur : tuile grisée.
+    PendingApproval,
+    /// Demande « je n'ai pas de compte » ouverte : un administrateur doit créer le compte.
+    Requested,
 }
 
 #[derive(Debug)]
@@ -23,11 +27,13 @@ pub struct Tile<'a> {
 }
 
 /// Habilité (descripteur). `disabled` est masqué ; `active` et `failed` affichés normalement ;
-/// sans compte, affiché grisé (voir ADR 0022) plutôt que masqué.
+/// sans compte, affiché grisé (voir ADR 0022) plutôt que masqué ; une demande d'accès en cours
+/// (ADR 0029) est signalée sur la tuile grisée.
 pub fn tiles<'a>(
     descriptors: &'a [AppDescriptor],
     user: &UserIdentity,
     accounts: &[AppAccount],
+    requests: &[AccessRequest],
 ) -> Vec<Tile<'a>> {
     descriptors
         .iter()
@@ -38,12 +44,32 @@ pub fn tiles<'a>(
                     AccountStatus::Active => TileState::Active,
                     AccountStatus::Failed => TileState::Failed,
                     AccountStatus::Disabled => return None,
+                    AccountStatus::Pending => TileState::PendingApproval,
                 },
+                None if requests
+                    .iter()
+                    .any(|r| r.app_id == d.metadata.id && r.kind == AccessRequestKind::NoAccount) =>
+                {
+                    TileState::Requested
+                }
                 None => TileState::NoAccount,
             };
             Some(Tile { descriptor: d, state })
         })
         .collect()
+}
+
+/// Messages de retour d'une demande d'accès, désignés par un code fixe dans l'URL
+/// (`/?request=<code>`) : aucun texte fourni par l'appelant n'est jamais affiché.
+pub fn notice_text(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "credentials" => {
+            "Vos identifiants sont enregistrés. Un administrateur doit maintenant activer votre compte."
+        }
+        "no_account" => "Votre demande est transmise : un administrateur va créer votre compte.",
+        "exists" => "Un compte existe déjà pour vous sur cette application : aucune demande n'a été créée.",
+        _ => return None,
+    })
 }
 
 /// Initiale affichée dans la pastille de la tuile.
@@ -56,18 +82,26 @@ fn initial(name: &str) -> String {
 
 /// `admin_url` : lien « Administration » affiché aux membres du groupe d'administrateurs
 /// (`SESAME_ADMIN_URL` configurée et utilisateur dans `SESAME_ADMIN_GROUP`), `None` sinon.
+/// `notice` : code d'un message de retour d'une demande d'accès (voir [`notice_text`]).
 pub fn render(
     user: &UserIdentity,
     tiles: &[Tile<'_>],
     scheme: &str,
     portal_url: &str,
     admin_url: Option<&str>,
+    notice: Option<&str>,
 ) -> String {
     let name = user.display_name.as_deref().unwrap_or(&user.user_key);
     let mut body = format!(
         "<h1>Mes applications</h1><p class=\"muted\">Connecté en tant que {}</p>",
         escape(name)
     );
+    if let Some(text) = notice.and_then(notice_text) {
+        body.push_str(&format!(
+            "<p class=\"notice\" role=\"status\">{}</p>",
+            escape(text)
+        ));
+    }
     if let Some(url) = admin_url {
         body.push_str(&format!(
             "<p><a class=\"button\" href=\"{}\">Administration</a></p>",
@@ -97,9 +131,24 @@ pub fn render(
                 TileState::NoAccount => body.push_str(&format!(
                     "<li class=\"tile\"><div class=\"unavailable\"><span class=\"ico\" aria-hidden=\"true\">{}</span><span>\
 <strong>{}</strong><br>{desc}<br>\
-<span class=\"muted\">Vous n'avez pas de compte sur cette application.</span></span></div></li>",
+<span class=\"muted\">Vous n'avez pas de compte sur cette application.</span></span></div>\
+<form class=\"disconnect\" method=\"get\" action=\"/apps/{}/request\">\
+<button type=\"submit\" class=\"link\">Demander l'accès</button></form></li>",
                     escape(&initial(&d.metadata.name)),
-                    escape(&d.metadata.name)
+                    escape(&d.metadata.name),
+                    escape(&d.metadata.id),
+                )),
+                TileState::PendingApproval | TileState::Requested => body.push_str(&format!(
+                    "<li class=\"tile\"><div class=\"unavailable\"><span class=\"ico\" aria-hidden=\"true\">{}</span><span>\
+<strong>{}</strong><br>{desc}<br>\
+<span class=\"muted\">{}</span></span></div></li>",
+                    escape(&initial(&d.metadata.name)),
+                    escape(&d.metadata.name),
+                    if t.state == TileState::PendingApproval {
+                        "Demande en cours : un administrateur doit activer votre compte."
+                    } else {
+                        "Demande envoyée : un administrateur va créer votre compte."
+                    },
                 )),
                 TileState::Active => body.push_str(&format!(
                     "<li class=\"tile\"><a href=\"{scheme}://{}{}\" target=\"_blank\" rel=\"noopener noreferrer\">\
@@ -152,19 +201,22 @@ mod tests {
     fn requires_access_shows_state_by_account() {
         let ds = vec![AppDescriptor::from_yaml(FAKE_APP).unwrap()];
         let active = [account(AccountStatus::Active)];
-        assert_eq!(tiles(&ds, &user(&["fake-app-users"]), &active).len(), 1);
-        assert!(tiles(&ds, &user(&["autre"]), &active).is_empty(), "non habilité");
+        assert_eq!(tiles(&ds, &user(&["fake-app-users"]), &active, &[]).len(), 1);
+        assert!(
+            tiles(&ds, &user(&["autre"]), &active, &[]).is_empty(),
+            "non habilité"
+        );
 
         // Habilité mais sans compte : grisé, pas masqué (ADR 0022).
-        let sans_compte = tiles(&ds, &user(&["fake-app-users"]), &[]);
+        let sans_compte = tiles(&ds, &user(&["fake-app-users"]), &[], &[]);
         assert_eq!(sans_compte.len(), 1);
         assert_eq!(sans_compte[0].state, TileState::NoAccount);
 
         let disabled = [account(AccountStatus::Disabled)];
-        assert!(tiles(&ds, &user(&["fake-app-users"]), &disabled).is_empty());
+        assert!(tiles(&ds, &user(&["fake-app-users"]), &disabled, &[]).is_empty());
         let failed = [account(AccountStatus::Failed)];
         assert_eq!(
-            tiles(&ds, &user(&["fake-app-users"]), &failed)[0].state,
+            tiles(&ds, &user(&["fake-app-users"]), &failed, &[])[0].state,
             TileState::Failed
         );
     }
@@ -176,9 +228,10 @@ mod tests {
         let active = [account(AccountStatus::Active)];
         let html = render(
             &u,
-            &tiles(&ds, &u, &active),
+            &tiles(&ds, &u, &active, &[]),
             "https",
             "https://sesame.test/",
+            None,
             None,
         );
         assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/\""));
@@ -198,9 +251,10 @@ mod tests {
         let ds = vec![d];
         let html = render(
             &u,
-            &tiles(&ds, &u, &active),
+            &tiles(&ds, &u, &active, &[]),
             "https",
             "https://sesame.test/",
+            None,
             None,
         );
         assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/chat?a=1&amp;b=&quot;x\""));
@@ -213,8 +267,8 @@ mod tests {
     fn renders_grayed_tile_without_account() {
         let ds = vec![AppDescriptor::from_yaml(FAKE_APP).unwrap()];
         let u = user(&["fake-app-users"]);
-        let t = tiles(&ds, &u, &[]);
-        let html = render(&u, &t, "https", "https://sesame.test/", None);
+        let t = tiles(&ds, &u, &[], &[]);
+        let html = render(&u, &t, "https", "https://sesame.test/", None, None);
         assert!(html.contains("class=\"unavailable\""));
         assert!(html.contains("Vous n'avez pas de compte sur cette application."));
         // Grisée, non cliquable : pas de lien vers l'appli ni de bouton de déconnexion.
@@ -227,14 +281,61 @@ mod tests {
         let ds = vec![AppDescriptor::from_yaml(FAKE_APP).unwrap()];
         let u = user(&["fake-app-users"]);
         let active = [account(AccountStatus::Active)];
-        let t = tiles(&ds, &u, &active);
+        let t = tiles(&ds, &u, &active, &[]);
         let html = render(
             &u,
             &t,
             "https",
             "https://sesame.test/",
             Some("https://admin.sesame.test/"),
+            None,
         );
         assert!(html.contains("<a class=\"button\" href=\"https://admin.sesame.test/\">Administration</a>"));
+    }
+
+    #[test]
+    fn access_request_states_and_notices() {
+        let ds = vec![AppDescriptor::from_yaml(FAKE_APP).unwrap()];
+        let u = user(&["fake-app-users"]);
+        let request = |kind| AccessRequest {
+            app_id: "fake-app".into(),
+            user_key: "alice".into(),
+            kind,
+            note: None,
+            created_at: std::time::SystemTime::now(),
+        };
+
+        // Sans compte ni demande : bouton « Demander l'accès » vers le formulaire du portail.
+        let t = tiles(&ds, &u, &[], &[]);
+        let html = render(&u, &t, "https", "https://sesame.test/", None, None);
+        assert!(html.contains("action=\"/apps/fake-app/request\""));
+        assert!(html.contains("Demander l'accès"));
+
+        // Demande « sans compte » ouverte : grisé, plus de bouton.
+        let t = tiles(&ds, &u, &[], &[request(AccessRequestKind::NoAccount)]);
+        assert_eq!(t[0].state, TileState::Requested);
+        let html = render(&u, &t, "https", "https://sesame.test/", None, None);
+        assert!(!html.contains("action=\"/apps/fake-app/request\""));
+        assert!(html.contains("Demande envoyée"));
+
+        // Compte en attente d'activation (identifiants fournis).
+        let t = tiles(&ds, &u, &[account(AccountStatus::Pending)], &[]);
+        assert_eq!(t[0].state, TileState::PendingApproval);
+        let html = render(&u, &t, "https", "https://sesame.test/", None, None);
+        assert!(html.contains("Demande en cours"));
+        assert!(!html.contains("href=\"https://fake-app.sesame.localhost:8443/\""));
+
+        // Message de retour : code fixe uniquement, jamais de texte de l'appelant.
+        let html = render(&u, &t, "https", "https://sesame.test/", None, Some("credentials"));
+        assert!(html.contains("class=\"notice\""));
+        let html = render(
+            &u,
+            &t,
+            "https",
+            "https://sesame.test/",
+            None,
+            Some("<script>x</script>"),
+        );
+        assert!(!html.contains("class=\"notice\"") && !html.contains("<script>x"));
     }
 }

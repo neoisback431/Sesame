@@ -10,8 +10,15 @@
 //!   puis, si activée, déconnexion chez le fournisseur d'identité ;
 //! - `GET /auth/logged-out` : page de confirmation (retour du fournisseur).
 //!
-//! Le portail n'accède jamais au coffre de secrets.
+//! - `GET /apps/<id>/request`, `POST /apps/<id>/request/{credentials,no-account}` : demandes
+//!   d'accès depuis une tuile grisée (ADR 0029).
+//!
+//! Le portail n'accède jamais au coffre de secrets : les identifiants d'une demande sont relayés
+//! au moteur de proxy (service interne), qui les vérifie et les écrit.
 
+pub mod access;
+#[cfg(test)]
+mod access_tests;
 pub mod catalog;
 pub mod config;
 pub mod idp;
@@ -34,7 +41,7 @@ use sesame_core::crypto::{hash_token, new_token, CookieCipher};
 use sesame_core::descriptor::AppDescriptor;
 use sesame_core::html::error_page;
 use sesame_core::identity::UserIdentity;
-use sesame_core::ports::{AccountRegistry, AuditSink, PortalSession, SessionStore};
+use sesame_core::ports::{AccessRequests, AccountRegistry, AuditSink, Notifier, PortalSession, SessionStore};
 use sesame_core::secret::ExposeSecret;
 use url::Url;
 
@@ -54,6 +61,12 @@ pub struct Portal {
     pub state_cipher: CookieCipher,
     pub sessions: Arc<dyn SessionStore>,
     pub accounts: Arc<dyn AccountRegistry>,
+    /// Demandes d'accès (ADR 0029).
+    pub access: Arc<dyn AccessRequests>,
+    /// Signalement aux administrateurs (ADR 0030).
+    pub notifier: Arc<dyn Notifier>,
+    /// Service interne du proxy pour « j'ai déjà un compte » ; absent : option non proposée.
+    pub proxy_internal: Option<access::ProxyInternal>,
     pub audit: Arc<dyn AuditSink>,
     /// Lien « Administration » sur la page « Mes applications », pour `admin_group`.
     pub admin_url: Option<Url>,
@@ -71,6 +84,15 @@ pub fn router(portal: Arc<Portal>) -> Router {
         .route("/auth/logout", post(logout))
         .route("/auth/logged-out", get(logged_out))
         .route("/apps/{app_id}/disconnect", post(disconnect_app))
+        .route("/apps/{app_id}/request", get(access::form))
+        .route(
+            "/apps/{app_id}/request/credentials",
+            post(access::submit_credentials),
+        )
+        .route(
+            "/apps/{app_id}/request/no-account",
+            post(access::submit_no_account),
+        )
         .route("/static/{name}", get(static_asset))
         .route(
             "/healthz",
@@ -219,7 +241,13 @@ impl Portal {
     }
 }
 
-async fn home(State(p): State<AppState>, headers: HeaderMap) -> Response {
+#[derive(Deserialize)]
+struct HomeQuery {
+    /// Code d'un message de retour d'une demande d'accès (liste fixe, voir `catalog::notice_text`).
+    request: Option<String>,
+}
+
+async fn home(State(p): State<AppState>, headers: HeaderMap, Query(q): Query<HomeQuery>) -> Response {
     let Some(session) = p.current_session(&headers).await else {
         return p.start_login(p.public_url.to_string());
     };
@@ -236,8 +264,15 @@ async fn home(State(p): State<AppState>, headers: HeaderMap) -> Response {
             );
         }
     };
+    let requests = match p.access.open_for_user(&session.user.user_key).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, correlation_id = %cid, "demandes d'accès illisibles");
+            Vec::new()
+        }
+    };
     let descriptors = p.descriptors();
-    let tiles = catalog::tiles(&descriptors, &session.user, &accounts);
+    let tiles = catalog::tiles(&descriptors, &session.user, &accounts, &requests);
     let admin_url = p
         .admin_url
         .as_ref()
@@ -249,6 +284,7 @@ async fn home(State(p): State<AppState>, headers: HeaderMap) -> Response {
         p.public_url.scheme(),
         p.public_url.as_str(),
         admin_url,
+        q.request.as_deref(),
     );
     ([(CACHE_CONTROL, "no-store")], Html(html)).into_response()
 }

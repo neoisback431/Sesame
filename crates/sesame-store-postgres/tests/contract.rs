@@ -66,6 +66,17 @@ async fn diagnostic_store_contract() {
     contract::diagnostic_store(&store, "app1", &user).await;
 }
 
+#[tokio::test]
+async fn access_requests_contract() {
+    let Some(store) = store().await else {
+        eprintln!("SESAME_TEST_DATABASE_URL absente : test ignoré");
+        return;
+    };
+    let (fresh, existing) = (unique("nouveau"), unique("titulaire"));
+    store.seed_account("app1", &existing).await.unwrap();
+    contract::access_requests(&store, &store, "app1", &fresh, &existing).await;
+}
+
 // Coffre de secrets PostgreSQL (ADR 0021). SecretStore n'expose que la lecture (seul
 // le proxy le lit) : le seed passe par `put_credential`, réservé aux tests et au dev.
 #[tokio::test]
@@ -105,4 +116,50 @@ async fn postgres_secret_store() {
         secrets.get_credential("app1", &user).await,
         Err(PortError::NotFound)
     ));
+}
+
+#[tokio::test]
+async fn notifier_groups_repeated_events() {
+    use sesame_core::ports::{NotificationEvent, Notifier};
+    let Some(store) = store().await else {
+        eprintln!("SESAME_TEST_DATABASE_URL absente : test ignoré");
+        return;
+    };
+    let app = unique("notif");
+    for _ in 0..3 {
+        store
+            .notify(
+                NotificationEvent::UpstreamUnreachable,
+                &app,
+                None,
+                "upstream_unreachable",
+            )
+            .await;
+    }
+    store
+        .notify(
+            NotificationEvent::AccountFailed,
+            &app,
+            Some("alice"),
+            "login_rejected",
+        )
+        .await;
+    store
+        .notify(
+            NotificationEvent::AccountFailed,
+            &app,
+            Some("bob"),
+            "login_rejected",
+        )
+        .await;
+    store
+        .notify(
+            NotificationEvent::AccountFailed,
+            &app,
+            Some("bob"),
+            "login_rejected",
+        )
+        .await;
+    let n = store.count_notifications(&app).await;
+    assert_eq!(n, 3, "une par (événement, appli, utilisateur) sur la fenêtre");
 }
