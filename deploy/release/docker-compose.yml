@@ -37,6 +37,9 @@ services:
       SESAME_OIDC_CLIENT_SECRET: ${SESAME_OIDC_PORTAL_CLIENT_SECRET:?SESAME_OIDC_PORTAL_CLIENT_SECRET manquant dans .env}
       SESAME_OIDC_USER_KEY_CLAIM: ${SESAME_OIDC_USER_KEY_CLAIM:-sub}
       SESAME_OIDC_GROUPS_CLAIM: ${SESAME_OIDC_GROUPS_CLAIM:-groups}
+      # Demandes d'accès avec identifiants (ADR 0029) : relais vers le service interne du proxy.
+      SESAME_PROXY_INTERNAL_URL: http://proxy:8082
+      SESAME_INTERNAL_TOKEN: ${SESAME_INTERNAL_TOKEN:?lancez ./generate-keys.sh}
     depends_on:
       postgres: { condition: service_healthy }
     restart: unless-stopped
@@ -49,6 +52,8 @@ services:
       SESAME_DATABASE_URL: postgres://sesame:${POSTGRES_PASSWORD}@postgres:5432/sesame
       SESAME_SESSION_ENCRYPTION_KEY: ${SESAME_SESSION_ENCRYPTION_KEY:?lancez ./generate-keys.sh}
       SESAME_SECRETS_ENCRYPTION_KEY: ${SESAME_SECRETS_ENCRYPTION_KEY:?lancez ./generate-keys.sh}
+      # Service interne des demandes d'accès (ADR 0029), jamais exposé par Nginx.
+      SESAME_INTERNAL_TOKEN: ${SESAME_INTERNAL_TOKEN:?lancez ./generate-keys.sh}
       # Mise au point d'une appli : réponse de l'appli au dernier rejeu en échec, visible
       # dans l'admin (valeurs sensibles masquées).
       SESAME_REPLAY_DEBUG: ${SESAME_REPLAY_DEBUG:-false}
@@ -72,6 +77,8 @@ services:
       SESAME_SECRETS_ENCRYPTION_KEY: ${SESAME_SECRETS_ENCRYPTION_KEY}
       SESAME_RECORDER_URL: http://recorder:8090
       SESAME_RECORDER_TOKEN: ${SESAME_RECORDER_TOKEN:?lancez ./generate-keys.sh}
+      # Notifications par mail (ADR 0030) : le reste se règle dans la console.
+      SESAME_SMTP_PASSWORD: ${SESAME_SMTP_PASSWORD:-}
     depends_on:
       postgres: { condition: service_healthy }
       # Le schéma de la base est créé par le portail et le proxy au démarrage.

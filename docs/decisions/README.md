@@ -32,3 +32,5 @@ Une fiche par décision structurante : contexte, décision, conséquences. Une d
 | [0026](0026-compose-sesame-seul-keycloak-facultatif.md) | Docker Compose : Sesame seul par défaut, Keycloak facultatif | 2026-09-28 |
 | [0027](0027-kit-de-deploiement.md) | Kit de déploiement release (`deploy/release/`) | 2026-09-28 |
 | [0028](0028-kit-aws-terraform.md) | Kit de déploiement AWS (Terraform, ECS Fargate, RDS) | 2026-09-28 |
+| [0029](0029-demandes-d-acces.md) | Demandes d'accès depuis « Mes applications » | 2026-09-30 |
+| [0030](0030-notifications-mail.md) | Notifications par mail aux administrateurs | 2026-09-30 |
