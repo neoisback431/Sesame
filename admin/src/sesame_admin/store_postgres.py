@@ -14,11 +14,14 @@ import asyncpg
 from .crypto import SecretCipher, field_aad
 from .identity import valid_user_key
 from .ports import (
+    AccessRequest,
     Account,
     Conflict,
     DescriptorRevision,
     Diagnostic,
     NotFound,
+    Notification,
+    NotificationSettings,
     Status,
     StoredDescriptor,
     Unavailable,
@@ -187,6 +190,183 @@ def _conflict(e: asyncpg.UniqueViolationError) -> Conflict:
     if "public_host" in (e.constraint_name or ""):
         return Conflict("hôte public déjà utilisé")
     return Conflict("identifiant déjà utilisé")
+
+
+class PostgresNotificationStore:
+    """Réglages et boîte d'envoi des notifications (ADR 0030)."""
+
+    def __init__(self, db: str | PgPool) -> None:
+        self._db = db if isinstance(db, PgPool) else PgPool(db)
+
+    def __repr__(self) -> str:
+        return "PostgresNotificationStore()"
+
+    async def pool(self) -> asyncpg.Pool:
+        return await self._db.get()
+
+    async def close(self) -> None:
+        await self._db.close()
+
+    async def get_settings(self) -> NotificationSettings:
+        r = await (await self.pool()).fetchrow("SELECT * FROM notification_settings WHERE id = 1")
+        if r is None:
+            return NotificationSettings()
+        return NotificationSettings(
+            enabled=r["enabled"],
+            smtp_host=r["smtp_host"],
+            smtp_port=r["smtp_port"],
+            smtp_security=r["smtp_security"],
+            smtp_user=r["smtp_user"],
+            from_address=r["from_address"],
+            recipients=tuple(r["recipients"]),
+            events=tuple(r["events"]),
+            updated_at=r["updated_at"],
+            updated_by=r["updated_by"],
+        )
+
+    async def save_settings(self, s: NotificationSettings, by: str) -> None:
+        await (await self.pool()).execute(
+            """INSERT INTO notification_settings
+                 (id, enabled, smtp_host, smtp_port, smtp_security, smtp_user, from_address,
+                  recipients, events, updated_at, updated_by)
+               VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, now(), $9)
+               ON CONFLICT (id) DO UPDATE SET enabled = $1, smtp_host = $2, smtp_port = $3,
+                 smtp_security = $4, smtp_user = $5, from_address = $6, recipients = $7,
+                 events = $8, updated_at = now(), updated_by = $9""",
+            s.enabled,
+            s.smtp_host,
+            s.smtp_port,
+            s.smtp_security,
+            s.smtp_user,
+            s.from_address,
+            list(s.recipients),
+            list(s.events),
+            by,
+        )
+
+    async def enqueue(
+        self, event: str, app_id: str | None, user_key: str | None, reason: str | None, actor: str | None
+    ) -> None:
+        await (await self.pool()).execute(
+            "INSERT INTO notifications (event, app_id, user_key, reason, actor) VALUES ($1, $2, $3, $4, $5)",
+            event,
+            app_id,
+            user_key,
+            reason,
+            actor,
+        )
+
+    @staticmethod
+    def _notification(r: asyncpg.Record) -> Notification:
+        return Notification(
+            r["id"],
+            r["event"],
+            r["app_id"],
+            r["user_key"],
+            r["reason"],
+            r["actor"],
+            r["status"],
+            r["attempts"],
+            r["last_error"],
+            r["created_at"],
+            r["sent_at"],
+        )
+
+    async def claim_pending(self, limit: int) -> list[Notification]:
+        rows = await (await self.pool()).fetch(
+            """UPDATE notifications SET next_attempt_at = now() + interval '5 minutes'
+               WHERE id IN (SELECT id FROM notifications
+                            WHERE status = 'pending' AND next_attempt_at <= now()
+                            ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED)
+               RETURNING *""",
+            limit,
+        )
+        return sorted((self._notification(r) for r in rows), key=lambda n: n.id)
+
+    async def mark(self, notification_id: int, status: str, error: str | None) -> None:
+        pool = await self.pool()
+        if status == "retry":
+            await pool.execute(
+                """UPDATE notifications SET attempts = attempts + 1, last_error = $2,
+                       next_attempt_at = now() + make_interval(mins => power(2, attempts)::int)
+                   WHERE id = $1""",
+                notification_id,
+                error,
+            )
+        else:
+            await pool.execute(
+                """UPDATE notifications SET status = $2, last_error = $3,
+                       attempts = attempts + CASE WHEN $2 = 'failed' THEN 1 ELSE 0 END,
+                       sent_at = CASE WHEN $2 = 'sent' THEN now() ELSE sent_at END
+                   WHERE id = $1""",
+                notification_id,
+                status,
+                error,
+            )
+
+    async def recent(self, limit: int) -> list[Notification]:
+        rows = await (await self.pool()).fetch("SELECT * FROM notifications ORDER BY id DESC LIMIT $1", limit)
+        return [self._notification(r) for r in rows]
+
+    async def purge(self, older_than_days: int) -> int:
+        done = await (await self.pool()).execute(
+            """DELETE FROM notifications
+               WHERE status <> 'pending' AND created_at < now() - make_interval(days => $1)""",
+            older_than_days,
+        )
+        return int(done.rsplit(" ", 1)[-1])
+
+
+class PostgresAccessRequestStore:
+    """Demandes d'accès : lecture et clôture seulement, le dépôt vient du portail et du proxy."""
+
+    def __init__(self, db: str | PgPool) -> None:
+        self._db = db if isinstance(db, PgPool) else PgPool(db)
+
+    def __repr__(self) -> str:
+        return "PostgresAccessRequestStore()"
+
+    async def pool(self) -> asyncpg.Pool:
+        return await self._db.get()
+
+    async def close(self) -> None:
+        await self._db.close()
+
+    @staticmethod
+    def _request(r: asyncpg.Record) -> AccessRequest:
+        return AccessRequest(r["app_id"], r["user_key"], r["kind"], r["note"], r["created_at"])
+
+    async def list_open(self) -> list[AccessRequest]:
+        rows = await (await self.pool()).fetch(
+            """SELECT app_id, user_key, kind, note, created_at FROM access_requests
+               WHERE status = 'open' ORDER BY created_at"""
+        )
+        return [self._request(r) for r in rows]
+
+    async def get_open(self, app_id: str, user_key: str) -> AccessRequest | None:
+        r = await (await self.pool()).fetchrow(
+            """SELECT app_id, user_key, kind, note, created_at FROM access_requests
+               WHERE app_id = $1 AND user_key = $2 AND status = 'open'""",
+            app_id,
+            user_key,
+        )
+        return self._request(r) if r else None
+
+    async def count_open(self) -> int:
+        return int(
+            await (await self.pool()).fetchval("SELECT count(*) FROM access_requests WHERE status = 'open'")
+        )
+
+    async def resolve(self, app_id: str, user_key: str, status: str, by: str) -> bool:
+        done = await (await self.pool()).execute(
+            """UPDATE access_requests SET status = $3, resolved_at = now(), resolved_by = $4
+               WHERE app_id = $1 AND user_key = $2 AND status = 'open'""",
+            app_id,
+            user_key,
+            status,
+            by,
+        )
+        return not done.endswith(" 0")
 
 
 class PostgresDescriptorStore:

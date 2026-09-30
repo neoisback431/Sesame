@@ -1,0 +1,76 @@
+{# SPDX-License-Identifier: Apache-2.0 #}
+{% extends "base.html" %}
+{% block title %}Notifications{% endblock %}
+{% block content %}
+<h1>Notifications par mail</h1>
+<p class="muted">Signalement des événements aux administrateurs (ADR 0030). Les mails ne contiennent aucun
+  identifiant applicatif : seulement l'événement, l'application, l'utilisateur et un motif court.</p>
+{% if errors %}<ul class="errors">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+<form method="post" action="/settings/notifications" class="card" autocomplete="off">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label><input type="checkbox" name="enabled" value="1" {% if s.enabled %}checked{% endif %}>
+    Activer l'envoi de notifications</label>
+
+  <h2>Serveur SMTP</h2>
+  <div class="grid">
+    <div><label for="smtp_host">Serveur</label>
+      <input type="text" id="smtp_host" name="smtp_host" value="{{ s.smtp_host }}" placeholder="smtp.example.org"></div>
+    <div><label for="smtp_port">Port</label>
+      <input type="text" id="smtp_port" name="smtp_port" value="{{ s.smtp_port }}" inputmode="numeric"></div>
+    <div><label for="smtp_security">Sécurité</label>
+      <select id="smtp_security" name="smtp_security">
+        {% for value, label in [("starttls", "STARTTLS (587)"), ("tls", "TLS implicite (465)"), ("none", "Aucune (relais interne sans authentification)")] %}
+        <option value="{{ value }}" {% if s.smtp_security == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select></div>
+    <div><label for="smtp_user">Identifiant (facultatif)</label>
+      <input type="text" id="smtp_user" name="smtp_user" value="{{ s.smtp_user }}"></div>
+  </div>
+  <p class="muted">Mot de passe SMTP :
+    {% if password_set %}<strong>défini</strong> (variable d'environnement <code>SESAME_SMTP_PASSWORD</code> de l'admin).
+    {% else %}<strong>non défini</strong> : à fournir par la variable d'environnement <code>SESAME_SMTP_PASSWORD</code>
+      de l'admin ; il n'est jamais stocké en base ni affiché ici.{% endif %}
+    Le mot de passe n'est envoyé que sur une connexion chiffrée.</p>
+
+  <h2>Expéditeur et destinataires</h2>
+  <label for="from_address">Adresse d'expédition</label>
+  <input type="text" id="from_address" name="from_address" value="{{ s.from_address }}" placeholder="sesame@example.org">
+  <label for="recipients">Destinataires (un par ligne, ou séparés par des virgules)</label>
+  <textarea id="recipients" name="recipients" rows="3">{{ s.recipients | join("\n") }}</textarea>
+
+  <h2>Événements notifiés</h2>
+  {% for key, label, help in events %}
+  <label><input type="checkbox" name="events" value="{{ key }}" {% if key in s.events %}checked{% endif %}>
+    {{ label }} <span class="muted">— {{ help }}</span></label>
+  {% endfor %}
+
+  <p><button type="submit">Enregistrer</button></p>
+  {% if s.updated_at %}<p class="muted">Dernière modification {{ s.updated_at.strftime("%Y-%m-%d %H:%M") }}{% if s.updated_by %} par <code>{{ s.updated_by }}</code>{% endif %}.</p>{% endif %}
+</form>
+
+<form method="post" action="/settings/notifications/test" class="card">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <h2>Mail de test</h2>
+  <p class="muted">Envoie un message aux destinataires enregistrés ci-dessus (enregistrez d'abord vos modifications).</p>
+  <button type="submit">Envoyer un mail de test</button>
+</form>
+
+<h2>Envois récents</h2>
+<table>
+  <thead><tr><th>Date</th><th>Événement</th><th>Application</th><th>Utilisateur</th><th>État</th></tr></thead>
+  <tbody>
+  {% for n in recent %}
+    <tr>
+      <td>{{ n.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+      <td>{{ labels.get(n.event, n.event) }}<br><span class="muted">{{ n.reason or "" }}</span></td>
+      <td>{{ n.app_id or "—" }}</td>
+      <td>{{ n.user_key or "—" }}</td>
+      <td>{{ {"pending": "en attente", "sent": "envoyé", "failed": "abandonné", "skipped": "ignoré"}[n.status] }}
+        {% if n.last_error %}<br><span class="muted">{{ n.last_error }}</span>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5">Aucune notification.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -54,7 +54,7 @@
   {% for a in accounts %}
     <tr>
       <td><code>{{ a.user_key }}</code></td>
-      <td><span class="status {{ a.status }}">{{ {"active": "actif", "failed": "en échec", "disabled": "désactivé"}[a.status] }}</span>
+      <td><span class="status {{ a.status }}">{{ {"active": "actif", "failed": "en échec", "disabled": "désactivé", "pending": "en attente"}[a.status] }}</span>
         {% if a.status_reason %}<br><span class="muted">{{ a.status_reason }}</span>{% endif %}
         {% if a.status == "failed" %}<br><a href="/apps/{{ app.id }}/accounts/{{ a.user_key }}/diagnostic">Voir la réponse de l'appli</a>{% endif %}</td>
       <td>{{ a.last_login_at.strftime("%Y-%m-%d %H:%M") if a.last_login_at else "—" }}</td>
@@ -63,6 +63,10 @@
         <form class="inline" method="post" action="/apps/{{ app.id }}/accounts/{{ a.user_key }}/status">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="status" value="disabled">
           <button type="submit">Désactiver</button></form>
+        {% elif a.status == "pending" %}
+        <form class="inline" method="post" action="/apps/{{ app.id }}/accounts/{{ a.user_key }}/status">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="status" value="active">
+          <button type="submit">Activer</button></form>
         {% else %}
         <form class="inline" method="post" action="/apps/{{ app.id }}/accounts/{{ a.user_key }}/status">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="status" value="active">
@@ -86,7 +90,7 @@
   <form method="post" action="/apps/{{ app.id }}/accounts" autocomplete="off">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="user_key">Utilisateur Sesame</label>
-    <input type="text" id="user_key" name="user_key" list="known-users" autocomplete="off"
+    <input type="text" id="user_key" name="user_key" list="known-users" autocomplete="off" value="{{ prefill_user }}"
       placeholder="commencez à taper un utilisateur connu" required>
     <datalist id="known-users">
       {% for u in known_users %}<option value="{{ u }}">{% endfor %}
