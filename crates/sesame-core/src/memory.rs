@@ -3,15 +3,17 @@
 //! Aucune persistance, aucun chiffrement : ne pas utiliser en production.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use async_trait::async_trait;
 
 use crate::audit::AuditEvent;
 use crate::ports::{
-    AccountRegistry, AccountStatus, AppAccount, AppSession, AuditSink, DescriptorStore, DiagnosticStore,
-    PortError, PortResult, PortalSession, ReplayDiagnostic, SecretStore, SessionStore, StoredDescriptor,
+    AccessRequest, AccessRequestKind, AccessRequests, AccountRegistry, AccountStatus, AppAccount, AppSession,
+    AuditSink, DescriptorStore, DiagnosticStore, NotificationEvent, Notifier, PortError, PortResult,
+    PortalSession, ReplayDiagnostic, SecretStore, SecretWriter, SessionStore, StoredDescriptor,
+    SubmitOutcome,
 };
 use crate::secret::{Credential, ExposeSecret, SecretString};
 
@@ -213,6 +215,114 @@ impl SecretStore for MemorySecretStore {
                 .map(|(k, v)| (k.clone(), SecretString::from(v.as_str())))
                 .collect(),
         ))
+    }
+}
+
+#[async_trait]
+impl SecretWriter for MemorySecretStore {
+    async fn put_credential(&self, app_id: &str, user_key: &str, credential: &Credential) -> PortResult<()> {
+        let fields = credential
+            .keys()
+            .filter_map(|k| {
+                credential
+                    .get(k)
+                    .map(|v| (k.to_owned(), v.expose_secret().to_owned()))
+            })
+            .collect();
+        locked(&self.entries).insert((app_id.into(), user_key.into()), fields);
+        Ok(())
+    }
+}
+
+/// Demandes d'accès en mémoire, adossées au registre des comptes en mémoire.
+pub struct MemoryAccessRequests {
+    accounts: Arc<MemoryAccountRegistry>,
+    requests: Mutex<HashMap<(String, String), AccessRequest>>,
+}
+
+impl MemoryAccessRequests {
+    pub fn new(accounts: Arc<MemoryAccountRegistry>) -> Self {
+        Self {
+            accounts,
+            requests: Mutex::default(),
+        }
+    }
+}
+
+#[async_trait]
+impl AccessRequests for MemoryAccessRequests {
+    async fn submit(
+        &self,
+        app_id: &str,
+        user_key: &str,
+        kind: AccessRequestKind,
+        note: Option<&str>,
+    ) -> PortResult<SubmitOutcome> {
+        let existing = self.accounts.get_account(app_id, user_key).await?;
+        match (existing.map(|a| a.status), kind) {
+            (None, AccessRequestKind::NoAccount) => {}
+            (None | Some(AccountStatus::Pending), AccessRequestKind::Credentials) => {
+                self.accounts.upsert(AppAccount {
+                    app_id: app_id.into(),
+                    user_key: user_key.into(),
+                    status: AccountStatus::Pending,
+                    status_reason: Some("access_request".into()),
+                    last_login_at: None,
+                });
+            }
+            _ => return Ok(SubmitOutcome::AccountExists),
+        }
+        locked(&self.requests).insert(
+            (app_id.into(), user_key.into()),
+            AccessRequest {
+                app_id: app_id.into(),
+                user_key: user_key.into(),
+                kind,
+                note: note.map(str::to_owned),
+                created_at: SystemTime::now(),
+            },
+        );
+        Ok(SubmitOutcome::Recorded)
+    }
+
+    async fn withdraw(&self, app_id: &str, user_key: &str) -> PortResult<()> {
+        locked(&self.requests).remove(&(app_id.to_owned(), user_key.to_owned()));
+        if let Some(a) = self.accounts.get_account(app_id, user_key).await? {
+            if a.status == AccountStatus::Pending {
+                locked(&self.accounts.accounts).remove(&(app_id.to_owned(), user_key.to_owned()));
+            }
+        }
+        Ok(())
+    }
+
+    async fn open_for_user(&self, user_key: &str) -> PortResult<Vec<AccessRequest>> {
+        Ok(locked(&self.requests)
+            .values()
+            .filter(|r| r.user_key == user_key)
+            .cloned()
+            .collect())
+    }
+}
+
+/// Événement déposé : (type, appli, utilisateur, motif).
+pub type NotifiedEvent = (NotificationEvent, String, Option<String>, String);
+
+/// Notifications en mémoire : événements déposés, sans regroupement.
+#[derive(Default)]
+pub struct MemoryNotifier {
+    events: Mutex<Vec<NotifiedEvent>>,
+}
+
+impl MemoryNotifier {
+    pub fn events(&self) -> Vec<NotifiedEvent> {
+        locked(&self.events).clone()
+    }
+}
+
+#[async_trait]
+impl Notifier for MemoryNotifier {
+    async fn notify(&self, event: NotificationEvent, app_id: &str, user_key: Option<&str>, reason: &str) {
+        locked(&self.events).push((event, app_id.into(), user_key.map(str::to_owned), reason.into()));
     }
 }
 

@@ -37,6 +37,15 @@ pub trait SecretStore: Send + Sync {
     async fn get_credential(&self, app_id: &str, user_key: &str) -> PortResult<Credential>;
 }
 
+/// Écriture d'un secret par le moteur de proxy, pour les demandes d'accès où l'utilisateur
+/// fournit lui-même ses identifiants (ADR 0029). Distincte de `SecretStore` : toutes les
+/// implémentations du coffre ne la fournissent pas (OpenBao/Vault : lecture seule pour le
+/// proxy). Remplace l'ensemble des champs du couple (appli, utilisateur).
+#[async_trait]
+pub trait SecretWriter: Send + Sync {
+    async fn put_credential(&self, app_id: &str, user_key: &str, credential: &Credential) -> PortResult<()>;
+}
+
 /// Session portail.
 ///
 /// `id` est l'empreinte (`crypto::hash_token`) du jeton opaque porté par le
@@ -92,6 +101,9 @@ pub enum AccountStatus {
     Failed,
     /// Désactivé par un administrateur : tuile masquée, rejeu bloqué.
     Disabled,
+    /// Identifiants fournis par l'utilisateur, en attente d'activation par un administrateur
+    /// (ADR 0029) : tuile grisée « demande en cours », rejeu bloqué.
+    Pending,
 }
 
 /// Entrée du registre des comptes. Ne contient aucun secret.
@@ -122,6 +134,53 @@ pub trait AccountRegistry: Send + Sync {
         reason: Option<&str>,
     ) -> PortResult<()>;
     async fn record_login(&self, app_id: &str, user_key: &str, at: SystemTime) -> PortResult<()>;
+}
+
+/// Nature d'une demande d'accès (ADR 0029).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessRequestKind {
+    /// L'utilisateur a fourni ses identifiants : l'administrateur n'a qu'à activer le compte.
+    Credentials,
+    /// L'utilisateur n'a pas de compte : l'administrateur doit le créer.
+    NoAccount,
+}
+
+/// Demande d'accès ouverte. Ne contient aucun secret.
+#[derive(Debug, Clone)]
+pub struct AccessRequest {
+    pub app_id: String,
+    pub user_key: String,
+    pub kind: AccessRequestKind,
+    /// Message libre de l'utilisateur, jamais un secret.
+    pub note: Option<String>,
+    pub created_at: SystemTime,
+}
+
+/// Résultat d'un dépôt de demande.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubmitOutcome {
+    Recorded,
+    /// Un compte `active`, `failed` ou `disabled` existe déjà : rien n'est modifié.
+    AccountExists,
+}
+
+/// Demandes d'accès : écrites par le portail et le proxy, traitées par l'administration.
+#[async_trait]
+pub trait AccessRequests: Send + Sync {
+    /// Enregistre (ou remplace) la demande ouverte du couple. Pour `Credentials`, crée en
+    /// même temps le compte `pending` (ou le laisse `pending`) ; un compte déjà `active`,
+    /// `failed` ou `disabled` n'est jamais modifié (`AccountExists`), pour les deux types.
+    async fn submit(
+        &self,
+        app_id: &str,
+        user_key: &str,
+        kind: AccessRequestKind,
+        note: Option<&str>,
+    ) -> PortResult<SubmitOutcome>;
+    /// Retire une demande `Credentials` et son compte `pending` (écriture du secret échouée).
+    async fn withdraw(&self, app_id: &str, user_key: &str) -> PortResult<()>;
+    /// Demandes ouvertes d'un utilisateur.
+    async fn open_for_user(&self, user_key: &str) -> PortResult<Vec<AccessRequest>>;
 }
 
 /// Diagnostic du dernier rejeu en échec d'un compte, pour corriger le descripteur depuis
@@ -201,6 +260,39 @@ pub trait DescriptorStore: Send + Sync {
         by: Option<&str>,
     ) -> PortResult<u32>;
     async fn delete_descriptor(&self, app_id: &str, by: Option<&str>) -> PortResult<()>;
+}
+
+/// Événement à signaler par mail aux administrateurs (ADR 0030).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationEvent {
+    /// Nouvelle demande d'accès (ADR 0029).
+    AccessRequested,
+    /// Un rejeu échoue : le compte passe à `failed` et le rejeu est bloqué.
+    AccountFailed,
+    /// Un rejeu échoue parce que l'appli est injoignable.
+    UpstreamUnreachable,
+}
+
+impl NotificationEvent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AccessRequested => "access_requested",
+            Self::AccountFailed => "account_failed",
+            Self::UpstreamUnreachable => "upstream_unreachable",
+        }
+    }
+}
+
+/// Dépôt d'un événement dans la boîte d'envoi : l'administration l'expédie par SMTP.
+///
+/// Volontairement sans erreur : une notification n'est jamais une raison de faire échouer
+/// une connexion, un rejeu ou une demande. L'implémentation journalise l'échec et
+/// regroupe les répétitions (même événement, même appli, même utilisateur) sur une fenêtre
+/// courte, pour qu'une appli en panne ne produise pas un mail par requête. `reason` est un
+/// code court : jamais un secret ni un contenu de réponse.
+#[async_trait]
+pub trait Notifier: Send + Sync {
+    async fn notify(&self, event: NotificationEvent, app_id: &str, user_key: Option<&str>, reason: &str);
 }
 
 /// Journal d'audit dédié.

@@ -59,3 +59,40 @@ async fn secrets_never_appear_in_logs_or_audit() {
         assert!(!text.contains(PORTAL_TOKEN), "jeton portail journalisé");
     }
 }
+
+#[tokio::test]
+async fn access_request_secrets_never_appear_in_logs_or_audit() {
+    use common::access::*;
+    let capture = Capture::default();
+    let writer = capture.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .json()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(move || writer.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let b = bench(&["fake-app-users"], APP_PASSWORD, false).await;
+    let a = access_bench(&b, true);
+    let bad = serde_json::json!({ "username": "amartin", "password": "Mauvais-MDP-777" });
+    let good = serde_json::json!({ "username": "amartin", "password": APP_PASSWORD });
+    let user = bob(&["fake-app-users"]);
+    let mut bodies = Vec::new();
+    for fields in [bad, good] {
+        bodies.push(
+            post_access(&a.router, Some(INTERNAL_TOKEN), &user, fields)
+                .await
+                .1,
+        );
+    }
+
+    let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+    assert!(logs.contains("demande d'accès"), "logs capturés : {logs}");
+    let audit = serde_json::to_string(&b.audit.events()).unwrap();
+    for text in bodies.iter().chain([&logs, &audit]) {
+        assert!(!text.contains(APP_PASSWORD), "mot de passe divulgué");
+        assert!(!text.contains("Mauvais-MDP-777"), "saisie erronée divulguée");
+        assert!(!text.contains(INTERNAL_TOKEN), "jeton interne divulgué");
+        assert!(!text.contains("sess-"), "cookie applicatif divulgué");
+    }
+}

@@ -2840,6 +2840,7 @@ dependencies = [
  "sesame-store-postgres",
  "thiserror 2.0.21",
  "tokio",
+ "tower",
  "tracing",
  "url",
  "uuid",
@@ -2856,6 +2857,7 @@ dependencies = [
  "regex",
  "reqwest",
  "scraper",
+ "serde",
  "serde_json",
  "sesame-core",
  "sesame-secrets-openbao",
@@ -2897,6 +2899,7 @@ dependencies = [
  "sesame-core",
  "sqlx",
  "tokio",
+ "tracing",
  "zeroize",
 ]
 

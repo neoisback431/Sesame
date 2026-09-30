@@ -6,7 +6,9 @@ use std::time::{Duration, SystemTime};
 
 use sesame_core::audit::StdoutAuditSink;
 use sesame_core::crypto::CookieCipher;
-use sesame_core::ports::{DescriptorStore, DiagnosticStore, SecretStore, SessionStore};
+use sesame_core::ports::{
+    AccessRequests, DescriptorStore, DiagnosticStore, SecretStore, SecretWriter, SessionStore,
+};
 use sesame_core::sources::{log_rejected, watch, DescriptorSource};
 use sesame_proxy::config::{ProxyConfig, SecretStoreConfig};
 use sesame_proxy::replay::Replayer;
@@ -42,10 +44,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .for_each(|r| tracing::error!(reason = %r, "appli écartée"));
     tracing::info!(count = apps.len(), "descripteurs chargés");
 
+    // Écriture des secrets (demandes d'accès, ADR 0029) : seulement avec le coffre PostgreSQL.
+    let mut secret_writer: Option<Arc<dyn SecretWriter>> = None;
     let secrets: Arc<dyn SecretStore> = match cfg.secret_store {
         SecretStoreConfig::Postgres { key } => {
             let cipher = CookieCipher::from_base64(&key)?;
-            Arc::new(store.secrets(cipher))
+            let pg = Arc::new(store.secrets(cipher));
+            secret_writer = Some(pg.clone());
+            pg
         }
         SecretStoreConfig::OpenBao {
             addr,
@@ -78,6 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         secrets,
         accounts: store.clone(),
         audit: audit.clone(),
+        notifier: store.clone(),
         diagnostics: cfg
             .replay_debug
             .then(|| store.clone() as Arc<dyn DiagnosticStore>),
@@ -85,6 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cfg.replay_debug {
         tracing::warn!("SESAME_REPLAY_DEBUG actif : diagnostic des rejeux en échec enregistré (ADR 0018)");
     }
+    let requests: Arc<dyn AccessRequests> = store.clone();
     let sessions: Arc<dyn SessionStore> = store;
     let proxy = Arc::new(Proxy::new(
         apps,
@@ -125,6 +133,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+
+    // Service interne : demandes d'accès avec identifiants fournis (ADR 0029).
+    if let Some(internal) = cfg.internal {
+        if secret_writer.is_none() {
+            tracing::warn!(
+                "coffre en lecture seule pour le proxy : les demandes avec identifiants seront refusées"
+            );
+        }
+        let listener = tokio::net::TcpListener::bind(&internal.listen).await?;
+        tracing::info!(addr = %internal.listen, "service interne des demandes d'accès démarré");
+        let app = sesame_proxy::internal::router(Arc::new(sesame_proxy::internal::Internal {
+            proxy: proxy.clone(),
+            token: internal.token,
+            requests,
+            writer: secret_writer,
+        }));
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, app).await {
+                tracing::error!(error = %e, "service interne arrêté");
+            }
+        });
+    }
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen).await?;
     tracing::info!(addr = %cfg.listen, "proxy démarré");

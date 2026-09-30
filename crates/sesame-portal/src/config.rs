@@ -27,6 +27,14 @@ pub struct PortalConfig {
     /// « Administration » sur la page « Mes applications » aux membres d'`admin_group`.
     pub admin_url: Option<Url>,
     pub admin_group: String,
+    /// Service interne du proxy pour les demandes d'accès avec identifiants (ADR 0029) :
+    /// `SESAME_PROXY_INTERNAL_URL` et `SESAME_INTERNAL_TOKEN`, ensemble ou pas du tout.
+    pub proxy_internal: Option<ProxyInternalConfig>,
+}
+
+pub struct ProxyInternalConfig {
+    pub url: Url,
+    pub token: SecretString,
 }
 
 /// Un seul protocole actif par déploiement, choisi par `SESAME_IDP_PROTOCOL` (ADR 0024).
@@ -99,6 +107,22 @@ fn idp_config_from_env() -> Result<IdpConfig, ConfigError> {
     }
 }
 
+fn proxy_internal_from_env() -> Result<Option<ProxyInternalConfig>, ConfigError> {
+    match (
+        config::optional("SESAME_PROXY_INTERNAL_URL"),
+        config::optional("SESAME_INTERNAL_TOKEN"),
+    ) {
+        (Some(url), Some(token)) => Ok(Some(ProxyInternalConfig {
+            url: Url::parse(&url).map_err(|e| ConfigError(format!("SESAME_PROXY_INTERNAL_URL : {e}")))?,
+            token: SecretString::from(token),
+        })),
+        (None, None) => Ok(None),
+        _ => Err(ConfigError(
+            "SESAME_PROXY_INTERNAL_URL et SESAME_INTERNAL_TOKEN vont ensemble".into(),
+        )),
+    }
+}
+
 impl PortalConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         let public_url = Url::parse(&config::required("SESAME_PUBLIC_URL")?)
@@ -122,6 +146,7 @@ impl PortalConfig {
                 .map(|s| Url::parse(&s).map_err(|e| ConfigError(format!("SESAME_ADMIN_URL : {e}"))))
                 .transpose()?,
             admin_group: config::or("SESAME_ADMIN_GROUP", "sesame-admins"),
+            proxy_internal: proxy_internal_from_env()?,
         })
     }
 }

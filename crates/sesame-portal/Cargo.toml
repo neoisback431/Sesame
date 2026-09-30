@@ -25,5 +25,8 @@ tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+tower.workspace = true
+
 [lints]
 workspace = true
