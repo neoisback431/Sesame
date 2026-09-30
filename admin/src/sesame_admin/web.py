@@ -5,6 +5,8 @@ Pas de ``from __future__ import annotations`` : FastAPI doit résoudre les
 annotations des routes, dont l'alias local ``Admin``.
 """
 
+import asyncio
+import contextlib
 import hmac
 import logging
 import re
@@ -23,8 +25,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from .audit import AuditEvent, AuditSink
 from .auth import Authenticator, AuthError, SamlAuthenticator
 from .descriptors import draft
-from .identity import AdminUser, ClaimsError, identity_from_claims
-from .ports import NotFound, Unavailable
+from .identity import AdminUser, ClaimsError, identity_from_claims, valid_user_key
+from .notifications import EVENTS, NotificationWorker, parse_recipients
+from .ports import NotFound, NotificationSettings, Unavailable
 from .recorder import Recorder, RecorderError
 from .service import AdminService, InvalidDescriptor, InvalidInput
 
@@ -81,8 +84,22 @@ def create_app(
     session_ttl_secs: int = 3600,
     secure_cookies: bool = True,
     recorder: Recorder | None = None,
+    worker: NotificationWorker | None = None,
+    smtp_password_set: bool = False,
 ) -> FastAPI:
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    @contextlib.asynccontextmanager
+    async def lifespan(_: FastAPI):
+        # Envoi des notifications (ADR 0030) : une tâche de fond, arrêtée avec le serveur.
+        task = asyncio.create_task(worker.run()) if worker else None
+        try:
+            yield
+        finally:
+            if task:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     app.add_middleware(
         SessionMiddleware,
@@ -200,7 +217,138 @@ def create_app(
         except Unavailable:
             return error(request, 503, "Service indisponible", "La base de données est injoignable.")
         rows = [(a, counts.get(a.id, {})) for a in sorted(catalog.apps.values(), key=lambda a: a.name)]
-        return render(request, "apps.html", admin=admin, rows=rows, rejected=catalog.rejected)
+        try:
+            open_requests = await service.requests.count_open()
+        except Unavailable:
+            open_requests = 0
+        return render(
+            request,
+            "apps.html",
+            admin=admin,
+            rows=rows,
+            rejected=catalog.rejected,
+            open_requests=open_requests,
+        )
+
+    # --- Notifications par mail (ADR 0030) ----------------------------------------------
+
+    event_help = {
+        "access_requested": "un utilisateur demande l'accès à une appli",
+        "account_failed": "un rejeu échoue : le compte est bloqué (« verrouillé ») jusqu'à correction",
+        "upstream_unreachable": "un rejeu échoue parce que l'appli est hors service (regroupé)",
+        "admin_sensitive": "compte supprimé ou désactivé, application supprimée",
+    }
+
+    async def notifications_page(
+        request: Request,
+        admin: AdminUser,
+        *,
+        settings: NotificationSettings | None = None,
+        errors: list[str] | None = None,
+        status: int = 200,
+    ) -> Response:
+        try:
+            current = settings or await service.notification_settings()
+            recent = await service.notifications.recent(30)
+        except Unavailable:
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+        return render(
+            request,
+            "notifications.html",
+            status,
+            admin=admin,
+            s=current,
+            recent=recent,
+            errors=errors or [],
+            events=[(k, v, event_help[k]) for k, v in EVENTS.items()],
+            labels=EVENTS,
+            password_set=smtp_password_set,
+        )
+
+    @app.get("/settings/notifications")
+    async def notifications_get(request: Request, admin: Admin) -> Response:
+        return await notifications_page(request, admin)
+
+    @app.post("/settings/notifications")
+    async def notifications_save(request: Request, admin: Admin) -> Response:
+        cid = correlation_id(request)
+        try:
+            await check_csrf(request)
+        except InvalidInput as e:
+            return error(request, 400, "Requête refusée", str(e))
+        form = await request.form()
+        try:
+            port = int(str(form.get("smtp_port", "")).strip() or "0")
+        except ValueError:
+            port = 0
+        submitted = NotificationSettings(
+            enabled="enabled" in form,
+            smtp_host=str(form.get("smtp_host", "")).strip()[:253],
+            smtp_port=port,
+            smtp_security=str(form.get("smtp_security", "starttls")),  # type: ignore[arg-type]
+            smtp_user=str(form.get("smtp_user", "")).strip()[:254],
+            from_address=str(form.get("from_address", "")).strip()[:320],
+            recipients=parse_recipients(str(form.get("recipients", ""))[:4000]),
+            events=tuple(str(v) for v in form.getlist("events")),
+        )
+        try:
+            await service.save_notification_settings(admin, submitted, cid)
+        except InvalidInput as e:
+            return await notifications_page(request, admin, settings=submitted, errors=[str(e)], status=422)
+        except Unavailable:
+            log.error("brique externe indisponible", extra={"correlation_id": cid})
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+        request.session["flash"] = {"kind": "ok", "text": "Réglages de notification enregistrés."}
+        return RedirectResponse("/settings/notifications", status_code=303)
+
+    @app.post("/settings/notifications/test")
+    async def notifications_test(request: Request, admin: Admin) -> Response:
+        cid = correlation_id(request)
+        try:
+            await check_csrf(request)
+            await service.send_test_mail(admin, public_url, cid)
+            request.session["flash"] = {"kind": "ok", "text": "Mail de test envoyé."}
+        except InvalidInput as e:
+            request.session["flash"] = {"kind": "error", "text": str(e)}
+        except Unavailable:
+            log.error("brique externe indisponible", extra={"correlation_id": cid})
+            request.session["flash"] = {
+                "kind": "error",
+                "text": f"Opération impossible : service indisponible (référence {cid}).",
+            }
+        return RedirectResponse("/settings/notifications", status_code=303)
+
+    # --- Demandes d'accès (ADR 0029) ---------------------------------------------------
+
+    @app.get("/requests")
+    async def requests_page(request: Request, admin: Admin, kind: str = "") -> Response:
+        try:
+            catalog = await service.catalog()
+            listed = await service.open_requests()
+        except Unavailable:
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+        if kind in ("credentials", "no_account"):
+            listed = [r for r in listed if r.kind == kind]
+        else:
+            kind = ""
+        names = {a.id: a.name for a in catalog.apps.values()}
+        return render(request, "requests.html", admin=admin, requests=listed, names=names, kind=kind)
+
+    @app.post("/requests/{app_id}/{user_key}/approve")
+    async def request_approve(request: Request, app_id: str, user_key: str, admin: Admin) -> Response:
+        async def op(cid: str) -> str:
+            await service.approve_access(admin, app_id, user_key, cid)
+            return f"Compte de « {user_key} » activé sur « {app_id} »."
+
+        return await act(request, app_id, op, default="/requests")
+
+    @app.post("/requests/{app_id}/{user_key}/reject")
+    async def request_reject(request: Request, app_id: str, user_key: str, admin: Admin) -> Response:
+        async def op(cid: str) -> str:
+            await service.reject_access(admin, app_id, user_key, cid)
+            return f"Demande de « {user_key} » sur « {app_id} » refusée."
+
+        return await act(request, app_id, op, default="/requests")
 
     # --- Création / modification / suppression d'appli ------------------------------
 
@@ -415,7 +563,7 @@ def create_app(
         )
 
     @app.get("/apps/{app_id}")
-    async def app_detail(request: Request, app_id: str, admin: Admin) -> Response:
+    async def app_detail(request: Request, app_id: str, admin: Admin, user_key: str = "") -> Response:
         try:
             target = await service.app(app_id)
             accounts = await service.accounts.list_accounts(app_id)
@@ -427,12 +575,22 @@ def create_app(
             return error(request, 404, "Application inconnue", "Aucun descripteur ne porte cet identifiant.")
         except Unavailable:
             return error(request, 503, "Service indisponible", "La base de données est injoignable.")
-        return render(request, "app.html", admin=admin, app=target, accounts=accounts, known_users=known)
+        # Prérempli depuis une demande d'accès « sans compte » ; la valeur reste modifiable.
+        prefill = user_key if valid_user_key(user_key) else ""
+        return render(
+            request,
+            "app.html",
+            admin=admin,
+            app=target,
+            accounts=accounts,
+            known_users=known,
+            prefill_user=prefill,
+        )
 
-    async def act(request: Request, app_id: str, operation) -> Response:
+    async def act(request: Request, app_id: str, operation, default: str | None = None) -> Response:
         cid = correlation_id(request)
         back = str((await request.form()).get("back", ""))
-        target = back if _BACK.fullmatch(back) else f"/apps/{app_id}"
+        target = back if _BACK.fullmatch(back) else default or f"/apps/{app_id}"
         try:
             await check_csrf(request)
             message = await operation(cid)

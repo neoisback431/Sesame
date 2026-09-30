@@ -14,7 +14,7 @@
   {% for user_key, counts in rows %}
     <tr>
       <td><a href="/users/{{ user_key }}"><code>{{ user_key }}</code></a></td>
-      <td>{{ counts.get('active', 0) }} actif(s){% if counts.get('failed') %}, <strong>{{ counts['failed'] }} en échec</strong>{% endif %}{% if counts.get('disabled') %}, {{ counts['disabled'] }} désactivé(s){% endif %}</td>
+      <td>{{ counts.get('active', 0) }} actif(s){% if counts.get('failed') %}, <strong>{{ counts['failed'] }} en échec</strong>{% endif %}{% if counts.get('disabled') %}, {{ counts['disabled'] }} désactivé(s){% endif %}{% if counts.get('pending') %}, <strong>{{ counts['pending'] }} en attente</strong>{% endif %}</td>
       <td><a class="button" href="/users/{{ user_key }}">Gérer</a></td>
     </tr>
   {% else %}

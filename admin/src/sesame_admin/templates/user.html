@@ -11,7 +11,7 @@
     {% set app = apps.get(a.app_id) %}
     <tr>
       <td>{% if app %}<a href="/apps/{{ a.app_id }}">{{ app.name }}</a>{% else %}<code>{{ a.app_id }}</code><br><span class="muted">descripteur absent</span>{% endif %}</td>
-      <td><span class="status {{ a.status }}">{{ {"active": "actif", "failed": "en échec", "disabled": "désactivé"}[a.status] }}</span>
+      <td><span class="status {{ a.status }}">{{ {"active": "actif", "failed": "en échec", "disabled": "désactivé", "pending": "en attente"}[a.status] }}</span>
         {% if a.status_reason %}<br><span class="muted">{{ a.status_reason }}</span>{% endif %}</td>
       <td>{{ a.last_login_at.strftime("%Y-%m-%d %H:%M") if a.last_login_at else "—" }}</td>
       <td>

@@ -21,11 +21,22 @@ from .descriptors import (
     parse_yaml,
 )
 from .identity import AdminUser, valid_user_key
+from .notifications import (
+    Mailer,
+    MailError,
+    SettingsError,
+    build_test_message,
+    validate_settings,
+)
 from .ports import (
+    AccessRequest,
+    AccessRequestStore,
     AccountStore,
     Conflict,
     DescriptorStore,
     NotFound,
+    NotificationSettings,
+    NotificationStore,
     SecretWriter,
     StoredDescriptor,
     Unavailable,
@@ -57,6 +68,9 @@ class AdminService:
         audit: AuditSink,
         descriptors: DescriptorStore,
         validator: DescriptorValidator,
+        requests: AccessRequestStore,
+        notifications: NotificationStore,
+        mailer: Mailer | None = None,
     ):
         self.files = files  # descripteurs Git, lecture seule
         self.secrets = secrets
@@ -64,6 +78,9 @@ class AdminService:
         self.audit = audit
         self.descriptors = descriptors
         self.validator = validator
+        self.requests = requests  # demandes d'accès (ADR 0029)
+        self.notifications = notifications  # réglages et boîte d'envoi (ADR 0030)
+        self.mailer = mailer
 
     async def catalog(self) -> Catalog:
         """Relu à chaque appel : une appli créée ou modifiée est visible immédiatement."""
@@ -216,7 +233,64 @@ class AdminService:
         await self._audit(
             "descriptor_deleted", actor, app_id, cid, "success", f"revision:{expected_revision}"
         )
+        await self._notify_sensitive(actor, "descriptor_deleted", app_id, None)
         log.info("appli supprimée", extra={"app_id": app_id, "correlation_id": cid})
+
+    # --- Notifications par mail (ADR 0030) ---------------------------------------------
+
+    async def _notify_sensitive(
+        self, actor: AdminUser, reason: str, app_id: str | None, user_key: str | None
+    ) -> None:
+        """Signale une action d'administration sensible. Ne fait jamais échouer l'action :
+        elle est déjà faite et auditée, la notification n'est qu'un signalement."""
+        try:
+            await self.notifications.enqueue("admin_sensitive", app_id, user_key, reason, actor.actor)
+        except Exception:  # noqa: BLE001
+            log.warning("notification non enregistrée", extra={"reason": reason})
+
+    async def notification_settings(self) -> NotificationSettings:
+        return await self.notifications.get_settings()
+
+    async def save_notification_settings(
+        self, actor: AdminUser, settings: NotificationSettings, cid: str
+    ) -> None:
+        """Valide puis enregistre les réglages (audité, succès comme échec). Aucun secret."""
+        try:
+            validate_settings(settings)
+        except SettingsError as e:
+            await self.audit.record(
+                AuditEvent.of(
+                    "notification_settings_updated", "failure", actor, correlation_id=cid, reason="invalid"
+                )
+            )
+            raise InvalidInput(str(e)) from None
+        await self.notifications.save_settings(settings, actor.actor)
+        await self.audit.record(
+            AuditEvent.of(
+                "notification_settings_updated",
+                "success",
+                actor,
+                correlation_id=cid,
+                reason=f"enabled:{str(settings.enabled).lower()};events:{len(settings.events)};"
+                f"recipients:{len(settings.recipients)}",
+            )
+        )
+
+    async def send_test_mail(self, actor: AdminUser, public_url: str, cid: str) -> None:
+        """Envoie un mail de test aux destinataires enregistrés (sans passer par la boîte d'envoi)."""
+        settings = await self.notifications.get_settings()
+        if self.mailer is None or not (settings.smtp_host and settings.from_address and settings.recipients):
+            raise InvalidInput("Enregistrez d'abord le serveur, l'expéditeur et au moins un destinataire.")
+        try:
+            await self.mailer.send(settings, build_test_message(settings, public_url))
+        except MailError as e:
+            await self.audit.record(
+                AuditEvent.of("notification_test", "failure", actor, correlation_id=cid, reason=e.code)
+            )
+            raise InvalidInput(
+                f"Envoi impossible ({e.code}). Vérifiez le serveur, le port et la sécurité."
+            ) from None
+        await self.audit.record(AuditEvent.of("notification_test", "success", actor, correlation_id=cid))
 
     # --- Comptes -------------------------------------------------------------------
 
@@ -253,6 +327,7 @@ class AdminService:
             await self.audit.record(event("account_status_changed", "failure", "registry_unavailable"))
             raise
         await self.audit.record(event("account_status_changed", "success", "active:provisioned"))
+        await self._close_request(actor, app_id, user_key, cid, provisioned=True)
         log.info(
             "compte provisionné", extra={"app_id": app_id, "target_user": user_key, "correlation_id": cid}
         )
@@ -281,6 +356,10 @@ class AdminService:
         if status == "disabled":
             await self.accounts.revoke_app_sessions(app_id, user_key)
         await self.audit.record(event)
+        # Activer un compte en attente revient à approuver sa demande ; désactiver la refuse.
+        await self._close_request(actor, app_id, user_key, cid, approved=status == "active")
+        if status == "disabled":
+            await self._notify_sensitive(actor, "account_disabled", app_id, user_key)
 
     async def delete(self, actor: AdminUser, app_id: str, user_key: str, cid: str) -> None:
         """Supprime les identifiants du coffre puis l'entrée du registre."""
@@ -303,6 +382,70 @@ class AdminService:
             pass
         await self.accounts.revoke_app_sessions(app_id, user_key)
         await self.audit.record(event("account_status_changed", "success", "deleted:admin"))
+        await self._close_request(actor, app_id, user_key, cid, approved=False)
+        await self._notify_sensitive(actor, "account_deleted", app_id, user_key)
+
+    # --- Demandes d'accès (ADR 0029) ---------------------------------------------------
+
+    async def open_requests(self) -> list[AccessRequest]:
+        return await self.requests.list_open()
+
+    async def _close_request(
+        self,
+        actor: AdminUser,
+        app_id: str,
+        user_key: str,
+        cid: str,
+        *,
+        approved: bool = True,
+        provisioned: bool = False,
+    ) -> None:
+        """Clôt la demande ouverte du couple, si elle existe, et l'audite.
+
+        ``provisioned`` : l'admin vient d'enregistrer un compte par le formulaire habituel ; la
+        demande « sans compte » est alors satisfaite (``fulfilled``), celle avec identifiants
+        approuvée. Sans demande ouverte, rien ne se passe."""
+        request = await self.requests.get_open(app_id, user_key)
+        if request is None:
+            return
+        if provisioned:
+            status = "approved" if request.kind == "credentials" else "fulfilled"
+        else:
+            status = "approved" if approved else "rejected"
+        if await self.requests.resolve(app_id, user_key, status, actor.actor):  # type: ignore[arg-type]
+            await self.audit.record(
+                AuditEvent.of(
+                    f"access_request_{status}",
+                    "success",
+                    actor,
+                    app_id=app_id,
+                    target_user=user_key,
+                    correlation_id=cid,
+                    reason=request.kind,
+                )
+            )
+
+    async def approve_access(self, actor: AdminUser, app_id: str, user_key: str, cid: str) -> None:
+        """Active le compte d'une demande avec identifiants (déjà vérifiés et stockés)."""
+        request = await self.requests.get_open(app_id, user_key)
+        account = await self.accounts.get_account(app_id, user_key)
+        if request is None or request.kind != "credentials" or account is None or account.status != "pending":
+            raise InvalidInput("Aucune demande avec identifiants en attente pour ce compte.")
+        # set_status clôt la demande (approuvée) et audite l'activation.
+        await self.set_status(actor, app_id, user_key, "active", cid)
+
+    async def reject_access(self, actor: AdminUser, app_id: str, user_key: str, cid: str) -> None:
+        """Refuse une demande. Avec identifiants : ils sont supprimés du coffre, avec le compte
+        en attente. Un compte qui n'est pas en attente n'est jamais touché."""
+        request = await self.requests.get_open(app_id, user_key)
+        if request is None:
+            raise InvalidInput("Cette demande n'est plus ouverte.")
+        if request.kind == "credentials":
+            account = await self.accounts.get_account(app_id, user_key)
+            if account is not None and account.status != "pending":
+                raise InvalidInput("Le compte n'est plus en attente : gérez-le depuis la page de l'appli.")
+            await self.delete(actor, app_id, user_key, cid)  # supprime secret + compte, clôt (refusée)
+        await self._close_request(actor, app_id, user_key, cid, approved=False)
 
     async def disable_all(self, actor: AdminUser, user_key: str, cid: str) -> int:
         """Désactive tous les comptes actifs ou en échec d'un utilisateur (départ, suspension).
@@ -327,5 +470,8 @@ class AdminService:
                     reason="disabled:admin_bulk",
                 )
             )
+            await self._close_request(actor, account.app_id, user_key, cid, approved=False)
             count += 1
+        if count:
+            await self._notify_sensitive(actor, "disable_all", None, user_key)
         return count

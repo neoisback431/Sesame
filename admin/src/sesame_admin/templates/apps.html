@@ -3,6 +3,7 @@
 {% block title %}Applications{% endblock %}
 {% block content %}
 <h1>Applications</h1>
+{% if open_requests %}<div class="flash ok" role="status"><strong>{{ open_requests }} demande(s) d'accès en attente.</strong> <a href="/requests">Les traiter</a></div>{% endif %}
 <p class="muted">Pour enregistrer, désactiver ou supprimer le compte d'un utilisateur, cliquez sur « Gérer les comptes ».</p>
 <table>
   <thead><tr><th>Application</th><th>Hôte public</th><th>Habilitations</th><th>Comptes</th><th></th></tr></thead>
@@ -13,7 +14,7 @@
         {% if app.editable %}<span class="tag db">base</span>{% else %}<span class="tag">Git</span>{% endif %}</td>
       <td>{{ app.public_host }}</td>
       <td>{% for g in app.groups %}<code>{{ g }}</code> {% endfor %}{% for u in app.users %}<code>{{ u }}</code> {% endfor %}</td>
-      <td>{{ counts.get('active', 0) }} actif(s){% if counts.get('failed') %}, <strong>{{ counts['failed'] }} en échec</strong>{% endif %}{% if counts.get('disabled') %}, {{ counts['disabled'] }} désactivé(s){% endif %}</td>
+      <td>{{ counts.get('active', 0) }} actif(s){% if counts.get('failed') %}, <strong>{{ counts['failed'] }} en échec</strong>{% endif %}{% if counts.get('disabled') %}, {{ counts['disabled'] }} désactivé(s){% endif %}{% if counts.get('pending') %}, <strong>{{ counts['pending'] }} en attente</strong>{% endif %}</td>
       <td><a class="button" href="/apps/{{ app.id }}">Gérer les comptes</a></td>
     </tr>
   {% else %}

@@ -11,9 +11,19 @@ import os
 import uuid
 
 import pytest
-from sesame_admin.memory import MemoryAccountStore, MemoryDescriptorStore
-from sesame_admin.ports import Conflict, NotFound
-from sesame_admin.store_postgres import PostgresAccountStore, PostgresDescriptorStore
+from sesame_admin.memory import (
+    MemoryAccessRequestStore,
+    MemoryAccountStore,
+    MemoryDescriptorStore,
+    MemoryNotificationStore,
+)
+from sesame_admin.ports import Conflict, NotFound, NotificationSettings
+from sesame_admin.store_postgres import (
+    PostgresAccessRequestStore,
+    PostgresAccountStore,
+    PostgresDescriptorStore,
+    PostgresNotificationStore,
+)
 
 from .conftest import ROOT
 
@@ -289,3 +299,157 @@ async def test_secret_writer_contract(secrets):
             "SELECT key FROM app_secrets WHERE app_id = $1 AND user_key = $2", app, user
         )
         assert rows == []
+
+
+@pytest.fixture(params=["memory", "postgres"])
+async def requests_store(request):
+    """Magasin des demandes d'accès + une fonction qui en dépose une, comme le portail."""
+    if request.param == "memory":
+        s = MemoryAccessRequestStore()
+
+        async def submit(app, user, kind, note=None):
+            s.submit(app, user, kind, note)
+
+        yield s, submit
+        return
+    accounts = await postgres_store()
+    pool = await accounts.pool()
+    s = PostgresAccessRequestStore(accounts._db)  # même pool que le registre
+
+    async def submit(app, user, kind, note=None):
+        await pool.execute(
+            """INSERT INTO access_requests (app_id, user_key, kind, note) VALUES ($1, $2, $3, $4)
+               ON CONFLICT (app_id, user_key) DO UPDATE
+               SET kind = $3, note = $4, status = 'open', created_at = now(), resolved_at = NULL""",
+            app,
+            user,
+            kind,
+            note,
+        )
+
+    yield s, submit
+    await accounts.close()
+
+
+async def test_access_request_store_contract(requests_store):
+    store, submit = requests_store
+    app = f"app-{uuid.uuid4().hex[:8]}"
+    before = await store.count_open()
+    assert await store.get_open(app, "bob") is None
+
+    await submit(app, "bob", "no_account", "besoin du CRM")
+    await submit(app, "carol", "credentials")
+    assert await store.count_open() == before + 2
+    mine = [r for r in await store.list_open() if r.app_id == app]
+    assert [(r.user_key, r.kind, r.note) for r in mine] == [
+        ("bob", "no_account", "besoin du CRM"),
+        ("carol", "credentials", None),
+    ]
+    assert (await store.get_open(app, "bob")).kind == "no_account"
+
+    assert await store.resolve(app, "bob", "fulfilled", "admin") is True
+    assert await store.resolve(app, "bob", "fulfilled", "admin") is False, "déjà clôturée"
+    assert await store.get_open(app, "bob") is None
+    assert await store.count_open() == before + 1
+
+    # Une nouvelle demande après clôture rouvre le couple.
+    await submit(app, "bob", "credentials")
+    assert (await store.get_open(app, "bob")).kind == "credentials"
+    for user in ("bob", "carol"):
+        assert await store.resolve(app, user, "rejected", "admin")
+
+
+async def test_pending_status_round_trips(store):
+    app = f"app-{uuid.uuid4().hex[:8]}"
+    await store.upsert_active(app, "erin")
+    await store.set_status(app, "erin", "pending", "access_request")
+    a = await store.get_account(app, "erin")
+    assert (a.status, a.status_reason) == ("pending", "access_request")
+    assert (await store.count_by_app())[app] == {"pending": 1}
+    await store.delete_account(app, "erin")
+
+
+@pytest.fixture(params=["memory", "postgres"])
+async def notification_store(request):
+    """Magasin des notifications + une fonction de dépôt, comme le portail et le proxy."""
+    if request.param == "memory":
+        s = MemoryNotificationStore()
+
+        async def deposit(event, app, user, reason):
+            s.deposit(event, app, user, reason)
+
+        yield s, deposit
+        return
+    accounts = await postgres_store()
+    pool = await accounts.pool()
+    s = PostgresNotificationStore(accounts._db)
+
+    async def deposit(event, app, user, reason):
+        await pool.execute(
+            "INSERT INTO notifications (event, app_id, user_key, reason) VALUES ($1, $2, $3, $4)",
+            event,
+            app,
+            user,
+            reason,
+        )
+
+    yield s, deposit
+    await pool.execute("DELETE FROM notifications")
+    await accounts.close()
+
+
+async def test_notification_settings_round_trip(notification_store):
+    store, _ = notification_store
+    saved = NotificationSettings(
+        enabled=True,
+        smtp_host="smtp.example.org",
+        smtp_port=465,
+        smtp_security="tls",
+        smtp_user="sesame",
+        from_address="sesame@example.org",
+        recipients=("a@example.org", "b@example.org"),
+        events=("account_failed",),
+    )
+    await store.save_settings(saved, "admin")
+    got = await store.get_settings()
+    assert (got.enabled, got.smtp_host, got.smtp_port, got.smtp_security, got.smtp_user) == (
+        True,
+        "smtp.example.org",
+        465,
+        "tls",
+        "sesame",
+    )
+    assert got.recipients == ("a@example.org", "b@example.org") and got.events == ("account_failed",)
+    assert got.updated_by == "admin" and got.updated_at is not None
+    await store.save_settings(NotificationSettings(), "admin")
+    assert (await store.get_settings()).enabled is False
+
+
+async def test_notification_outbox_lifecycle(notification_store):
+    store, deposit = notification_store
+    app = f"app-{uuid.uuid4().hex[:8]}"
+    await deposit("account_failed", app, "alice", "login_rejected")
+    await store.enqueue("admin_sensitive", app, "bob", "account_deleted", "issuer|admin")
+
+    claimed = [n for n in await store.claim_pending(50) if n.app_id == app]
+    assert [(n.event, n.user_key, n.actor) for n in claimed] == [
+        ("account_failed", "alice", None),
+        ("admin_sensitive", "bob", "issuer|admin"),
+    ]
+    # Bail : un événement pris n'est pas repris tout de suite (le mémoire n'a pas de bail).
+    if isinstance(store, PostgresNotificationStore):
+        assert [n for n in await store.claim_pending(50) if n.app_id == app] == []
+
+    first, second = claimed
+    await store.mark(first.id, "sent", None)
+    await store.mark(second.id, "retry", "smtp_connect")
+    recent = {n.id: n for n in await store.recent(50)}
+    assert (recent[first.id].status, recent[first.id].sent_at is not None) == ("sent", True)
+    assert (recent[second.id].status, recent[second.id].attempts, recent[second.id].last_error) == (
+        "pending",
+        1,
+        "smtp_connect",
+    )
+    await store.mark(second.id, "failed", "smtp_connect")
+    assert {n.id: n for n in await store.recent(50)}[second.id].status == "failed"
+    assert await store.purge(30) == 0  # rien d'assez ancien
