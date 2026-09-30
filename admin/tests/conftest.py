@@ -5,7 +5,13 @@ import pytest
 from sesame_admin.audit import MemoryAuditSink
 from sesame_admin.descriptors import DescriptorValidator, load_dir
 from sesame_admin.identity import AdminUser
-from sesame_admin.memory import MemoryAccountStore, MemoryDescriptorStore, MemorySecretWriter
+from sesame_admin.memory import (
+    MemoryAccessRequestStore,
+    MemoryAccountStore,
+    MemoryDescriptorStore,
+    MemoryNotificationStore,
+    MemorySecretWriter,
+)
 from sesame_admin.service import AdminService
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,7 +26,7 @@ def apps():
     return load_dir(DESCRIPTORS, SCHEMA)
 
 
-def make_service(apps, audit=None) -> AdminService:
+def make_service(apps, audit=None, mailer=None) -> AdminService:
     return AdminService(
         apps,
         MemorySecretWriter(),
@@ -28,6 +34,9 @@ def make_service(apps, audit=None) -> AdminService:
         audit or MemoryAuditSink(),
         MemoryDescriptorStore(),
         DescriptorValidator(SCHEMA),
+        MemoryAccessRequestStore(),
+        MemoryNotificationStore(),
+        mailer,
     )
 
 

@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
-Status = Literal["active", "failed", "disabled"]
+# ``pending`` : identifiants fournis par l'utilisateur, en attente d'activation (ADR 0029).
+Status = Literal["active", "failed", "disabled", "pending"]
 
 
 class Unavailable(RuntimeError):
@@ -94,6 +95,86 @@ class Diagnostic:
         )
 
 
+@dataclass(frozen=True)
+class AccessRequest:
+    """Demande d'accès ouverte depuis « Mes applications » (ADR 0029). Aucun secret.
+
+    ``credentials`` : l'utilisateur a fourni ses identifiants (compte ``pending``, l'admin n'a
+    qu'à activer) ; ``no_account`` : il n'a pas de compte, l'admin doit le créer."""
+
+    app_id: str
+    user_key: str
+    kind: Literal["credentials", "no_account"]
+    note: str | None
+    created_at: datetime
+
+
+NOTIFICATION_EVENTS = ("access_requested", "account_failed", "upstream_unreachable", "admin_sensitive")
+
+
+@dataclass(frozen=True)
+class NotificationSettings:
+    """Réglages des notifications par mail (ADR 0030). Le mot de passe SMTP n'en fait pas
+    partie : il vit dans l'environnement de l'admin, jamais en base."""
+
+    enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_security: Literal["starttls", "tls", "none"] = "starttls"
+    smtp_user: str = ""
+    from_address: str = ""
+    recipients: tuple[str, ...] = ()
+    events: tuple[str, ...] = ("access_requested", "account_failed")
+    updated_at: datetime | None = None
+    updated_by: str | None = None
+
+
+@dataclass(frozen=True)
+class Notification:
+    """Événement de la boîte d'envoi. Codes courts seulement, jamais de secret."""
+
+    id: int
+    event: str
+    app_id: str | None
+    user_key: str | None
+    reason: str | None
+    actor: str | None
+    status: str
+    attempts: int
+    last_error: str | None
+    created_at: datetime
+    sent_at: datetime | None = None
+
+
+class NotificationStore(Protocol):
+    """Réglages et boîte d'envoi (tables ``notification_settings`` et ``notifications``)."""
+
+    async def get_settings(self) -> NotificationSettings: ...
+
+    async def save_settings(self, settings: NotificationSettings, by: str) -> None: ...
+
+    async def enqueue(
+        self, event: str, app_id: str | None, user_key: str | None, reason: str | None, actor: str | None
+    ) -> None:
+        """Dépose un événement (côté admin : ``admin_sensitive``). Le portail et le proxy
+        déposent les leurs directement."""
+        ...
+
+    async def claim_pending(self, limit: int) -> list[Notification]:
+        """Événements à expédier, avec un bail de quelques minutes (une réplique de l'admin
+        ne reprend pas ce qu'une autre est en train d'envoyer)."""
+        ...
+
+    async def mark(self, notification_id: int, status: str, error: str | None) -> None:
+        """``sent`` / ``skipped`` / ``failed`` ; ``retry`` remet en file avec une attente
+        croissante (les tentatives sont comptées)."""
+        ...
+
+    async def recent(self, limit: int) -> list[Notification]: ...
+
+    async def purge(self, older_than_days: int) -> int: ...
+
+
 class SecretWriter(Protocol):
     """Coffre en écriture seule : l'UI d'admin ne relit jamais un secret."""
 
@@ -140,6 +221,24 @@ class AccountStore(Protocol):
 
     async def get_diagnostic(self, app_id: str, user_key: str) -> Diagnostic | None:
         """Diagnostic du dernier rejeu en échec (écrit par le proxy), s'il existe."""
+        ...
+
+
+class AccessRequestStore(Protocol):
+    """Demandes d'accès (table ``access_requests``, écrite par le portail et le proxy)."""
+
+    async def list_open(self) -> list[AccessRequest]:
+        """Demandes ouvertes, de la plus ancienne à la plus récente."""
+        ...
+
+    async def get_open(self, app_id: str, user_key: str) -> AccessRequest | None: ...
+
+    async def count_open(self) -> int: ...
+
+    async def resolve(
+        self, app_id: str, user_key: str, status: Literal["approved", "rejected", "fulfilled"], by: str
+    ) -> bool:
+        """Clôt la demande ouverte du couple ; ``False`` s'il n'y en avait pas."""
         ...
 
 

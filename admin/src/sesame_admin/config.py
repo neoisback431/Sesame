@@ -76,6 +76,10 @@ class Settings:
     secret_store: str
     secrets_encryption_key: str | None = field(repr=False)
     openbao: OpenBaoConfig | None
+    # Notifications par mail (ADR 0030) : le serveur, l'expéditeur et les destinataires se règlent
+    # dans la console ; seul le mot de passe SMTP vient de l'environnement (jamais en base).
+    smtp_password: str | None = field(default=None, repr=False)
+    notify_interval_secs: float = 30.0
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -136,6 +140,8 @@ class Settings:
                 if secret_store == "postgres"  # noqa: S105 (nom de la brique, pas un mot de passe)
                 else None
             ),
+            smtp_password=(os.environ.get("SESAME_SMTP_PASSWORD") or None),
+            notify_interval_secs=float(_or("SESAME_NOTIFY_INTERVAL_SECS", "30")),
             openbao=(
                 OpenBaoConfig(
                     addr=_required("SESAME_OPENBAO_ADDR"),

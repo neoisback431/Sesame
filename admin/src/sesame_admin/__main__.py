@@ -16,10 +16,18 @@ from .auth import Authenticator, OidcAuthenticator, SamlAuthenticator
 from .config import Settings
 from .crypto import SecretCipher
 from .descriptors import DescriptorValidator, load_dir
+from .notifications import NotificationWorker, SmtpMailer
 from .openbao import OpenBaoSecretWriter
 from .recorder import HttpRecorder
 from .service import AdminService
-from .store_postgres import PgPool, PostgresAccountStore, PostgresDescriptorStore, PostgresSecretWriter
+from .store_postgres import (
+    PgPool,
+    PostgresAccessRequestStore,
+    PostgresAccountStore,
+    PostgresDescriptorStore,
+    PostgresNotificationStore,
+    PostgresSecretWriter,
+)
 from .web import create_app
 
 
@@ -53,6 +61,8 @@ def main() -> None:
         secrets = OpenBaoSecretWriter(
             s.openbao, httpx.AsyncClient(timeout=10, verify=verify, follow_redirects=False)
         )
+    mailer = SmtpMailer(s.smtp_password, str(s.ca_file) if s.ca_file else None)
+    notifications = PostgresNotificationStore(db)
     service = AdminService(
         apps,
         secrets,
@@ -60,7 +70,14 @@ def main() -> None:
         audit,
         PostgresDescriptorStore(db),
         DescriptorValidator(s.schema_file),
+        PostgresAccessRequestStore(db),
+        notifications,
+        mailer,
     )
+
+    async def app_names() -> dict[str, str]:
+        return {a.id: a.name for a in (await service.catalog()).apps.values()}
+
     recorder = HttpRecorder(s.recorder_url, s.recorder_token) if s.recorder_url and s.recorder_token else None
     authenticator: Authenticator
     if s.idp_protocol == "saml":
@@ -88,6 +105,10 @@ def main() -> None:
         session_ttl_secs=s.session_ttl_secs,
         secure_cookies=s.public_url.startswith("https://"),
         recorder=recorder,
+        worker=NotificationWorker(
+            notifications, mailer, s.public_url, app_names, interval=s.notify_interval_secs
+        ),
+        smtp_password_set=mailer.has_password,
     )
     logging.getLogger(__name__).info("administration démarrée (%d applis en fichiers)", len(apps))
     uvicorn.run(

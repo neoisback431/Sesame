@@ -5,10 +5,22 @@ from __future__ import annotations
 
 import copy
 from collections import Counter
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
-from .ports import Account, Conflict, DescriptorRevision, Diagnostic, NotFound, Status, StoredDescriptor
+from .ports import (
+    AccessRequest,
+    Account,
+    Conflict,
+    DescriptorRevision,
+    Diagnostic,
+    NotFound,
+    Notification,
+    NotificationSettings,
+    Status,
+    StoredDescriptor,
+)
 
 
 class MemorySecretWriter:
@@ -83,6 +95,80 @@ class MemoryAccountStore:
     async def get_diagnostic(self, app_id: str, user_key: str) -> Diagnostic | None:
         doc = self.diagnostics.get((app_id, user_key))
         return Diagnostic.from_document(doc) if doc is not None else None
+
+
+class MemoryNotificationStore:
+    def __init__(self) -> None:
+        self.settings = NotificationSettings()
+        self.items: list[Notification] = []
+        self._next_id = 1
+
+    async def get_settings(self) -> NotificationSettings:
+        return self.settings
+
+    async def save_settings(self, settings: NotificationSettings, by: str) -> None:
+        self.settings = replace(settings, updated_at=datetime.now(UTC), updated_by=by)
+
+    async def enqueue(self, event, app_id, user_key, reason, actor) -> None:  # type: ignore[no-untyped-def]
+        self.deposit(event, app_id, user_key, reason, actor)
+
+    def deposit(self, event, app_id=None, user_key=None, reason=None, actor=None) -> None:  # type: ignore[no-untyped-def]
+        """Simule un dépôt du portail / du proxy."""
+        self.items.append(
+            Notification(
+                self._next_id, event, app_id, user_key, reason, actor, "pending", 0, None, datetime.now(UTC)
+            )
+        )
+        self._next_id += 1
+
+    async def claim_pending(self, limit: int) -> list[Notification]:
+        return [n for n in self.items if n.status == "pending"][:limit]
+
+    async def mark(self, notification_id: int, status: str, error: str | None) -> None:
+        for i, n in enumerate(self.items):
+            if n.id == notification_id:
+                attempts = n.attempts + (1 if status in ("retry", "failed") else 0)
+                new = "pending" if status == "retry" else status
+                sent_at = datetime.now(UTC) if status == "sent" else n.sent_at
+                self.items[i] = replace(n, status=new, attempts=attempts, last_error=error, sent_at=sent_at)
+
+    async def recent(self, limit: int) -> list[Notification]:
+        return list(reversed(self.items))[:limit]
+
+    async def purge(self, older_than_days: int) -> int:
+        return 0
+
+
+class MemoryAccessRequestStore:
+    def __init__(self) -> None:
+        self.requests: dict[tuple[str, str], AccessRequest] = {}
+        self.resolved: dict[tuple[str, str], str] = {}
+
+    def submit(self, app_id: str, user_key: str, kind: str, note: str | None = None) -> None:
+        """Simule le dépôt d'une demande (fait par le portail / le proxy en production)."""
+        self.requests[(app_id, user_key)] = AccessRequest(
+            app_id,
+            user_key,
+            kind,
+            note,
+            datetime.now(UTC),  # type: ignore[arg-type]
+        )
+        self.resolved.pop((app_id, user_key), None)
+
+    async def list_open(self) -> list[AccessRequest]:
+        return sorted(self.requests.values(), key=lambda r: r.created_at)
+
+    async def get_open(self, app_id: str, user_key: str) -> AccessRequest | None:
+        return self.requests.get((app_id, user_key))
+
+    async def count_open(self) -> int:
+        return len(self.requests)
+
+    async def resolve(self, app_id: str, user_key: str, status: str, by: str) -> bool:
+        if self.requests.pop((app_id, user_key), None) is None:
+            return False
+        self.resolved[(app_id, user_key)] = status
+        return True
 
 
 def _host(document: dict[str, Any]) -> Any:

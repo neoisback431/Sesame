@@ -28,8 +28,9 @@
     .flash{padding:10px 14px;border-radius:6px;margin-bottom:16px}
     .flash.ok{background:#e5f5ea;border:1px solid #9fd4ae}.flash.error{background:#fdecec;border:1px solid #efa6a6}
     .status{padding:2px 8px;border-radius:10px;font-size:.85em}
-    .status.active{background:#e5f5ea}.status.failed{background:#fdecec}.status.disabled{background:#eceef2}
-    label{display:block;margin:8px 0 4px}input[type=text],input[type=password]{width:100%;max-width:360px;padding:6px}
+    .status.active{background:#e5f5ea}.status.failed{background:#fdecec}.status.disabled{background:#eceef2}.status.pending{background:#fff3d6}
+    label{display:block;margin:8px 0 4px}input[type=text],input[type=password],select{width:100%;max-width:360px;padding:6px}
+    input[type=checkbox]{margin-right:6px}
     form.inline{display:inline}
     button{padding:5px 12px;border:1px solid var(--blue);border-radius:5px;background:var(--blue);color:#fff;font:inherit;cursor:pointer}
     button:hover{background:var(--navy);border-color:var(--navy)}
@@ -47,7 +48,7 @@
 <header>
   <nav>
     <a class="brand" href="/"><img src="/static/logo-64.png" alt="" width="32" height="32"><span><b>SE</b>same</span><small>Administration</small></a>
-    {% if admin %}<a class="nav" href="/">Applications</a><a class="nav" href="/users">Utilisateurs</a>{% endif %}
+    {% if admin %}<a class="nav" href="/">Applications</a><a class="nav" href="/users">Utilisateurs</a><a class="nav" href="/requests">Demandes d'accès</a><a class="nav" href="/settings/notifications">Notifications</a>{% endif %}
   </nav>
   {% if admin %}
   <form class="inline" method="post" action="/logout">
