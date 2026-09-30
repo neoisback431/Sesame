@@ -37,5 +37,6 @@ fill SESAME_SESSION_ENCRYPTION_KEY "$(openssl rand -base64 32)"
 fill SESAME_SECRETS_ENCRYPTION_KEY "$(openssl rand -base64 32)"
 fill SESAME_ADMIN_SESSION_KEY "$(openssl rand -hex 32)"
 fill SESAME_RECORDER_TOKEN "$(openssl rand -hex 32)"
+fill SESAME_INTERNAL_TOKEN "$(openssl rand -hex 32)"
 
 echo "Terminé. Renseignez maintenant la section 1 de .env (domaine et fournisseur d'identité)."

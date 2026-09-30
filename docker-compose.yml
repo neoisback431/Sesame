@@ -55,6 +55,9 @@ services:
       # Lien « Administration » sur « Mes applications », pour le groupe d'administrateurs.
       SESAME_ADMIN_URL: https://admin.sesame.localhost:8443
       SESAME_ADMIN_GROUP: ${SESAME_ADMIN_GROUP:-sesame-admins}
+      # Demandes d'accès avec identifiants (ADR 0029) : relais vers le service interne du proxy.
+      SESAME_PROXY_INTERNAL_URL: http://proxy:8082
+      SESAME_INTERNAL_TOKEN: dev-internal-token
       SESAME_DATABASE_URL: postgres://sesame:dev-db-password@postgres:5432/sesame
       # Clé de dev (base64, 32 octets) : chiffre l'état OIDC temporaire.
       SESAME_PORTAL_STATE_KEY: c2VzYW1lLWRldi1wb3J0YWwtc3RhdGUta2V5LTAwMDE=
@@ -89,6 +92,8 @@ services:
       # supplémentaire). Clé de dev (base64, 32 octets), distincte de celle des sessions.
       SESAME_SECRETS_ENCRYPTION_KEY: c2VzYW1lLWRldi1zZWNyZXRzLWtleS0wMDAwMDAwMTI=
       SESAME_CA_FILE: /etc/sesame/ca.crt
+      # Service interne des demandes d'accès (ADR 0029), jamais exposé par Nginx.
+      SESAME_INTERNAL_TOKEN: dev-internal-token
       # Dev : réponse de l'appli conservée en cas d'échec de rejeu, visible dans l'admin (ADR 0018).
       SESAME_REPLAY_DEBUG: "true"
       RUST_LOG: info
@@ -122,6 +127,9 @@ services:
       # Service recorder interne, pour le bouton « Analyser une page de login ».
       SESAME_RECORDER_URL: http://recorder:8090
       SESAME_RECORDER_TOKEN: dev-recorder-token
+      # Notifications par mail (ADR 0030) : serveur et destinataires dans la console ; seul le mot
+      # de passe SMTP est ici, facultatif (relais interne sans authentification).
+      SESAME_SMTP_PASSWORD: ${SESAME_SMTP_PASSWORD:-}
     volumes:
       - ./descriptors:/etc/sesame/descriptors:ro
       - ./schemas/app-descriptor.schema.json:/etc/sesame/app-descriptor.schema.json:ro

@@ -98,6 +98,31 @@ Le portail doit savoir quelles applis afficher sans accéder au coffre : seul le
 | `active` | Compte provisionné | Affichée | Autorisé |
 | `failed` | Dernier rejeu en échec (identifiants refusés, formulaire changé…) | Affichée, signalée | Bloqué jusqu'à correction |
 | `disabled` | Désactivé par un administrateur | Masquée | Bloqué |
+| `pending` | Identifiants fournis par l'utilisateur depuis « Mes applications », en attente d'activation par un administrateur (ADR 0029) | Grisée (« demande en cours ») | Bloqué jusqu'à activation |
+
+### Demandes d'accès (ADR 0029)
+
+Une tuile grisée (sans compte) porte un bouton **« Demander l'accès »** (`GET /apps/<id>/request`, portail) avec deux options :
+
+1. **« J'ai déjà un compte »** : l'utilisateur saisit ses identifiants applicatifs. Le portail ne les lit ni ne les stocke : il les **relaie au moteur de proxy** par un service interne (`POST /internal/access-requests`, jeton partagé, jamais exposé par Nginx). Le proxy contrôle l'habilitation, refuse d'écraser un compte existant, **vérifie les identifiants par un rejeu de test** (une seule tentative, sans session), crée le compte `pending` puis écrit le secret dans le coffre (PostgreSQL). Un administrateur n'a plus qu'à **activer** (ou refuser, ce qui supprime identifiants et compte en attente).
+2. **« Je n'ai pas de compte »** : une demande (avec message facultatif) est enregistrée dans `access_requests`. L'administrateur la voit dans « Demandes d'accès », crée le compte par le formulaire habituel (la demande est alors clôturée) ou refuse.
+
+```mermaid
+sequenceDiagram
+    participant U as Utilisateur
+    participant P as Portail
+    participant X as Proxy (service interne)
+    participant A as Application
+    participant V as Coffre + registre
+    participant D as Admin
+    U->>P: POST /apps/<id>/request/credentials
+    P->>X: identifiants + identité (jeton interne)
+    X->>A: rejeu de test (1 tentative)
+    X->>V: compte pending, puis secret
+    X-->>P: recorded
+    P-->>U: « Mes applications » (tuile en attente)
+    D->>V: Activer : compte active, demande approved
+```
 
 - **Source** : l'UI d'admin. Elle écrit le secret dans le coffre (sans pouvoir le relire) et crée ou met à jour l'entrée du registre dans la même opération.
 - **Proxy** : avant de lire le coffre, il vérifie l'habilitation (si `spec.access` est défini) et l'état `active` du compte. Sinon, il refuse sans lire le coffre et émet `access_denied`. Après un rejeu, il met à jour `last_login_at` ou passe le compte à `failed`.
@@ -323,6 +348,9 @@ Chaque lecture de secret et chaque rejeu produit un événement, succès ou éch
 | `login_replay` | Proxy | Rejeu du login (succès, échec, abandon) |
 | `session_handoff` | Proxy | Remise de la session au navigateur (mode handoff) |
 | `app_session_expired` | Proxy | Expiration détectée |
+| `notification_settings_updated` / `notification_test` | Admin | Réglages des notifications modifiés (nombre de destinataires et d'événements, jamais les adresses) ; mail de test envoyé (`reason` : code d'échec SMTP éventuel), ADR 0030 |
+| `access_requested` | Portail, proxy | Demande d'accès déposée (`reason` : `credentials` ou `no_account`, ou motif d'échec : `verify_failed:<code>`, `account_exists`, `not_allowed`…), ADR 0029 |
+| `access_request_approved` / `_rejected` / `_fulfilled` | Admin | Demande traitée (`reason` : type de la demande) |
 | `app_logout` | Proxy, portail | Chemin de déconnexion de l'appli appelé (proxy), ou déconnexion forcée d'une appli depuis « Mes applications » (portail, `reason: manual_from_portal`, ADR 0022) |
 
 Champs : horodatage UTC, action, résultat, acteur (`issuer` + `subject`), appli, compte visé (`target_user`, pour les actions d'administration), identifiant de corrélation, raison courte. Jamais de secret, de cookie ni de contenu de réponse.
