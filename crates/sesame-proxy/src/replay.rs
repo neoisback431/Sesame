@@ -17,7 +17,8 @@ use sesame_core::descriptor::{
 };
 use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{
-    AccountRegistry, AccountStatus, AuditSink, DiagnosticStore, PortError, ReplayDiagnostic, SecretStore,
+    AccountRegistry, AccountStatus, AuditSink, DiagnosticStore, NotificationEvent, Notifier, PortError,
+    ReplayDiagnostic, SecretStore,
 };
 use sesame_core::secret::{Credential, ExposeSecret};
 use url::Url;
@@ -83,6 +84,8 @@ pub struct Replayer {
     pub audit: Arc<dyn AuditSink>,
     /// Présent si `SESAME_REPLAY_DEBUG` : diagnostic du dernier échec (ADR 0018).
     pub diagnostics: Option<Arc<dyn DiagnosticStore>>,
+    /// Signalement aux administrateurs (ADR 0030) : compte en échec, appli injoignable.
+    pub notifier: Arc<dyn Notifier>,
 }
 
 /// Corps de requête effacé de la mémoire à la destruction (contient le mot de passe).
@@ -143,6 +146,14 @@ impl Replayer {
                     .correlation(cid)
                     .reason(format!("failed:{reason}"));
                 let _ = self.audit(event).await;
+                self.notifier
+                    .notify(
+                        NotificationEvent::AccountFailed,
+                        app,
+                        Some(&user.user_key),
+                        reason,
+                    )
+                    .await;
             }
             Err(e) => tracing::error!(error = %e, app, "mise à jour du registre des comptes impossible"),
         }
@@ -174,6 +185,7 @@ impl Replayer {
             Some(AccountStatus::Active) => None,
             Some(AccountStatus::Failed) => Some("account_failed"),
             Some(AccountStatus::Disabled) => Some("account_disabled"),
+            Some(AccountStatus::Pending) => Some("account_pending"),
             None => Some("no_account"),
         };
         if let Some(reason) = denied {
@@ -250,12 +262,66 @@ impl Replayer {
         };
         self.audit(event(AuditAction::LoginReplay, AuditOutcome::Failure).reason(reason))
             .await?;
-        if let ReplayError::Rejected(r) = err {
-            self.mark_failed(d, user, cid, r).await;
-            self.save_diagnostic(d, user, cid, r, capture).await;
+        match err {
+            ReplayError::Rejected(r) => {
+                self.mark_failed(d, user, cid, r).await;
+                self.save_diagnostic(d, user, cid, r, capture).await;
+            }
+            // Appli hors service : aucun changement d'état, mais l'administrateur doit le savoir.
+            ReplayError::Upstream => {
+                self.notifier
+                    .notify(NotificationEvent::UpstreamUnreachable, app, None, reason)
+                    .await;
+            }
+            _ => {}
         }
         tracing::warn!(app, correlation_id = cid, reason, "rejeu en échec");
         Err(err)
+    }
+
+    /// Vérifie des identifiants fournis par l'utilisateur lors d'une demande d'accès (ADR 0029).
+    ///
+    /// Une seule tentative (pas de nouvel essai : le compte applicatif ne doit pas se
+    /// verrouiller), sans session conservée ni écriture dans le registre. Audité comme un
+    /// rejeu, succès ou échec ; le motif d'échec est un code court.
+    pub async fn verify(
+        &self,
+        http: &reqwest::Client,
+        d: &AppDescriptor,
+        user: &UserIdentity,
+        credential: &Credential,
+        cid: &str,
+    ) -> Result<(), ReplayError> {
+        let event = |outcome| {
+            AuditEvent::new(AuditAction::LoginReplay, outcome)
+                .actor(user)
+                .app(&d.metadata.id)
+                .correlation(cid)
+        };
+        let result = match self.login(http, d, credential, &mut None).await {
+            Ok(Outcome::Success(..)) => Ok(()),
+            Ok(Outcome::Failure(reason) | Outcome::Indeterminate(reason)) => {
+                Err(ReplayError::Rejected(reason))
+            }
+            Err(e) => {
+                tracing::warn!(
+                    app = %d.metadata.id,
+                    correlation_id = cid,
+                    error = %describe_upstream_error(e),
+                    "appli injoignable pendant la vérification"
+                );
+                Err(ReplayError::Upstream)
+            }
+        };
+        let audited = match &result {
+            Ok(()) => event(AuditOutcome::Success).reason("access_request_verify"),
+            Err(ReplayError::Rejected(r)) => {
+                event(AuditOutcome::Failure).reason(format!("access_request_verify:{r}"))
+            }
+            Err(_) => event(AuditOutcome::Failure).reason("access_request_verify:upstream_unreachable"),
+        };
+        self.audit(audited).await?;
+        result
     }
 
     async fn save_diagnostic(

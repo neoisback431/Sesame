@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use sesame_core::crypto::CookieCipher;
 use sesame_core::identity::validate_user_key;
-use sesame_core::ports::{PortError, PortResult, SecretStore};
-use sesame_core::secret::{Credential, SecretString};
+use sesame_core::ports::{PortError, PortResult, SecretStore, SecretWriter};
+use sesame_core::secret::{Credential, ExposeSecret, SecretString};
 use sqlx::postgres::PgPool;
 use sqlx::Row;
 
@@ -85,6 +85,21 @@ impl PgSecretStore {
             .await
             .map_err(db_err)?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl SecretWriter for PgSecretStore {
+    async fn put_credential(&self, app_id: &str, user_key: &str, credential: &Credential) -> PortResult<()> {
+        let fields = credential
+            .keys()
+            .filter_map(|k| {
+                credential
+                    .get(k)
+                    .map(|v| (k.to_owned(), v.expose_secret().to_owned()))
+            })
+            .collect();
+        PgSecretStore::put_credential(self, app_id, user_key, &fields).await
     }
 }
 

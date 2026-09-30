@@ -3,6 +3,8 @@
 //! implémentations en mémoire.
 #![allow(dead_code)]
 
+pub mod access;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -20,7 +22,8 @@ use sesame_core::crypto::hash_token;
 use sesame_core::descriptor::AppDescriptor;
 use sesame_core::identity::UserIdentity;
 use sesame_core::memory::{
-    MemoryAccountRegistry, MemoryAuditSink, MemoryDiagnosticStore, MemorySecretStore, MemorySessionStore,
+    MemoryAccountRegistry, MemoryAuditSink, MemoryDiagnosticStore, MemoryNotifier, MemorySecretStore,
+    MemorySessionStore,
 };
 use sesame_core::ports::{DiagnosticStore, PortalSession, SessionStore};
 use sesame_proxy::replay::Replayer;
@@ -215,6 +218,7 @@ pub struct Bench {
     pub accounts: Arc<MemoryAccountRegistry>,
     pub audit: Arc<MemoryAuditSink>,
     pub diagnostics: Arc<MemoryDiagnosticStore>,
+    pub notifier: Arc<MemoryNotifier>,
 }
 
 pub fn descriptor(internal: &str) -> AppDescriptor {
@@ -260,6 +264,7 @@ pub async fn bench_with(groups: &[&str], password: &str, with_account: bool, rep
     });
     let audit = Arc::new(MemoryAuditSink::default());
     let diagnostics = Arc::new(MemoryDiagnosticStore::default());
+    let notifier = Arc::new(MemoryNotifier::default());
     let now = SystemTime::now();
     sessions
         .create_portal_session(PortalSession {
@@ -284,6 +289,7 @@ pub async fn bench_with(groups: &[&str], password: &str, with_account: bool, rep
             secrets: secrets.clone(),
             accounts: accounts.clone(),
             audit: audit.clone(),
+            notifier: notifier.clone(),
             diagnostics: replay_debug.then(|| diagnostics.clone() as Arc<dyn DiagnosticStore>),
         },
         1024 * 1024,
@@ -299,6 +305,7 @@ pub async fn bench_with(groups: &[&str], password: &str, with_account: bool, rep
         accounts,
         audit,
         diagnostics,
+        notifier,
     }
 }
 

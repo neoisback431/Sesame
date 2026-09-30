@@ -23,6 +23,14 @@ pub struct ProxyConfig {
     /// Diagnostic des rejeux en échec, consultable dans l'administration (ADR 0018).
     pub replay_debug: bool,
     pub secret_store: SecretStoreConfig,
+    /// Service interne des demandes d'accès (ADR 0029) : adresse d'écoute et jeton partagé
+    /// avec le portail. Désactivé si le jeton est absent.
+    pub internal: Option<InternalConfig>,
+}
+
+pub struct InternalConfig {
+    pub listen: String,
+    pub token: SecretString,
 }
 
 pub enum SecretStoreConfig {
@@ -77,6 +85,10 @@ impl ProxyConfig {
             reload_interval: config::duration("SESAME_DESCRIPTORS_RELOAD", "10s")?,
             replay_debug: config::flag("SESAME_REPLAY_DEBUG"),
             secret_store,
+            internal: config::optional("SESAME_INTERNAL_TOKEN").map(|token| InternalConfig {
+                listen: config::or("SESAME_PROXY_INTERNAL_LISTEN", "0.0.0.0:8082"),
+                token: SecretString::from(token),
+            }),
         })
     }
 }

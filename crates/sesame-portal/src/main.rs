@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use sesame_core::audit::StdoutAuditSink;
 use sesame_core::crypto::CookieCipher;
-use sesame_core::ports::DescriptorStore;
+use sesame_core::ports::{AccessRequests, DescriptorStore};
 use sesame_core::sources::{log_rejected, watch, DescriptorSource};
 use sesame_portal::config::PortalConfig;
 use sesame_portal::idp::IdentityProvider;
@@ -48,7 +48,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         idp,
         state_cipher: CookieCipher::from_base64(&cfg.state_key)?,
         sessions: store.clone(),
-        accounts: store,
+        accounts: store.clone(),
+        access: store.clone() as Arc<dyn AccessRequests>,
+        notifier: store,
+        proxy_internal: cfg
+            .proxy_internal
+            .map(|c| -> Result<_, reqwest::Error> {
+                Ok(sesame_portal::access::ProxyInternal {
+                    url: c.url,
+                    token: c.token,
+                    http: sesame_portal::access::internal_client()?,
+                })
+            })
+            .transpose()?,
         audit: Arc::new(StdoutAuditSink::default()),
         admin_url: cfg.admin_url,
         admin_group: cfg.admin_group,

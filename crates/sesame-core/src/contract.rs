@@ -8,8 +8,8 @@ use std::time::{Duration, SystemTime};
 use crate::identity::UserIdentity;
 use crate::memory::cookie_value;
 use crate::ports::{
-    AccountRegistry, AccountStatus, AppSession, DescriptorStore, DiagnosticStore, PortError, PortalSession,
-    ReplayDiagnostic, SessionStore,
+    AccessRequests, AccountRegistry, AccountStatus, AppSession, DescriptorStore, DiagnosticStore, PortError,
+    PortalSession, ReplayDiagnostic, SessionStore,
 };
 use crate::secret::AppCookie;
 
@@ -167,6 +167,79 @@ pub async fn account_registry(registry: &dyn AccountRegistry, app: &str, user: &
     assert!(registry.get_account(app, "personne").await.unwrap().is_none());
 }
 
+/// `fresh` n'a aucun compte ; `existing` a un compte actif (créé par le seed, hors interface).
+pub async fn access_requests(
+    requests: &dyn AccessRequests,
+    registry: &dyn AccountRegistry,
+    app: &str,
+    fresh: &str,
+    existing: &str,
+) {
+    use crate::ports::{AccessRequestKind::*, SubmitOutcome::*};
+
+    // Sans compte : « pas de compte » enregistre la demande, sans créer de compte.
+    assert_eq!(
+        requests
+            .submit(app, fresh, NoAccount, Some("besoin"))
+            .await
+            .unwrap(),
+        Recorded
+    );
+    assert!(registry.get_account(app, fresh).await.unwrap().is_none());
+    let open = requests.open_for_user(fresh).await.unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(
+        (open[0].kind, open[0].note.as_deref()),
+        (NoAccount, Some("besoin"))
+    );
+
+    // Identifiants fournis : la demande est remplacée et le compte passe en attente.
+    assert_eq!(
+        requests.submit(app, fresh, Credentials, None).await.unwrap(),
+        Recorded
+    );
+    let open = requests.open_for_user(fresh).await.unwrap();
+    assert_eq!(open.len(), 1, "une seule demande par couple");
+    assert_eq!(open[0].kind, Credentials);
+    let a = registry.get_account(app, fresh).await.unwrap().unwrap();
+    assert_eq!(a.status, AccountStatus::Pending);
+    // Nouvelle soumission tant que le compte est en attente : remplacement permis.
+    assert_eq!(
+        requests.submit(app, fresh, Credentials, None).await.unwrap(),
+        Recorded
+    );
+
+    // Retrait : ni demande ni compte en attente.
+    requests.withdraw(app, fresh).await.unwrap();
+    assert!(requests.open_for_user(fresh).await.unwrap().is_empty());
+    assert!(registry.get_account(app, fresh).await.unwrap().is_none());
+
+    // Un compte existant (actif, échec, désactivé) n'est jamais modifié.
+    for status in [
+        AccountStatus::Active,
+        AccountStatus::Failed,
+        AccountStatus::Disabled,
+    ] {
+        registry.set_status(app, existing, status, None).await.unwrap();
+        for kind in [Credentials, NoAccount] {
+            assert_eq!(
+                requests.submit(app, existing, kind, None).await.unwrap(),
+                AccountExists
+            );
+            let a = registry.get_account(app, existing).await.unwrap().unwrap();
+            assert_eq!(a.status, status);
+        }
+    }
+    assert!(requests.open_for_user(existing).await.unwrap().is_empty());
+    registry
+        .set_status(app, existing, AccountStatus::Active, None)
+        .await
+        .unwrap();
+    // `withdraw` ne supprime jamais un compte qui n'est pas en attente.
+    requests.withdraw(app, existing).await.unwrap();
+    assert!(registry.get_account(app, existing).await.unwrap().is_some());
+}
+
 /// Le compte (`app`, `user`) doit exister dans le registre (clé étrangère côté base).
 pub async fn diagnostic_store(store: &dyn DiagnosticStore, app: &str, user: &str) {
     assert!(store.get_diagnostic(app, user).await.unwrap().is_none());
@@ -242,7 +315,9 @@ pub async fn descriptor_store(store: &dyn DescriptorStore, prefix: &str) {
 
 #[cfg(test)]
 mod tests {
-    use crate::memory::{MemoryAccountRegistry, MemorySessionStore};
+    use std::sync::Arc;
+
+    use crate::memory::{MemoryAccessRequests, MemoryAccountRegistry, MemorySessionStore};
 
     #[tokio::test]
     async fn memory_session_store() {
@@ -263,5 +338,18 @@ mod tests {
     async fn memory_account_registry() {
         let r = MemoryAccountRegistry::with_active(&[("app1", "alice")]);
         super::account_registry(&r, "app1", "alice").await;
+    }
+
+    #[tokio::test]
+    async fn memory_access_requests() {
+        let r = Arc::new(MemoryAccountRegistry::with_active(&[("app1", "alice")]));
+        super::access_requests(
+            &MemoryAccessRequests::new(r.clone()),
+            &*r,
+            "app1",
+            "nouveau",
+            "alice",
+        )
+        .await;
     }
 }

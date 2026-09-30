@@ -221,7 +221,7 @@ fn identity_from_assertion(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use chrono::{Duration, Utc};
     use samael::attribute::{Attribute, AttributeValue};
     use samael::crypto::{Crypto, CryptoProvider};
@@ -357,13 +357,13 @@ mod tests {
 
     /// Un IdP de test complet : clé + certificat, et le `Saml` du portail configuré pour lui
     /// faire confiance (mêmes valeurs que `SamlConfig` en configuration réelle).
-    struct TestSetup {
+    pub(crate) struct TestSetup {
         idp: TestIdp,
         idp_cert_der: samael::crypto::CertificateDer,
-        saml: Saml,
+        pub(crate) saml: Saml,
     }
 
-    fn setup() -> TestSetup {
+    pub(crate) fn setup() -> TestSetup {
         let idp = TestIdp::generate_new(KeyType::Rsa(Rsa::Rsa2048)).unwrap();
         let idp_cert_der = idp
             .create_certificate(&CertificateParams {

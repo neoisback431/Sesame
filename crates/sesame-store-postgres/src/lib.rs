@@ -13,8 +13,9 @@ use chrono::{DateTime, Utc};
 use sesame_core::crypto::CookieCipher;
 use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{
-    AccountRegistry, AccountStatus, AppAccount, AppSession, DescriptorStore, DiagnosticStore, PortError,
-    PortResult, PortalSession, ReplayDiagnostic, SessionStore, StoredDescriptor,
+    AccessRequest, AccessRequestKind, AccessRequests, AccountRegistry, AccountStatus, AppAccount, AppSession,
+    DescriptorStore, DiagnosticStore, NotificationEvent, Notifier, PortError, PortResult, PortalSession,
+    ReplayDiagnostic, SessionStore, StoredDescriptor, SubmitOutcome,
 };
 use sesame_core::secret::{AppCookie, ExposeSecret, SecretString};
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -52,6 +53,7 @@ fn status_str(s: AccountStatus) -> &'static str {
         AccountStatus::Active => "active",
         AccountStatus::Failed => "failed",
         AccountStatus::Disabled => "disabled",
+        AccountStatus::Pending => "pending",
     }
 }
 
@@ -60,6 +62,7 @@ fn parse_status(s: &str) -> PortResult<AccountStatus> {
         "active" => Ok(AccountStatus::Active),
         "failed" => Ok(AccountStatus::Failed),
         "disabled" => Ok(AccountStatus::Disabled),
+        "pending" => Ok(AccountStatus::Pending),
         other => Err(PortError::Other(format!("état de compte inconnu : {other}"))),
     }
 }
@@ -98,6 +101,15 @@ impl PgStore {
         .await
         .map_err(db_err)?;
         Ok(())
+    }
+
+    /// Notifications déposées pour une appli (usage : tests).
+    pub async fn count_notifications(&self, app_id: &str) -> i64 {
+        sqlx::query_scalar("SELECT count(*) FROM notifications WHERE app_id = $1")
+            .bind(app_id)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(-1)
     }
 
     /// Coffre de secrets sur ce même pool, avec sa propre clé (ADR 0021). Indépendante du
@@ -355,6 +367,144 @@ impl AccountRegistry for PgStore {
             .await
             .map_err(db_err)?;
         Ok(())
+    }
+}
+
+/// Fenêtre de regroupement des notifications identiques (ADR 0030).
+const NOTIFY_DEDUPE: &str = "10 minutes";
+
+#[async_trait]
+impl Notifier for PgStore {
+    async fn notify(&self, event: NotificationEvent, app_id: &str, user_key: Option<&str>, reason: &str) {
+        let done = sqlx::query(&format!(
+            "INSERT INTO notifications (event, app_id, user_key, reason)
+             SELECT $1::text, $2::text, $3::text, $4::text
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM notifications
+                 WHERE event = $1::text AND app_id = $2::text AND user_key IS NOT DISTINCT FROM $3::text
+                   AND created_at > now() - interval '{NOTIFY_DEDUPE}')"
+        ))
+        .bind(event.as_str())
+        .bind(app_id)
+        .bind(user_key)
+        .bind(reason)
+        .execute(&self.pool)
+        .await;
+        if let Err(e) = done {
+            tracing::warn!(error = %db_err(e), event = event.as_str(), app_id, "notification non enregistrée");
+        }
+    }
+}
+
+fn kind_str(k: AccessRequestKind) -> &'static str {
+    match k {
+        AccessRequestKind::Credentials => "credentials",
+        AccessRequestKind::NoAccount => "no_account",
+    }
+}
+
+#[async_trait]
+impl AccessRequests for PgStore {
+    async fn submit(
+        &self,
+        app_id: &str,
+        user_key: &str,
+        kind: AccessRequestKind,
+        note: Option<&str>,
+    ) -> PortResult<SubmitOutcome> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        let recorded = match kind {
+            // Création du compte en attente, ou maintien s'il l'est déjà ; jamais d'écrasement
+            // d'un compte actif, en échec ou désactivé (la condition WHERE le garantit).
+            AccessRequestKind::Credentials => {
+                sqlx::query(
+                    "INSERT INTO app_accounts (app_id, user_key, status, status_reason)
+                 VALUES ($1, $2, 'pending', 'access_request')
+                 ON CONFLICT (app_id, user_key) DO UPDATE SET updated_at = now()
+                 WHERE app_accounts.status = 'pending'",
+                )
+                .bind(app_id)
+                .bind(user_key)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?
+                .rows_affected()
+                    == 1
+            }
+            AccessRequestKind::NoAccount => !sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS (SELECT 1 FROM app_accounts WHERE app_id = $1 AND user_key = $2)",
+            )
+            .bind(app_id)
+            .bind(user_key)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_err)?,
+        };
+        if !recorded {
+            return Ok(SubmitOutcome::AccountExists);
+        }
+        sqlx::query(
+            "INSERT INTO access_requests (app_id, user_key, kind, note) VALUES ($1, $2, $3, $4)
+             ON CONFLICT (app_id, user_key) DO UPDATE
+             SET kind = $3, note = $4, status = 'open', created_at = now(),
+                 resolved_at = NULL, resolved_by = NULL",
+        )
+        .bind(app_id)
+        .bind(user_key)
+        .bind(kind_str(kind))
+        .bind(note)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        Ok(SubmitOutcome::Recorded)
+    }
+
+    async fn withdraw(&self, app_id: &str, user_key: &str) -> PortResult<()> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        sqlx::query("DELETE FROM access_requests WHERE app_id = $1 AND user_key = $2 AND status = 'open'")
+            .bind(app_id)
+            .bind(user_key)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        sqlx::query("DELETE FROM app_accounts WHERE app_id = $1 AND user_key = $2 AND status = 'pending'")
+            .bind(app_id)
+            .bind(user_key)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)
+    }
+
+    async fn open_for_user(&self, user_key: &str) -> PortResult<Vec<AccessRequest>> {
+        let rows = sqlx::query(
+            "SELECT app_id, user_key, kind, note, created_at FROM access_requests
+             WHERE user_key = $1 AND status = 'open' ORDER BY app_id",
+        )
+        .bind(user_key)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+        rows.iter()
+            .map(|r| {
+                let kind: String = r.try_get("kind").map_err(db_err)?;
+                Ok(AccessRequest {
+                    app_id: r.try_get("app_id").map_err(db_err)?,
+                    user_key: r.try_get("user_key").map_err(db_err)?,
+                    kind: match kind.as_str() {
+                        "credentials" => AccessRequestKind::Credentials,
+                        "no_account" => AccessRequestKind::NoAccount,
+                        other => return Err(PortError::Other(format!("type de demande inconnu : {other}"))),
+                    },
+                    note: r.try_get("note").map_err(db_err)?,
+                    created_at: r
+                        .try_get::<DateTime<Utc>, _>("created_at")
+                        .map_err(db_err)?
+                        .into(),
+                })
+            })
+            .collect()
     }
 }
 

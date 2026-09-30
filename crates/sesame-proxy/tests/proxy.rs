@@ -519,3 +519,46 @@ async fn catalog_hot_reload_adds_and_removes_apps() {
     b.engine.set_apps(apps);
     assert!(b.get("/").await.body.contains("Bonjour amartin"));
 }
+
+#[tokio::test]
+async fn failures_are_signalled_to_administrators_once_per_window() {
+    use sesame_core::ports::NotificationEvent::{AccountFailed, UpstreamUnreachable};
+
+    // Compte en échec : un signalement, sans aucun contenu de l'appli.
+    let b = bench(&["fake-app-users"], "wrong-password", true).await;
+    b.get("/").await;
+    assert_eq!(
+        b.notifier.events(),
+        vec![(
+            AccountFailed,
+            "fake-app".to_owned(),
+            Some("alice".to_owned()),
+            "login_rejected".to_owned()
+        )]
+    );
+    assert!(!format!("{:?}", b.notifier.events()).contains("wrong-password"));
+
+    // Appli injoignable : signalement par appli, sans changement d'état du compte.
+    let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
+    let d = descriptor("http://127.0.0.1:9");
+    let http = sesame_proxy::build_client(&d, None).unwrap();
+    b.engine.set_apps(vec![sesame_proxy::App::new(d, http, "https")]);
+    let r = b.get("/").await;
+    assert_eq!(r.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        b.notifier.events(),
+        vec![(
+            UpstreamUnreachable,
+            "fake-app".to_owned(),
+            None,
+            "upstream_unreachable".to_owned()
+        )]
+    );
+    let a = b
+        .accounts
+        .get_account("fake-app", "alice")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(a.status, AccountStatus::Active);
+}

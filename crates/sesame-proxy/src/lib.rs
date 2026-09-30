@@ -17,6 +17,7 @@ pub mod config;
 pub mod diagnostic;
 pub mod form;
 pub mod handoff;
+pub mod internal;
 pub mod jar;
 pub mod matcher;
 pub mod replay;
@@ -157,6 +158,16 @@ impl Proxy {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .get(host)
+            .cloned()
+    }
+
+    /// Appli par identifiant (service interne des demandes d'accès, ADR 0029).
+    pub fn app_by_id(&self, id: &str) -> Option<Arc<App>> {
+        self.apps
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .find(|a| a.id() == id)
             .cloned()
     }
 
@@ -387,6 +398,12 @@ impl Proxy {
 
     fn replay_error(&self, err: &ReplayError, cid: &str) -> Response {
         match err {
+            ReplayError::AccessDenied("account_pending") => self.page(
+                StatusCode::FORBIDDEN,
+                "Demande en cours",
+                "Votre demande d'accès est en attente de validation par un administrateur.",
+                cid,
+            ),
             ReplayError::AccessDenied(_) => self.page(
                 StatusCode::FORBIDDEN,
                 "Accès refusé",
