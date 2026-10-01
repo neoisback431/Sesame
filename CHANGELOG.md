@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- ✨ **Noms des utilisateurs dans l'administration** (ADR 0031) : « Alice Martin » (et son e-mail) à la place de la clé illisible (`oid` d'Entra). Le portail mémorise le nom et l'e-mail déclarés par le fournisseur d'identité à chaque connexion (table `users`, migration `0008`) ; la recherche porte aussi sur le nom et l'e-mail. Un utilisateur jamais connecté reste affiché par sa clé. ⚠️ Donnée personnelle conservée en base (nom, e-mail) ; les comptes existants se remplissent à la prochaine connexion de chacun.
+
 - 🐛 **Identifiants d'appli réservés** : `new`, `admin` et `www` sont refusés (portail, proxy et administration). Le recorder déduisait l'identifiant du premier label de l'hôte de l'appli, donc `www.exemple.com` donnait `www` ; il ignore désormais les labels génériques (`www`, `login`, `sso`…), propose le suivant (`exemple`), signale que l'identifiant est déduit et à confirmer, et bloque l'enregistrement d'un identifiant réservé. ⚠️ Une appli déjà enregistrée sous un de ces identifiants est écartée au chargement : la recréer sous un autre identifiant.
 
 - 📚 **Entra ID : groupes et GUID** précisés dans le README, `docs/configuration.md` (nouvelle section), les `.env.example` et le kit AWS : `SESAME_ADMIN_GROUP` est le **GUID** du groupe, pas son nom, et les groupes doivent être activés dans l'application Entra (« Configuration du jeton » → revendication de groupes, ou `"groupMembershipClaims": "SecurityGroup"` dans le manifeste).

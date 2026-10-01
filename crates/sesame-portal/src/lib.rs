@@ -41,7 +41,10 @@ use sesame_core::crypto::{hash_token, new_token, CookieCipher};
 use sesame_core::descriptor::AppDescriptor;
 use sesame_core::html::error_page;
 use sesame_core::identity::UserIdentity;
-use sesame_core::ports::{AccessRequests, AccountRegistry, AuditSink, Notifier, PortalSession, SessionStore};
+use sesame_core::ports::{
+    AccessRequests, AccountRegistry, AuditSink, Notifier, PortalSession, SessionStore, UserDirectory,
+    UserProfile,
+};
 use sesame_core::secret::ExposeSecret;
 use url::Url;
 
@@ -61,6 +64,7 @@ pub struct Portal {
     pub state_cipher: CookieCipher,
     pub sessions: Arc<dyn SessionStore>,
     pub accounts: Arc<dyn AccountRegistry>,
+    pub users: Arc<dyn UserDirectory>,
     /// Demandes d'accès (ADR 0029).
     pub access: Arc<dyn AccessRequests>,
     /// Signalement aux administrateurs (ADR 0030).
@@ -213,6 +217,16 @@ impl Portal {
                 "Réessayez dans quelques instants.",
                 cid,
             );
+        }
+        // Nom et e-mail pour l'administration (ADR 0031) : un échec ne doit jamais empêcher la
+        // connexion, la clé utilisateur suffit à tout le reste.
+        let profile = UserProfile {
+            user_key: user.user_key.clone(),
+            display_name: user.display_name.clone(),
+            email: user.email.clone(),
+        };
+        if let Err(e) = self.users.upsert_user(&profile).await {
+            tracing::warn!(correlation_id = %cid, error = %e, "annuaire des utilisateurs non mis à jour");
         }
         tracing::info!(correlation_id = %cid, user = %user.user_key, "session portail créée");
         let set = self.cookie.set(token.expose_secret(), self.session_ttl.as_secs());

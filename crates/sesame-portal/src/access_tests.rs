@@ -17,6 +17,7 @@ use sesame_core::descriptor::AppDescriptor;
 use sesame_core::identity::UserIdentity;
 use sesame_core::memory::{
     MemoryAccessRequests, MemoryAccountRegistry, MemoryAuditSink, MemoryNotifier, MemorySessionStore,
+    MemoryUserDirectory,
 };
 use sesame_core::ports::{
     AccessRequestKind, AccessRequests, AccountRegistry, AccountStatus, PortalSession, SessionStore,
@@ -61,6 +62,8 @@ struct Bench {
     requests: Arc<MemoryAccessRequests>,
     audit: Arc<MemoryAuditSink>,
     notifier: Arc<MemoryNotifier>,
+    users: Arc<MemoryUserDirectory>,
+    portal: Arc<Portal>,
 }
 
 fn alice(groups: &[&str]) -> UserIdentity {
@@ -69,6 +72,7 @@ fn alice(groups: &[&str]) -> UserIdentity {
         subject: "sub-alice".into(),
         user_key: "alice".into(),
         display_name: Some("Alice".into()),
+        email: None,
         groups: groups.iter().map(|g| g.to_string()).collect(),
     }
 }
@@ -98,6 +102,7 @@ async fn bench(groups: &[&str], with_internal: bool) -> Bench {
     let requests = Arc::new(MemoryAccessRequests::new(accounts.clone()));
     let audit = Arc::new(MemoryAuditSink::default());
     let notifier = Arc::new(MemoryNotifier::default());
+    let users = Arc::new(MemoryUserDirectory::new());
     use base64::Engine;
     let key = base64::engine::general_purpose::STANDARD.encode([3u8; 32]);
     let portal = Portal {
@@ -113,6 +118,7 @@ async fn bench(groups: &[&str], with_internal: bool) -> Bench {
         state_cipher: CookieCipher::from_base64(&SecretString::from(key)).unwrap(),
         sessions,
         accounts: accounts.clone(),
+        users: users.clone(),
         access: requests.clone(),
         notifier: notifier.clone(),
         proxy_internal: with_internal.then(|| ProxyInternal {
@@ -124,13 +130,16 @@ async fn bench(groups: &[&str], with_internal: bool) -> Bench {
         admin_url: None,
         admin_group: "sesame-admins".into(),
     };
+    let portal = Arc::new(portal);
     Bench {
-        router: router(Arc::new(portal)),
+        router: router(portal.clone()),
         fake,
         accounts,
         requests,
         audit,
         notifier,
+        users,
+        portal,
     }
 }
 
@@ -173,6 +182,26 @@ impl Bench {
 }
 
 const GROUPS: &[&str] = &["fake-app-users"];
+
+#[tokio::test]
+async fn login_records_name_and_email_for_the_admin_directory() {
+    use sesame_core::ports::UserDirectory;
+
+    let b = bench(GROUPS, true).await;
+    let mut user = alice(GROUPS);
+    user.display_name = Some("Alice Martin".into());
+    user.email = Some("alice@example.org".into());
+    let resp = b.portal.finish_login(user, "/", "cid-test").await;
+    assert_eq!(resp.status(), StatusCode::FOUND);
+    let profile = b
+        .users
+        .get_user("alice")
+        .await
+        .unwrap()
+        .expect("profil enregistré");
+    assert_eq!(profile.display_name.as_deref(), Some("Alice Martin"));
+    assert_eq!(profile.email.as_deref(), Some("alice@example.org"));
+}
 
 #[tokio::test]
 async fn form_offers_both_options_only_when_the_proxy_relay_exists() {

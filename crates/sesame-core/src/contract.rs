@@ -9,7 +9,7 @@ use crate::identity::UserIdentity;
 use crate::memory::cookie_value;
 use crate::ports::{
     AccessRequests, AccountRegistry, AccountStatus, AppSession, DescriptorStore, DiagnosticStore, PortError,
-    PortalSession, ReplayDiagnostic, SessionStore,
+    PortalSession, ReplayDiagnostic, SessionStore, UserDirectory,
 };
 use crate::secret::AppCookie;
 
@@ -22,6 +22,7 @@ fn portal_session(id: &str, ttl: Duration) -> PortalSession {
             subject: "sub-1".into(),
             user_key: "alice".into(),
             display_name: Some("Alice".into()),
+            email: None,
             groups: vec!["g1".into(), "g2".into()],
         },
         created_at: now,
@@ -165,6 +166,43 @@ pub async fn account_registry(registry: &dyn AccountRegistry, app: &str, user: &
         Err(PortError::NotFound)
     ));
     assert!(registry.get_account(app, "personne").await.unwrap().is_none());
+}
+
+/// `user` ne doit pas encore figurer dans l'annuaire.
+pub async fn user_directory(directory: &dyn UserDirectory, user: &str) {
+    use crate::ports::UserProfile;
+
+    assert!(directory.get_user(user).await.unwrap().is_none());
+    let profile = |name: Option<&str>, email: Option<&str>| UserProfile {
+        user_key: user.into(),
+        display_name: name.map(str::to_owned),
+        email: email.map(str::to_owned),
+    };
+    directory
+        .upsert_user(&profile(Some("Alice Martin"), Some("alice@example.org")))
+        .await
+        .unwrap();
+    assert_eq!(
+        directory.get_user(user).await.unwrap(),
+        Some(profile(Some("Alice Martin"), Some("alice@example.org")))
+    );
+    // Un champ absent ne remplace pas la valeur connue ; un champ fourni la met à jour.
+    directory
+        .upsert_user(&profile(None, Some("alice.martin@example.org")))
+        .await
+        .unwrap();
+    assert_eq!(
+        directory.get_user(user).await.unwrap(),
+        Some(profile(Some("Alice Martin"), Some("alice.martin@example.org")))
+    );
+    directory
+        .upsert_user(&profile(Some("Alice Dupont"), None))
+        .await
+        .unwrap();
+    assert_eq!(
+        directory.get_user(user).await.unwrap(),
+        Some(profile(Some("Alice Dupont"), Some("alice.martin@example.org")))
+    );
 }
 
 /// `fresh` n'a aucun compte ; `existing` a un compte actif (créé par le seed, hors interface).

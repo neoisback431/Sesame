@@ -15,8 +15,11 @@ pub struct UserIdentity {
     pub subject: String,
     /// Clé de l'utilisateur dans le coffre (claim configurable, `subject` par défaut).
     pub user_key: String,
-    /// Libellé affichable (e-mail, nom), sans valeur d'autorisation.
+    /// Libellé affichable (nom, à défaut e-mail), sans valeur d'autorisation.
     pub display_name: Option<String>,
+    /// Adresse e-mail déclarée par le fournisseur d'identité, pour distinguer des homonymes
+    /// dans l'administration. Jamais une valeur d'autorisation.
+    pub email: Option<String>,
     /// Groupes issus des claims, utilisés pour les habilitations.
     pub groups: Vec<String>,
 }

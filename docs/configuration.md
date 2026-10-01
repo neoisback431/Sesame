@@ -34,7 +34,7 @@ Durées au format `30s`, `15m`, `8h`. Clés de chiffrement : 32 octets aléatoir
 | `SESAME_OIDC_CLIENT_ID` | requis | Identifiant du client OIDC |
 | `SESAME_OIDC_CLIENT_SECRET` 🔒 | requis | Secret du client OIDC |
 | `SESAME_OIDC_SCOPES` | `openid profile email` | Scopes demandés |
-| `SESAME_OIDC_USER_KEY_CLAIM` | `sub` | Claim servant de clé utilisateur (coffre, registre). Pour Entra ID : `oid` |
+| `SESAME_OIDC_USER_KEY_CLAIM` | `sub` | Claim servant de clé utilisateur (coffre, registre). Pour Entra ID : `oid`. Le **nom affiché** dans l'administration vient du claim `name` (à défaut `preferred_username`, puis `email`), mémorisé avec l'e-mail à chaque connexion (ADR 0031) : rien à configurer, mais Entra doit émettre `name` et `email` (jeton d'ID, portée `profile email`) |
 | `SESAME_OIDC_GROUPS_CLAIM` | `groups` | Claim portant les groupes. Absent = aucun groupe |
 | `SESAME_OIDC_LOGOUT` | `false` | `true` : la déconnexion ferme aussi la session chez le fournisseur d'identité (RP-Initiated Logout). Sans `end_session_endpoint` dans la discovery, déconnexion locale seulement (avertissement au démarrage) |
 

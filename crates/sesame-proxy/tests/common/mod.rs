@@ -236,6 +236,7 @@ pub fn alice(groups: &[&str]) -> UserIdentity {
         subject: "sub-alice".into(),
         user_key: "alice".into(),
         display_name: Some("Alice".into()),
+        email: None,
         groups: groups.iter().map(|g| g.to_string()).collect(),
     }
 }

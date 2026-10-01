@@ -49,6 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         state_cipher: CookieCipher::from_base64(&cfg.state_key)?,
         sessions: store.clone(),
         accounts: store.clone(),
+        users: store.clone(),
         access: store.clone() as Arc<dyn AccessRequests>,
         notifier: store,
         proxy_internal: cfg

@@ -7,6 +7,7 @@ Le schéma appartient aux migrations Rust (``crates/sesame-store-postgres/migrat
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
 import asyncpg
@@ -25,6 +26,7 @@ from .ports import (
     Status,
     StoredDescriptor,
     Unavailable,
+    UserProfile,
 )
 
 _COLUMNS = "app_id, user_key, status, status_reason, last_login_at, updated_at"
@@ -159,8 +161,11 @@ class PostgresAccountStore:
         rows = await (await self.pool()).fetch(
             """SELECT user_key, status, count(*) AS n FROM app_accounts
                WHERE user_key IN (
-                 SELECT DISTINCT user_key FROM app_accounts
-                 WHERE user_key ILIKE $1 ESCAPE '\\' ORDER BY user_key LIMIT $2)
+                 SELECT DISTINCT a.user_key FROM app_accounts a
+                 LEFT JOIN users u ON u.user_key = a.user_key
+                 WHERE a.user_key ILIKE $1 ESCAPE '\\' OR u.display_name ILIKE $1 ESCAPE '\\'
+                    OR u.email ILIKE $1 ESCAPE '\\'
+                 ORDER BY a.user_key LIMIT $2)
                GROUP BY user_key, status ORDER BY user_key""",
             pattern,
             limit,
@@ -169,6 +174,15 @@ class PostgresAccountStore:
         for r in rows:
             out.setdefault(r["user_key"], {})[r["status"]] = r["n"]
         return list(out.items())
+
+    async def user_profiles(self, user_keys: Iterable[str]) -> dict[str, UserProfile]:
+        keys = list(user_keys)
+        if not keys:
+            return {}
+        rows = await (await self.pool()).fetch(
+            "SELECT user_key, display_name, email FROM users WHERE user_key = ANY($1::text[])", keys
+        )
+        return {r["user_key"]: UserProfile(r["display_name"], r["email"]) for r in rows}
 
     async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:
         done = await (await self.pool()).execute(

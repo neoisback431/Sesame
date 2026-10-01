@@ -7,6 +7,7 @@ PostgreSQL, mémoire) sont choisies par configuration.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
@@ -35,6 +36,15 @@ class Account:
     status_reason: str | None
     last_login_at: datetime | None
     updated_at: datetime | None
+
+
+@dataclass(frozen=True)
+class UserProfile:
+    """Nom et e-mail déclarés par le fournisseur d'identité (écrits par le portail, ADR 0031).
+    Servent à l'affichage et à la recherche seulement : la clé utilisateur reste l'identité."""
+
+    display_name: str | None
+    email: str | None
 
 
 @dataclass(frozen=True)
@@ -211,7 +221,12 @@ class AccountStore(Protocol):
         ...
 
     async def search_users(self, query: str, limit: int) -> list[tuple[str, dict[str, int]]]:
-        """Utilisateurs dont la clé contient ``query`` (casse ignorée), avec leurs comptes par état."""
+        """Utilisateurs dont la clé, le nom ou l'e-mail contient ``query`` (casse ignorée),
+        avec leurs comptes par état."""
+        ...
+
+    async def user_profiles(self, user_keys: Iterable[str]) -> dict[str, UserProfile]:
+        """Profils connus parmi ``user_keys`` (les autres sont absents du résultat)."""
         ...
 
     async def known_users(self, limit: int) -> list[str]:

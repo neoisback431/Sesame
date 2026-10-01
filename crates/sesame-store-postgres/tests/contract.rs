@@ -67,6 +67,15 @@ async fn diagnostic_store_contract() {
 }
 
 #[tokio::test]
+async fn user_directory_contract() {
+    let Some(store) = store().await else {
+        eprintln!("SESAME_TEST_DATABASE_URL absente : test ignoré");
+        return;
+    };
+    contract::user_directory(&store, &unique("annuaire")).await;
+}
+
+#[tokio::test]
 async fn access_requests_contract() {
     let Some(store) = store().await else {
         eprintln!("SESAME_TEST_DATABASE_URL absente : test ignoré");

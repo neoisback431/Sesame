@@ -230,8 +230,9 @@ pub fn identity_from_claims(
         subject,
         user_key,
         display_name: text("name")
-            .or_else(|| text("email"))
-            .or_else(|| text("preferred_username")),
+            .or_else(|| text("preferred_username"))
+            .or_else(|| text("email")),
+        email: text("email"),
         groups,
     })
 }

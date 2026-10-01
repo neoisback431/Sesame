@@ -1,5 +1,6 @@
 {# SPDX-License-Identifier: Apache-2.0 #}
 {% extends "base.html" %}
+{% from "_people.html" import who %}
 {% block title %}{{ app.name }}{% endblock %}
 {% block content %}
 <p><a href="/">← Applications</a></p>
@@ -53,7 +54,7 @@
   <tbody>
   {% for a in accounts %}
     <tr>
-      <td><code>{{ a.user_key }}</code></td>
+      <td>{{ who(a.user_key, people) }}</td>
       <td><span class="status {{ a.status }}">{{ {"active": "actif", "failed": "en échec", "disabled": "désactivé", "pending": "en attente"}[a.status] }}</span>
         {% if a.status_reason %}<br><span class="muted">{{ a.status_reason }}</span>{% endif %}
         {% if a.status == "failed" %}<br><a href="/apps/{{ app.id }}/accounts/{{ a.user_key }}/diagnostic">Voir la réponse de l'appli</a>{% endif %}</td>
@@ -93,7 +94,7 @@
     <input type="text" id="user_key" name="user_key" list="known-users" autocomplete="off" value="{{ prefill_user }}"
       placeholder="commencez à taper un utilisateur connu" required>
     <datalist id="known-users">
-      {% for u in known_users %}<option value="{{ u }}">{% endfor %}
+      {% for u in known_users %}{% set p = people.get(u) %}<option value="{{ u }}"{% if p and (p.display_name or p.email) %} label="{{ p.display_name or p.email }}"{% endif %}>{% endfor %}
     </datalist>
     <p class="muted">La valeur doit être <strong>exactement</strong> la clé d'identité de l'utilisateur
       (le claim OIDC configuré, ex. <code>sub</code> ou <code>preferred_username</code>) — sinon le compte

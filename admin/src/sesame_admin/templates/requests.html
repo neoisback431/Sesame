@@ -1,5 +1,6 @@
 {# SPDX-License-Identifier: Apache-2.0 #}
 {% extends "base.html" %}
+{% from "_people.html" import who %}
 {% block title %}Demandes d'accès{% endblock %}
 {% block content %}
 <h1>Demandes d'accès</h1>
@@ -16,7 +17,7 @@
   <tbody>
   {% for r in requests %}
     <tr>
-      <td><code>{{ r.user_key }}</code></td>
+      <td>{{ who(r.user_key, people) }}</td>
       <td>{% if r.app_id in names %}<a href="/apps/{{ r.app_id }}">{{ names[r.app_id] }}</a>{% else %}<code>{{ r.app_id }}</code><br><span class="muted">descripteur absent</span>{% endif %}</td>
       <td>{% if r.kind == "credentials" %}<span class="status pending">identifiants fournis</span>{% else %}<span class="status disabled">sans compte</span>{% endif %}</td>
       <td>{{ r.note or "—" }}</td>

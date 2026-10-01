@@ -13,7 +13,7 @@ use crate::ports::{
     AccessRequest, AccessRequestKind, AccessRequests, AccountRegistry, AccountStatus, AppAccount, AppSession,
     AuditSink, DescriptorStore, DiagnosticStore, NotificationEvent, Notifier, PortError, PortResult,
     PortalSession, ReplayDiagnostic, SecretStore, SecretWriter, SessionStore, StoredDescriptor,
-    SubmitOutcome,
+    SubmitOutcome, UserDirectory, UserProfile,
 };
 use crate::secret::{Credential, ExposeSecret, SecretString};
 
@@ -234,6 +234,43 @@ impl SecretWriter for MemorySecretStore {
     }
 }
 
+/// Annuaire des utilisateurs en mémoire.
+#[derive(Default)]
+pub struct MemoryUserDirectory {
+    users: Mutex<HashMap<String, UserProfile>>,
+}
+
+impl MemoryUserDirectory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[async_trait]
+impl UserDirectory for MemoryUserDirectory {
+    async fn upsert_user(&self, profile: &UserProfile) -> PortResult<()> {
+        let mut users = locked(&self.users);
+        let entry = users
+            .entry(profile.user_key.clone())
+            .or_insert_with(|| UserProfile {
+                user_key: profile.user_key.clone(),
+                display_name: None,
+                email: None,
+            });
+        if profile.display_name.is_some() {
+            entry.display_name.clone_from(&profile.display_name);
+        }
+        if profile.email.is_some() {
+            entry.email.clone_from(&profile.email);
+        }
+        Ok(())
+    }
+
+    async fn get_user(&self, user_key: &str) -> PortResult<Option<UserProfile>> {
+        Ok(locked(&self.users).get(user_key).cloned())
+    }
+}
+
 /// Demandes d'accès en mémoire, adossées au registre des comptes en mémoire.
 pub struct MemoryAccessRequests {
     accounts: Arc<MemoryAccountRegistry>,
@@ -399,4 +436,14 @@ pub fn cookie_value(session: &AppSession, name: &str) -> Option<String> {
         .iter()
         .find(|c| c.name == name)
         .map(|c| c.value.expose_secret().to_owned())
+}
+
+#[cfg(test)]
+mod user_directory_tests {
+    use super::MemoryUserDirectory;
+
+    #[tokio::test]
+    async fn memory_user_directory_honors_the_contract() {
+        crate::contract::user_directory(&MemoryUserDirectory::new(), "alice").await;
+    }
 }

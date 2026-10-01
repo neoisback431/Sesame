@@ -285,6 +285,7 @@ Schéma : [`crates/sesame-store-postgres/migrations/`](../crates/sesame-store-po
 | `portal_sessions` | Empreinte SHA-256 du jeton du cookie (jamais le jeton), identité, groupes, échéance |
 | `app_sessions` | Jar de cookies applicatifs **chiffré** (AES-256-GCM, lié par AAD au couple session / appli), dates, échéance ; `ON DELETE CASCADE` depuis la session portail |
 | `app_accounts` | Registre des comptes (voir plus haut), sans secret |
+| `users` | Nom et e-mail déclarés par le fournisseur d'identité, écrits par le portail à chaque connexion et lus par l'administration pour afficher « Nom Prénom » à la place de la clé utilisateur (ADR 0031) ; aucune autorisation n'en dépend |
 | `app_descriptors` / `app_descriptor_history` | Descripteurs créés dans l'administration et leur historique (voir « Catalogue des applis ») |
 | `replay_diagnostics` | Dernier rejeu en échec par compte, valeurs sensibles masquées (voir « Diagnostic des rejeux ») ; `ON DELETE CASCADE` depuis le compte |
 

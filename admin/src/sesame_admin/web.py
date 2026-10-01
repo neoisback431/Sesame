@@ -12,6 +12,7 @@ import logging
 import re
 import secrets
 import uuid
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlsplit
@@ -27,7 +28,7 @@ from .auth import Authenticator, AuthError, SamlAuthenticator
 from .descriptors import draft
 from .identity import AdminUser, ClaimsError, identity_from_claims, valid_user_key
 from .notifications import EVENTS, NotificationWorker, parse_recipients
-from .ports import NotFound, NotificationSettings, Unavailable
+from .ports import NotFound, NotificationSettings, Unavailable, UserProfile
 from .recorder import Recorder, RecorderError
 from .service import AdminService, InvalidDescriptor, InvalidInput
 
@@ -109,6 +110,14 @@ def create_app(
         same_site="lax",
         https_only=secure_cookies,
     )
+
+    async def people_for(keys: Iterable[str]) -> dict[str, UserProfile]:
+        """Noms et e-mails des utilisateurs affichés (ADR 0031). Facultatif : sans eux, la page
+        montre la clé utilisateur, elle ne doit jamais échouer pour un nom."""
+        try:
+            return await service.accounts.user_profiles(set(keys))
+        except Unavailable:
+            return {}
 
     def render(request: Request, template: str, status: int = 200, **ctx: Any) -> HTMLResponse:
         session = request.session
@@ -252,11 +261,13 @@ def create_app(
             recent = await service.notifications.recent(30)
         except Unavailable:
             return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+        people = await people_for(n.user_key for n in recent if n.user_key)
         return render(
             request,
             "notifications.html",
             status,
             admin=admin,
+            people=people,
             s=current,
             recent=recent,
             errors=errors or [],
@@ -332,7 +343,10 @@ def create_app(
         else:
             kind = ""
         names = {a.id: a.name for a in catalog.apps.values()}
-        return render(request, "requests.html", admin=admin, requests=listed, names=names, kind=kind)
+        people = await people_for(r.user_key for r in listed)
+        return render(
+            request, "requests.html", admin=admin, requests=listed, names=names, kind=kind, people=people
+        )
 
     @app.post("/requests/{app_id}/{user_key}/approve")
     async def request_approve(request: Request, app_id: str, user_key: str, admin: Admin) -> Response:
@@ -577,10 +591,12 @@ def create_app(
             return error(request, 503, "Service indisponible", "La base de données est injoignable.")
         # Prérempli depuis une demande d'accès « sans compte » ; la valeur reste modifiable.
         prefill = user_key if valid_user_key(user_key) else ""
+        people = await people_for([a.user_key for a in accounts] + known)
         return render(
             request,
             "app.html",
             admin=admin,
+            people=people,
             app=target,
             accounts=accounts,
             known_users=known,
@@ -658,7 +674,8 @@ def create_app(
             rows = await service.accounts.search_users(q.strip(), 200)
         except Unavailable:
             return error(request, 503, "Service indisponible", "Le registre des comptes est injoignable.")
-        return render(request, "users.html", admin=admin, rows=rows, q=q.strip())
+        people = await people_for(u for u, _ in rows)
+        return render(request, "users.html", admin=admin, rows=rows, q=q.strip(), people=people)
 
     @app.get("/users/{user_key}")
     async def user_detail(request: Request, user_key: str, admin: Admin) -> Response:
@@ -667,7 +684,10 @@ def create_app(
             apps = (await service.catalog()).apps
         except Unavailable:
             return error(request, 503, "Service indisponible", "La base de données est injoignable.")
-        return render(request, "user.html", admin=admin, user_key=user_key, accounts=accounts, apps=apps)
+        people = await people_for([user_key])
+        return render(
+            request, "user.html", admin=admin, user_key=user_key, accounts=accounts, apps=apps, people=people
+        )
 
     @app.post("/users/{user_key}/disable-all")
     async def disable_all(request: Request, user_key: str, admin: Admin) -> Response:
