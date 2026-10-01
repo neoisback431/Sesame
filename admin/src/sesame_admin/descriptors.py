@@ -23,8 +23,10 @@ from jsonschema import Draft202012Validator
 from .ports import StoredDescriptor
 
 MAX_DOCUMENT_BYTES = 64 * 1024
-# Identifiants réservés par les routes de l'administration (/apps/new).
-RESERVED_IDS = frozenset({"new"})
+# Identifiants refusés (miroir de RESERVED_IDS dans descriptor.rs) : « new » est une route de
+# l'administration, « admin » donnerait l'hôte de l'administration (admin.<domaine>) et « www »
+# est un nom déduit à tort de l'hôte réel d'une appli (www.exemple.com).
+RESERVED_IDS = frozenset({"new", "admin", "www"})
 
 # Constructions acceptées par le module re de Python mais refusées par la crate regex
 # (moteur du proxy) : références arrière et assertions de voisinage.

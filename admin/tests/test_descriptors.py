@@ -6,6 +6,7 @@ import re
 import pytest
 import yaml
 from sesame_admin.descriptors import (
+    RESERVED_IDS,
     DescriptorError,
     DescriptorValidator,
     app_from_doc,
@@ -66,8 +67,15 @@ def test_endpoint_token_is_valid():
     assert V.check(yaml.safe_load(text)) == []
 
 
-def test_reserved_identifier():
-    assert any("réservé" in e for e in V.check(doc(app_id="new")))
+@pytest.mark.parametrize("app_id", ["new", "admin", "www"])
+def test_reserved_identifier(app_id):
+    assert any("réservé" in e for e in V.check(doc(app_id=app_id)))
+
+
+def test_reserved_identifiers_match_the_rust_core():
+    rust = (DESCRIPTORS.parent / "crates/sesame-core/src/descriptor.rs").read_text()
+    declared = re.search(r"RESERVED_IDS: &\[&str\] = &\[(.*?)\]", rust).group(1)
+    assert RESERVED_IDS == set(re.findall(r'"([^"]+)"', declared))
 
 
 def test_parse_yaml_rejects_aliases_syntax_and_size():

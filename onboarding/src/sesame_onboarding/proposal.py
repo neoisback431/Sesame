@@ -28,6 +28,22 @@ class Draft:
     blocking: list[str] = field(default_factory=list)
 
 
+# Identifiants refusés par le descripteur (miroir de RESERVED_IDS dans descriptor.rs).
+RESERVED_IDS = frozenset({"new", "admin", "www"})
+# Premiers labels d'hôte qui ne nomment pas l'appli (www.exemple.com, login.exemple.com…).
+_GENERIC_LABELS = re.compile(r"www\d*|web|login|auth|sso|secure|m")
+
+
+def _id_from_host(host: str) -> str:
+    """Identifiant proposé d'après l'hôte réel de l'appli : le premier label qui la nomme."""
+    if re.fullmatch(r"[0-9.]+|.*:.*", host):  # adresse IP : rien à en tirer
+        return "appli"
+    for label in host.split("."):
+        if label and not _GENERIC_LABELS.fullmatch(label) and _slug(label) not in RESERVED_IDS:
+            return label
+    return "appli"
+
+
 def _slug(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:63].strip("-")
     return slug or "appli"
@@ -49,10 +65,16 @@ def to_descriptor(
     host = urlsplit(rec.base_url).hostname or "appli"
     # metadata.id doit être en minuscules-tirets (schéma) : on normalise l'identifiant
     # fourni comme celui déduit de l'hôte, pour ne jamais proposer un descripteur invalide.
-    requested_id = app_id or host.split(".")[0]
+    requested_by_caller = bool(app_id)
+    requested_id = app_id or _id_from_host(host)
     app_id = _slug(requested_id)
     if app_id != requested_id:
         todo.append(f"metadata.id normalisé en « {app_id} » (minuscules et tirets requis)")
+    reserved_id = app_id in RESERVED_IDS
+    if reserved_id:
+        todo.append(f"metadata.id « {app_id} » est réservé : choisissez-en un autre")
+    elif not requested_by_caller:
+        todo.append(f"metadata.id « {app_id} » déduit de l'hôte de l'appli : à confirmer")
     if not public_host:
         # Domaine des applis exposées par Sesame, issu de la configuration (ex.
         # « sesame.localhost:8443 » en dev) ; à défaut, un exemple à remplacer.
@@ -152,7 +174,7 @@ def to_descriptor(
         login["failure"] = {"any_of": [failure]}
     login["max_attempts"] = 1
 
-    blocking: list[str] = []
+    blocking: list[str] = [f"metadata.id « {app_id} » réservé"] if reserved_id else []
     if rec.session_token_keys and not handoff:
         blocking.append(
             "session_token_in_response: " + ", ".join(rec.session_token_keys) + " (session par jeton "
