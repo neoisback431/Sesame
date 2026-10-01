@@ -17,7 +17,7 @@ from sesame_admin.memory import (
     MemoryDescriptorStore,
     MemoryNotificationStore,
 )
-from sesame_admin.ports import Conflict, NotFound, NotificationSettings
+from sesame_admin.ports import Conflict, NotFound, NotificationSettings, UserProfile
 from sesame_admin.store_postgres import (
     PostgresAccessRequestStore,
     PostgresAccountStore,
@@ -79,6 +79,38 @@ async def test_account_store_contract(store):
     with pytest.raises(NotFound):
         await store.delete_account(app, user)
     await store.delete_account(app, "dave")
+
+
+async def put_profile(store, user_key: str, name: str | None, email: str | None) -> None:
+    """Profil tel que le portail l'écrit à la connexion (ADR 0031) : l'administration ne fait que le lire."""
+    if isinstance(store, MemoryAccountStore):
+        store.profiles[user_key] = UserProfile(name, email)
+        return
+    await (await store.pool()).execute(
+        "INSERT INTO users (user_key, display_name, email) VALUES ($1, $2, $3)"
+        " ON CONFLICT (user_key) DO UPDATE SET display_name = $2, email = $3",
+        user_key,
+        name,
+        email,
+    )
+
+
+async def test_user_profiles_and_name_search_contract(store):
+    app, tag = f"app-{uuid.uuid4().hex[:8]}", uuid.uuid4().hex[:8]
+    named, bare = f"named-{tag}", f"bare-{tag}"
+    await store.upsert_active(app, named)
+    await store.upsert_active(app, bare)
+    await put_profile(store, named, f"Zoé Quidam{tag}", f"zoe.{tag}@example.org")
+
+    profiles = await store.user_profiles([named, bare, "personne"])
+    assert profiles == {named: UserProfile(f"Zoé Quidam{tag}", f"zoe.{tag}@example.org")}
+    assert await store.user_profiles([]) == {}
+
+    # La recherche porte sur le nom et l'e-mail, pas seulement sur la clé ; casse ignorée.
+    for query in (f"quidam{tag}", f"ZOE.{tag}@", named):
+        assert [u for u, _ in await store.search_users(query, 10)] == [named], query
+    assert [u for u, _ in await store.search_users(bare, 10)] == [bare]
+    assert await store.search_users(f"introuvable-{tag}", 10) == []
 
 
 async def seed_app_session(store, app_id: str, user_key: str) -> None:

@@ -34,3 +34,4 @@ Une fiche par décision structurante : contexte, décision, conséquences. Une d
 | [0028](0028-kit-aws-terraform.md) | Kit de déploiement AWS (Terraform, ECS Fargate, RDS) | 2026-09-28 |
 | [0029](0029-demandes-d-acces.md) | Demandes d'accès depuis « Mes applications » | 2026-09-30 |
 | [0030](0030-notifications-mail.md) | Notifications par mail aux administrateurs | 2026-09-30 |
+| [0031](0031-noms-des-utilisateurs.md) | Noms des utilisateurs dans l'administration | 2026-10-01 |

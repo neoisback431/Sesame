@@ -1,0 +1,13 @@
+{# SPDX-License-Identifier: Apache-2.0 #}
+{#- Utilisateur affiché par son nom (ADR 0031), la clé Sesame en dessous ; sans profil connu
+    (personne encore jamais connectée), la clé seule. -#}
+{% macro who(key, people) -%}
+{%- set p = people.get(key) -%}
+{%- if p and (p.display_name or p.email) -%}
+<strong>{{ p.display_name or p.email }}</strong>
+{%- if p.display_name and p.email and p.email != p.display_name %} <span class="muted">{{ p.email }}</span>{% endif %}
+<br><code class="muted">{{ key }}</code>
+{%- else -%}
+<code>{{ key }}</code>
+{%- endif -%}
+{%- endmacro %}
