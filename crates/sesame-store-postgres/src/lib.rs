@@ -15,7 +15,7 @@ use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{
     AccessRequest, AccessRequestKind, AccessRequests, AccountRegistry, AccountStatus, AppAccount, AppSession,
     DescriptorStore, DiagnosticStore, NotificationEvent, Notifier, PortError, PortResult, PortalSession,
-    ReplayDiagnostic, SessionStore, StoredDescriptor, SubmitOutcome,
+    ReplayDiagnostic, SessionStore, StoredDescriptor, SubmitOutcome, UserDirectory, UserProfile,
 };
 use sesame_core::secret::{AppCookie, ExposeSecret, SecretString};
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -185,6 +185,7 @@ impl SessionStore for PgStore {
                     subject: r.try_get("subject")?,
                     user_key: r.try_get("user_key")?,
                     display_name: r.try_get("display_name")?,
+                    email: None,
                     groups: r.try_get("groups")?,
                 },
                 created_at: r.try_get::<DateTime<Utc>, _>("created_at")?.into(),
@@ -400,6 +401,40 @@ fn kind_str(k: AccessRequestKind) -> &'static str {
     match k {
         AccessRequestKind::Credentials => "credentials",
         AccessRequestKind::NoAccount => "no_account",
+    }
+}
+
+#[async_trait]
+impl UserDirectory for PgStore {
+    async fn upsert_user(&self, profile: &UserProfile) -> PortResult<()> {
+        // COALESCE : un champ absent ne remplace jamais une valeur déjà connue.
+        sqlx::query(
+            "INSERT INTO users (user_key, display_name, email) VALUES ($1, $2, $3)
+             ON CONFLICT (user_key) DO UPDATE SET
+                display_name = COALESCE(EXCLUDED.display_name, users.display_name),
+                email = COALESCE(EXCLUDED.email, users.email),
+                last_login_at = now()",
+        )
+        .bind(&profile.user_key)
+        .bind(&profile.display_name)
+        .bind(&profile.email)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn get_user(&self, user_key: &str) -> PortResult<Option<UserProfile>> {
+        let row = sqlx::query("SELECT display_name, email FROM users WHERE user_key = $1")
+            .bind(user_key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
+        Ok(row.map(|r| UserProfile {
+            user_key: user_key.to_owned(),
+            display_name: r.get("display_name"),
+            email: r.get("email"),
+        }))
     }
 }
 

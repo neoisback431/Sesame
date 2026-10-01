@@ -209,13 +209,15 @@ fn identity_from_assertion(
     };
     validate_user_key(&user_key).map_err(SamlError::Claims)?;
     let groups = groups_attribute.map(all_values).unwrap_or_default();
-    let display_name = email_attribute.and_then(first_value).or_else(|| name_id.clone());
+    let email = email_attribute.and_then(first_value);
+    let display_name = email.clone().or_else(|| name_id.clone());
 
     Ok(UserIdentity {
         issuer: assertion.issuer.value.clone().unwrap_or_default(),
         subject: name_id.unwrap_or_default(),
         user_key,
         display_name,
+        email,
         groups,
     })
 }

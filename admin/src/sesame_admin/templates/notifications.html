@@ -1,5 +1,6 @@
 {# SPDX-License-Identifier: Apache-2.0 #}
 {% extends "base.html" %}
+{% from "_people.html" import who %}
 {% block title %}Notifications{% endblock %}
 {% block content %}
 <h1>Notifications par mail</h1>
@@ -64,7 +65,7 @@
       <td>{{ n.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
       <td>{{ labels.get(n.event, n.event) }}<br><span class="muted">{{ n.reason or "" }}</span></td>
       <td>{{ n.app_id or "—" }}</td>
-      <td>{{ n.user_key or "—" }}</td>
+      <td>{% if n.user_key %}{{ who(n.user_key, people) }}{% else %}—{% endif %}</td>
       <td>{{ {"pending": "en attente", "sent": "envoyé", "failed": "abandonné", "skipped": "ignoré"}[n.status] }}
         {% if n.last_error %}<br><span class="muted">{{ n.last_error }}</span>{% endif %}</td>
     </tr>

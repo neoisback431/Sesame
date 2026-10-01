@@ -1,9 +1,10 @@
 {# SPDX-License-Identifier: Apache-2.0 #}
 {% extends "base.html" %}
-{% block title %}{{ user_key }}{% endblock %}
+{% from "_people.html" import who %}
+{% block title %}{% set me = people.get(user_key) %}{{ (me.display_name or me.email) if me and (me.display_name or me.email) else user_key }}{% endblock %}
 {% block content %}
 <p><a href="/users">← Utilisateurs</a></p>
-<h1>Comptes de <code>{{ user_key }}</code></h1>
+<h1>Comptes de {{ who(user_key, people) }}</h1>
 <table>
   <thead><tr><th>Application</th><th>État</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
   <tbody>

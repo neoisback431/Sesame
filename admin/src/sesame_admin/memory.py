@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -20,6 +21,7 @@ from .ports import (
     NotificationSettings,
     Status,
     StoredDescriptor,
+    UserProfile,
 )
 
 
@@ -41,6 +43,8 @@ class MemoryAccountStore:
         self.app_sessions: dict[tuple[str, str], int] = {}
         # Personnes déjà connectées au portail (simulées dans les tests).
         self.portal_users: set[str] = set()
+        # Profils (écrits par le portail en production) : clé utilisateur -> nom, e-mail.
+        self.profiles: dict[str, UserProfile] = {}
         # Diagnostics de rejeu (écrits par le proxy en production) : documents JSON.
         self.diagnostics: dict[tuple[str, str], dict[str, Any]] = {}
 
@@ -81,9 +85,16 @@ class MemoryAccountStore:
     async def search_users(self, query: str, limit: int) -> list[tuple[str, dict[str, int]]]:
         counts: dict[str, Counter[str]] = {}
         for a in self.accounts.values():
-            if query.lower() in a.user_key.lower():
+            p = self.profiles.get(a.user_key)
+            haystack = " ".join(
+                [a.user_key, *(x for x in (p.display_name, p.email) if x)] if p else [a.user_key]
+            )
+            if query.lower() in haystack.lower():
                 counts.setdefault(a.user_key, Counter())[a.status] += 1
         return [(u, dict(counts[u])) for u in sorted(counts)[:limit]]
+
+    async def user_profiles(self, user_keys: Iterable[str]) -> dict[str, UserProfile]:
+        return {k: self.profiles[k] for k in user_keys if k in self.profiles}
 
     async def known_users(self, limit: int) -> list[str]:
         keys = {u for _, u in self.accounts} | self.portal_users

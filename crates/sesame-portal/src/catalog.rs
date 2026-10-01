@@ -183,6 +183,7 @@ mod tests {
             subject: "s".into(),
             user_key: "alice".into(),
             display_name: Some("Alice <admin>".into()),
+            email: None,
             groups: groups.iter().map(|g| g.to_string()).collect(),
         }
     }

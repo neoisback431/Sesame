@@ -136,6 +136,26 @@ pub trait AccountRegistry: Send + Sync {
     async fn record_login(&self, app_id: &str, user_key: &str, at: SystemTime) -> PortResult<()>;
 }
 
+/// Profil d'un utilisateur tel que déclaré par le fournisseur d'identité (ADR 0031).
+/// Sert uniquement à afficher « Nom Prénom » dans l'administration : aucune autorisation
+/// n'en dépend, la clé reste `user_key`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserProfile {
+    pub user_key: String,
+    pub display_name: Option<String>,
+    pub email: Option<String>,
+}
+
+/// Annuaire des utilisateurs connus : écrit par le portail à chaque connexion, lu par
+/// l'administration (qui n'en a pas besoin côté Rust, `get_user` sert aux tests de contrat).
+#[async_trait]
+pub trait UserDirectory: Send + Sync {
+    /// Enregistre ou met à jour le profil. Un champ absent (`None`) ne remplace jamais une
+    /// valeur déjà connue.
+    async fn upsert_user(&self, profile: &UserProfile) -> PortResult<()>;
+    async fn get_user(&self, user_key: &str) -> PortResult<Option<UserProfile>>;
+}
+
 /// Nature d'une demande d'accès (ADR 0029).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessRequestKind {
