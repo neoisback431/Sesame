@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+## [0.1.2] - 2026-10-01
+
 - 📧 **Notifications par mail** aux administrateurs (ADR 0030) : nouvelle demande d'accès, compte passé en échec, application injoignable, actions d'administration sensibles. Boîte d'envoi en base (le portail et le proxy déposent, l'admin expédie : un SMTP en panne ne bloque rien), reprise sur échec, regroupement des répétitions. Serveur SMTP, expéditeur, destinataires et événements réglables dans la console (page « Notifications », mail de test, historique) ; mot de passe SMTP dans `SESAME_SMTP_PASSWORD`, jamais en base. Migration `0007`.
 
 - ✨ **Demandes d'accès** depuis une tuile grisée de « Mes applications » (ADR 0029) : « J'ai déjà un compte » (identifiants vérifiés par un rejeu de test puis enregistrés, compte `pending`, l'administrateur n'a qu'à activer) ou « Je n'ai pas de compte » (l'administrateur voit la demande et crée le compte). Nouvelle page « Demandes d'accès » dans l'administration, état de compte `pending`, service interne du proxy (`SESAME_INTERNAL_TOKEN`, `SESAME_PROXY_INTERNAL_URL`, `SESAME_PROXY_INTERNAL_LISTEN`), migration `0006`. **Mise à jour des kits** : relancez `generate-keys.sh` (nouveau jeton `SESAME_INTERNAL_TOKEN`) ; Terraform génère le jeton tout seul.
@@ -33,6 +35,7 @@ Première version publique. Notes complètes : [docs/releases/v0.1.0.md](docs/re
 - 🧭 Embarquement : recorder (avec compte de test facultatif), CLI `sesame-onboard` (`record`, `verify`, `fingerprint`, `health`).
 - 🐳 Images `sesame-portal`, `sesame-proxy`, `sesame-admin`, `sesame-recorder` sur GitHub Container Registry.
 
-[Non publié]: https://github.com/neoisback431/Sesame/compare/v0.1.1...HEAD
+[Non publié]: https://github.com/neoisback431/Sesame/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/neoisback431/Sesame/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/neoisback431/Sesame/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/neoisback431/Sesame/releases/tag/v0.1.0

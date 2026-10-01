@@ -24,7 +24,7 @@ oidc_admin_client_secret  = "à-remplacer"
 
 # ── 2. Facultatif ────────────────────────────────────────────────────────────────
 
-# sesame_version      = "v0.1.1"
+# sesame_version      = "v0.1.2"
 # admin_group         = "sesame-admins" # Entra ID : GUID du groupe
 # oidc_user_key_claim = "oid"           # Entra ID
 # alb_internal        = true
