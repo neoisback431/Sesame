@@ -22,7 +22,7 @@ Durées au format `30s`, `15m`, `8h`. Clés de chiffrement : 32 octets aléatoir
 | `SESAME_CA_FILE` | aucun | CA supplémentaire (PEM) pour joindre le fournisseur d'identité (OIDC uniquement) |
 | `SESAME_IDP_PROTOCOL` | `oidc` | Protocole du fournisseur d'identité : `oidc` ou `saml`. Un seul actif par déploiement, le même pour le portail et l'administration (ADR 0024) |
 | `SESAME_ADMIN_URL` | aucun | URL publique de l'UI d'administration. Absente : pas de lien « Administration » sur « Mes applications » |
-| `SESAME_ADMIN_GROUP` | `sesame-admins` | Groupe affiché avec le lien « Administration ». Doit correspondre au `SESAME_ADMIN_GROUP` de l'admin |
+| `SESAME_ADMIN_GROUP` | `sesame-admins` | Groupe affiché avec le lien « Administration » : **valeur du claim de groupes, pas forcément un nom** (Entra ID : le **GUID** du groupe, voir « Entra ID » ci-dessous). Doit correspondre au `SESAME_ADMIN_GROUP` de l'admin |
 | `SESAME_PROXY_INTERNAL_URL` | aucun | URL du service interne du proxy (ex. `http://proxy:8082`). Avec `SESAME_INTERNAL_TOKEN`, active l'option « J'ai déjà un compte » des demandes d'accès (ADR 0029) ; sans eux, seule « Je n'ai pas de compte » est proposée. Les deux vont ensemble |
 | `SESAME_INTERNAL_TOKEN` 🔒 | aucun | Jeton partagé avec le proxy (`Authorization: Bearer`) pour ce service interne |
 
@@ -99,7 +99,7 @@ En mode `postgres` (par défaut), le rôle PostgreSQL du proxy n'a besoin que du
 | `SESAME_ADMIN_PUBLIC_URL` | requis | URL publique, ex. `https://admin.sesame.example` |
 | `SESAME_ADMIN_SESSION_KEY` 🔒 | requis | Clé de signature du cookie de session (longue chaîne aléatoire) |
 | `SESAME_ADMIN_SESSION_TTL_SECS` | `3600` | Durée de la session d'administration |
-| `SESAME_ADMIN_GROUP` | `sesame-admins` | Groupe (claim) requis pour accéder à l'UI |
+| `SESAME_ADMIN_GROUP` | `sesame-admins` | Groupe (claim) requis pour accéder à l'UI. **Entra ID : le GUID du groupe, pas son nom** |
 | `SESAME_DESCRIPTORS_DIR` | `descriptors` | Dossier des descripteurs en fichiers, affichés en lecture seule |
 | `SESAME_SCHEMA_FILE` | `schemas/app-descriptor.schema.json` | Schéma JSON contre lequel sont validés les descripteurs saisis dans l'éditeur |
 | `SESAME_DATABASE_URL` 🔒 | requis | Connexion PostgreSQL (registre des comptes, descripteurs en base) |
@@ -147,6 +147,25 @@ Aucune allowlist anti-SSRF : le recorder ouvre l'URL fournie (choix de l'exploit
 Options : `--schema` (schéma JSON), `--ca-file`, `--insecure` (ne pas vérifier TLS), `--timeout`. `health`, `fingerprint` et `record` n'utilisent aucun identifiant.
 
 Options de `record` : `--base-url`, `--protected-path` (page protégée sondée, `/` par défaut), `--probe-failure` (envoie une connexion factice pour observer l'échec), `--id`, `--name`, `--public-host`, `--group` / `--user` (répétables), `--session-cookie`, `--chromium`, `-o` (fichier de sortie). Le recorder nécessite l'extra `capture` (`pip install 'sesame-onboarding[capture]'`, puis `playwright install chromium`) ou l'image `recorder` (`make record`). `--ca-file` ne s'applique pas au navigateur : utiliser le magasin de certificats du système ou, en dev, `--insecure`.
+
+## Entra ID : groupes et GUID
+
+Entra ID ne met **pas le nom** des groupes dans le jeton mais leur **GUID** (*Object Id*, visible
+dans Entra ID → Groups). Tout ce qui référence un groupe doit donc utiliser ce GUID :
+`SESAME_ADMIN_GROUP` (portail et admin) et les `spec.access.groups` des descripteurs.
+
+Pour que le jeton contienne les groupes, dans **chacune des deux applications** Entra (portail et
+administration) :
+
+- *Configuration du jeton* (*Token configuration*) → *Ajouter une revendication de groupes*
+  (« Groupes de sécurité »), ou
+- dans le *Manifeste*, `"groupMembershipClaims": "SecurityGroup"`.
+
+Sans cela, aucun groupe n'arrive à Sesame : personne n'est administrateur et les habilitations par
+groupe refusent tout le monde. Au-delà de 200 groupes, Entra n'émet plus la liste (*groups
+overage*) : restreignez les groupes émis à ceux de l'application (« Groupes affectés à
+l'application ») ou limitez-vous aux groupes de sécurité utiles. En SAML, même principe : l'attribut
+de groupes (`SESAME_SAML_GROUPS_ATTRIBUTE`) porte les GUID.
 
 ## Commun
 
