@@ -53,8 +53,10 @@ Les valeurs à renseigner dans `terraform.tfvars` :
 | `oidc_portal_client_id` / `_secret` | | application « portail » chez l'IdP |
 | `oidc_admin_client_id` / `_secret` | | application « administration » chez l'IdP |
 
-Entra ID : `oidc_user_key_claim = "oid"` et `admin_group` = GUID du groupe des
-administrateurs. Toutes les options sont décrites dans [`variables.tf`](variables.tf).
+Entra ID : `oidc_user_key_claim = "oid"` et `admin_group` = **GUID du groupe** des
+administrateurs (son *Object Id*, pas son nom : Entra n'émet que les GUID). Dans les
+deux applications Entra, activez aussi les groupes : *Configuration du jeton* → *Ajouter une
+revendication de groupes*, ou `"groupMembershipClaims": "SecurityGroup"` dans le manifeste. Toutes les options sont décrites dans [`variables.tf`](variables.tf).
 
 À la fin, `terraform output` affiche les adresses du portail et de l'administration, et les
 URL de retour à déclarer chez l'IdP. Sans zone Route 53, créez vous-même deux

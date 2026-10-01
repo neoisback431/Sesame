@@ -72,8 +72,15 @@ Notez pour chacune son **identifiant** (client ID) et son **secret**. Faites ém
 Sesame.
 
 > **Entra ID** : App registrations → New registration, type *Web*, avec l'URL de retour
-> ci-dessus ; secret dans *Certificates & secrets* ; groupes dans *Token configuration* →
-> *Add groups claim*. L'émetteur est `https://login.microsoftonline.com/<tenant-id>/v2.0`.
+> ci-dessus ; secret dans *Certificates & secrets*. L'émetteur est
+> `https://login.microsoftonline.com/<tenant-id>/v2.0`.
+>
+> - **Groupes** : dans l'application, ouvrez *Token configuration* → *Add groups claim*
+>   (« Security groups »), pour les deux applications. Ou mettez
+>   `"groupMembershipClaims": "SecurityGroup"` dans leur *Manifest*.
+> - **Entra n'émet pas le nom des groupes mais leur GUID** (*Object Id* du groupe,
+>   visible dans Entra ID → Groups). C'est ce GUID, et non le nom, qu'il faut mettre dans
+>   `SESAME_ADMIN_GROUP` et dans les groupes des habilitations (`spec.access`).
 
 ### 3. Configurer
 
@@ -89,7 +96,7 @@ Ouvrez ensuite `.env` et renseignez **la section 1**, et c'est tout :
 | `SESAME_OIDC_ISSUER` | `https://login.microsoftonline.com/<tenant-id>/v2.0` | votre fournisseur d'identité |
 | `SESAME_OIDC_PORTAL_CLIENT_ID` / `_SECRET` | | application « Portail » de l'étape 2 |
 | `SESAME_OIDC_ADMIN_CLIENT_ID` / `_SECRET` | | application « Administration » de l'étape 2 |
-| `SESAME_ADMIN_GROUP` | `sesame-admins` | groupe des administrateurs (Entra ID : son **GUID**) |
+| `SESAME_ADMIN_GROUP` | `sesame-admins` | groupe des administrateurs : valeur du claim `groups`. **Entra ID : le GUID du groupe, pas son nom** |
 
 Avec **Entra ID**, mettez aussi `SESAME_OIDC_USER_KEY_CLAIM=oid` (section 2).
 

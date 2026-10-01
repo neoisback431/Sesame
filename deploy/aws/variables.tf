@@ -95,7 +95,7 @@ variable "image_registry" {
 }
 
 variable "admin_group" {
-  description = "Groupe (claim de groupes) dont les membres accèdent à l'administration. Entra ID : GUID du groupe."
+  description = "Groupe (claim de groupes) dont les membres accèdent à l'administration. Entra ID : GUID du groupe (Object Id), pas son nom ; activer la revendication de groupes dans l'application Entra."
   type        = string
   default     = "sesame-admins"
 }
