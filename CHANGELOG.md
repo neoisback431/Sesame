@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- 📚 **Entra ID : groupes et GUID** précisés dans le README, `docs/configuration.md` (nouvelle section), les `.env.example` et le kit AWS : `SESAME_ADMIN_GROUP` est le **GUID** du groupe, pas son nom, et les groupes doivent être activés dans l'application Entra (« Configuration du jeton » → revendication de groupes, ou `"groupMembershipClaims": "SecurityGroup"` dans le manifeste).
+
 ## [0.1.2] - 2026-10-01
 
 - 📧 **Notifications par mail** aux administrateurs (ADR 0030) : nouvelle demande d'accès, compte passé en échec, application injoignable, actions d'administration sensibles. Boîte d'envoi en base (le portail et le proxy déposent, l'admin expédie : un SMTP en panne ne bloque rien), reprise sur échec, regroupement des répétitions. Serveur SMTP, expéditeur, destinataires et événements réglables dans la console (page « Notifications », mail de test, historique) ; mot de passe SMTP dans `SESAME_SMTP_PASSWORD`, jamais en base. Migration `0007`.
