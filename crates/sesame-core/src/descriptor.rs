@@ -12,6 +12,11 @@ use regex::Regex;
 use serde::{Deserialize, Deserializer};
 
 pub const API_VERSION: &str = "sesame/v1";
+
+/// Identifiants d'appli refusés (miroir de `RESERVED_IDS` dans `admin/…/descriptors.py`) :
+/// `new` est une route de l'administration, `admin` donnerait l'hôte de l'administration
+/// (`admin.<domaine>`) et `www` est un nom déduit à tort de l'hôte réel d'une appli.
+pub const RESERVED_IDS: &[&str] = &["new", "admin", "www"];
 pub const KIND: &str = "AppDescriptor";
 
 #[derive(Debug, thiserror::Error)]
@@ -412,6 +417,9 @@ impl AppDescriptor {
         if !id_ok.is_match(&self.metadata.id) {
             return invalid("metadata.id invalide".into());
         }
+        if RESERVED_IDS.contains(&self.metadata.id.as_str()) {
+            return invalid("metadata.id réservé".into());
+        }
         if !spec_login_ok(&self.spec.login) {
             return invalid("login.action requise quand login.use_form vaut false".into());
         }
@@ -753,6 +761,15 @@ mod tests {
         let d = AppDescriptor::from_yaml(&text).expect("access facultatif");
         assert!(d.spec.access.is_empty());
         assert!(d.spec.access.allows("nimporte", &[]));
+    }
+
+    #[test]
+    fn rejects_reserved_ids() {
+        for id in RESERVED_IDS {
+            let text = FAKE_APP.replacen("id: fake-app", &format!("id: {id}"), 1);
+            let err = AppDescriptor::from_yaml(&text).unwrap_err().to_string();
+            assert!(err.contains("réservé"), "{id} : {err}");
+        }
     }
 
     #[test]
