@@ -7,7 +7,7 @@
 apiVersion: sesame/v1
 kind: AppDescriptor
 metadata:
-  id: mon-appli                    # minuscules, chiffres, tirets
+  id: mon-appli                    # minuscules, chiffres, tirets ; new, admin, www réservés
   name: Mon appli
   description: À quoi sert l'appli.
   revision: 1                      # incrémenter à chaque modification validée

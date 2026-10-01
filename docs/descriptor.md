@@ -10,7 +10,7 @@ Exemple complet : [`descriptors/fake-app.yaml`](../descriptors/fake-app.yaml). G
 
 | Section | Rôle |
 |---|---|
-| `metadata` | `id` stable (clé du coffre, des sessions et de l'audit), nom, `revision` incrémentée à chaque modification validée (tenue par Sesame pour les descripteurs en base), responsable |
+| `metadata` | `id` stable (clé du coffre, des sessions et de l'audit ; minuscules, chiffres et tirets ; **`new`, `admin` et `www` sont réservés**, ils donneraient une route ou un hôte de Sesame), nom, `revision` incrémentée à chaque modification validée (tenue par Sesame pour les descripteurs en base), responsable |
 | `spec.upstream` | URL interne de l'appli, TLS, délai, en-tête `Host` éventuel |
 | `spec.public.host` | Nom d'hôte public sous lequel Sesame expose l'appli (une appli par hôte) |
 | `spec.public.start_path` | Page ouverte par la tuile du portail (défaut `/`). À renseigner quand la racine de l'appli affiche le formulaire de login même une fois connecté ; le recorder avec compte de test la propose d'après la page atteinte après connexion |
