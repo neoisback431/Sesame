@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+## [0.1.3] - 2026-10-05
+
 - ✨ **Noms des utilisateurs dans l'administration** (ADR 0031) : « Alice Martin » (et son e-mail) à la place de la clé illisible (`oid` d'Entra). Le portail mémorise le nom et l'e-mail déclarés par le fournisseur d'identité à chaque connexion (table `users`, migration `0008`) ; la recherche porte aussi sur le nom et l'e-mail. Un utilisateur jamais connecté reste affiché par sa clé. ⚠️ Donnée personnelle conservée en base (nom, e-mail) ; les comptes existants se remplissent à la prochaine connexion de chacun.
 
 - 🐛 **Identifiants d'appli réservés** : `new`, `admin` et `www` sont refusés (portail, proxy et administration). Le recorder déduisait l'identifiant du premier label de l'hôte de l'appli, donc `www.exemple.com` donnait `www` ; il ignore désormais les labels génériques (`www`, `login`, `sso`…), propose le suivant (`exemple`), signale que l'identifiant est déduit et à confirmer, et bloque l'enregistrement d'un identifiant réservé. ⚠️ Une appli déjà enregistrée sous un de ces identifiants est écartée au chargement : la recréer sous un autre identifiant.
@@ -41,7 +43,8 @@ Première version publique. Notes complètes : [docs/releases/v0.1.0.md](docs/re
 - 🧭 Embarquement : recorder (avec compte de test facultatif), CLI `sesame-onboard` (`record`, `verify`, `fingerprint`, `health`).
 - 🐳 Images `sesame-portal`, `sesame-proxy`, `sesame-admin`, `sesame-recorder` sur GitHub Container Registry.
 
-[Non publié]: https://github.com/neoisback431/Sesame/compare/v0.1.2...HEAD
+[Non publié]: https://github.com/neoisback431/Sesame/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/neoisback431/Sesame/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/neoisback431/Sesame/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/neoisback431/Sesame/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/neoisback431/Sesame/releases/tag/v0.1.0
