@@ -822,3 +822,103 @@ def token_session_app() -> Flask:
         return {"accessToken": jwt, "refreshToken": "r" * 40}
 
     return app
+
+
+def formless_spa_app() -> Flask:
+    """Comme n8n : aucun <form>, champs dans des <div> rendus par JavaScript, bouton
+    ``type=button``, connexion par POST JSON (``/rest/login``) qui pose un cookie de session."""
+    app = Flask(__name__)
+    sessions: set[str] = set()
+
+    @app.get("/signin")
+    def page():
+        return (
+            "<html><head><title>n8n</title></head><body><noscript>JavaScript requis</noscript>"
+            '<div id="app"></div><script>'
+            "document.getElementById('app').innerHTML = `"
+            '<div data-test-id="signin-form"><div data-test-id="auth-form">'
+            '<div><label for="emailOrLdapLoginId">Email</label>'
+            '<input type="email" autocomplete="email" name="emailOrLdapLoginId"'
+            ' id="emailOrLdapLoginId"></div>'
+            '<div><label for="password">Password</label>'
+            '<input type="password" autocomplete="current-password" name="password" id="password"></div>'
+            '<button data-test-id="form-submit-button" type="button">Sign in</button>'
+            '<a href="/forgot-password">Forgot my password</a></div></div>'
+            "<aside><textarea placeholder='Assistant'></textarea><button type=button>Send</button></aside>`;"
+            "document.querySelector('[data-test-id=form-submit-button]').addEventListener('click', () => {"
+            "fetch('/rest/login', {method: 'POST', headers: {'Content-Type': 'application/json'},"
+            "body: JSON.stringify({emailOrLdapLoginId: document.getElementById('emailOrLdapLoginId').value,"
+            "password: document.getElementById('password').value})}).then(r => {"
+            "if (r.ok) location.href = '/home'; }); });"
+            "</script></body></html>"
+        )
+
+    @app.post("/rest/login")
+    def login():
+        from flask import request
+
+        body = request.get_json(silent=True) or {}
+        if (body.get("emailOrLdapLoginId"), body.get("password")) != ("owner@example.org", "Pw-n8n-real"):
+            return Response('{"message":"Wrong username or password"}', 401, content_type="application/json")
+        sid = f"s{len(sessions)}"
+        sessions.add(sid)
+        resp = Response('{"data":{"id":"1"}}', content_type="application/json")
+        resp.set_cookie("n8n-auth", sid, httponly=True)
+        return resp
+
+    @app.get("/home")
+    def home():
+        return "<h1>Workflows</h1>"
+
+    @app.get("/")
+    def root():
+        from flask import request
+
+        if request.cookies.get("n8n-auth") in sessions:
+            return "<h1>Workflows</h1>"
+        return Response("", 401)
+
+    return app
+
+
+def test_login_page_without_form_element_is_analyzed(client, browser):
+    """Page n8n : plus de blocage « password_field_outside_form », la soumission est observée."""
+    app = Recorder(formless_spa_app())
+    try:
+        rec = run(f"{app.base}/signin", client, browser)
+        assert app.posts() == [], "la soumission factice ne part jamais vers l'appli"
+        assert rec.blocking == [], rec.blocking
+        assert rec.formless and rec.form_selector is None and rec.use_form is False
+        assert (rec.username_field, rec.password_field) == ("emailOrLdapLoginId", "password")
+        assert "login_without_form_element" in " ".join(rec.warnings)
+        assert (rec.encoding, rec.action) == ("json", "/rest/login")
+        doc = proposal.to_descriptor(rec, app_id="n8n").document
+        assert descriptors.validate(doc) == [], descriptors.validate(doc)
+        login = doc["spec"]["login"]
+        assert login["use_form"] is False and login["action"] == "/rest/login"
+        assert login["fields"] == {
+            "emailOrLdapLoginId": {"from_secret": "username"},
+            "password": {"from_secret": "password"},
+        }
+        text = proposal.render(proposal.to_descriptor(rec, app_id="n8n"), rec) + repr(rec)
+        assert DUMMY_PASSWORD not in text and DUMMY_USER not in text
+    finally:
+        app.srv.shutdown()
+
+
+def test_test_account_logs_in_through_a_page_without_form_element(client, browser):
+    from sesame_onboarding import verify
+
+    app = Recorder(formless_spa_app())
+    try:
+        rec = run(f"{app.base}/signin", client, browser, credentials=("owner@example.org", "Pw-n8n-real"))
+        assert rec.blocking == [], rec.blocking
+        assert rec.login is not None and rec.login.logged_in
+        doc = proposal.to_descriptor(rec, app_id="n8n").document
+        assert descriptors.validate(doc) == [], descriptors.validate(doc)
+        assert doc["spec"]["session"]["cookies"] == ["n8n-auth"]
+        creds = {"username": "owner@example.org", "password": "Pw-n8n-real"}
+        assert verify.verify(doc, creds, client).ok
+        assert not verify.verify(doc, {**creds, "password": "nope"}, client).ok
+    finally:
+        app.srv.shutdown()

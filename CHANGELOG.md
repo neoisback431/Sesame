@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- 🐛 **Recorder : pages de login sans `<form>`** (ex. n8n) : le blocage `password_field_outside_form` disparaît. Quand les champs sont dans des `<div>` (page construite en JavaScript, bouton `type=button`), le bloc qui contient le mot de passe, un bouton et l'identifiant est traité comme le formulaire : analyse, soumission factice interceptée et connexion avec compte de test fonctionnent, et le descripteur proposé utilise `use_form: false` avec la requête observée (JSON ou formulaire).
+
 ## [0.1.3] - 2026-10-05
 
 - ✨ **Noms des utilisateurs dans l'administration** (ADR 0031) : « Alice Martin » (et son e-mail) à la place de la clé illisible (`oid` d'Entra). Le portail mémorise le nom et l'e-mail déclarés par le fournisseur d'identité à chaque connexion (table `users`, migration `0008`) ; la recherche porte aussi sur le nom et l'e-mail. Un utilisateur jamais connecté reste affiché par sa clé. ⚠️ Donnée personnelle conservée en base (nom, e-mail) ; les comptes existants se remplissent à la prochaine connexion de chacun.

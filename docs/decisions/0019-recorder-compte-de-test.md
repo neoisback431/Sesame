@@ -24,8 +24,10 @@ mot de passe** (même origine uniquement ; toute autre écriture est bloquée). 
 si la soumission factice n'a déclenché aucune requête (`submission_not_observed`) : une
 validation côté client (format d'identifiant attendu, par exemple) rejette souvent des
 valeurs factices avant tout appel réseau sans empêcher une connexion réelle d'aboutir ;
-seuls les blocages structurels (captcha, plusieurs étapes, formulaire hors d'un `<form>`,
-champ identifiant introuvable…) empêchent encore la tentative. Il en déduit :
+seuls les blocages structurels (captcha, plusieurs étapes, champ identifiant introuvable…)
+empêchent encore la tentative. Une page sans `<form>` (champs dans des `<div>`, ex. n8n) n'en
+est plus un : le plus petit bloc qui contient le mot de passe, un bouton et l'identifiant joue
+le rôle du formulaire (ajout du 2026-10-06). Il en déduit :
 
 - cible, méthode, encodage, noms réels des champs identifiant / mot de passe, constantes
   simples envoyées, envoi ou non des champs cachés ;
