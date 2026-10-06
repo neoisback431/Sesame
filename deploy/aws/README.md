@@ -82,8 +82,7 @@ d'exécution ECS lit le secret de configuration.
 
 ## Exploiter
 
-- **Mettre à jour** : `sesame_version = "vX.Y.Z"` puis `terraform apply` (ou `terragrunt apply`). La version est fixée volontairement : avec `latest`, la définition de tâche ne change pas et rien n'est redéployé.
-- **Forcer un redéploiement à version identique** : `aws ecs update-service --cluster <name> --service <portal|proxy|admin|recorder> --force-new-deployment`.
+- **Mettre à jour** : `sesame_version = "vX.Y.Z"` puis `terraform apply`.
 - **Mettre au point une appli** : `replay_debug = true` (réponse de l'appli au dernier
   rejeu en échec, visible dans l'administration), à repasser à `false` ensuite.
 - **Plusieurs proxys** : `proxy_desired_count` (les sessions sont en base).
