@@ -125,8 +125,10 @@ Le portail compile contre `libxmlsec1` (SAML) : `libxmlsec1-dev`, `libxml2-dev`,
 
 ## Publier une release (mainteneurs)
 
-1. Mettez à jour la version (`Cargo.toml`, `*/pyproject.toml`), le [CHANGELOG](CHANGELOG.md) et
-   les notes de version `docs/releases/vX.Y.Z.md`.
+1. Mettez à jour la version (`Cargo.toml`, `*/pyproject.toml`), la version fixée des kits
+   (`variable "sesame_version"` dans `deploy/aws/variables.tf`, `SESAME_VERSION` dans
+   `deploy/release/.env.example` : `make check-kit-versions` vérifie l'accord avec `Cargo.toml`),
+   le [CHANGELOG](CHANGELOG.md) et les notes de version `docs/releases/vX.Y.Z.md`.
 2. Taguez et poussez :
    ```sh
    git tag vX.Y.Z && git push origin vX.Y.Z

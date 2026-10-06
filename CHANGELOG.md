@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- 🐳 **Kits de déploiement : version des images fixée** (`v0.1.4`) au lieu de `latest`. Avec `latest`, la définition de tâche ECS ne change jamais et `terraform apply` ne redéploie rien ; avec une version fixée, changer `sesame_version` (ou `SESAME_VERSION`) suffit. `make check-kit-versions` (dans `make lint`) vérifie que ces versions suivent `Cargo.toml`.
+
 ## [0.1.4] - 2026-10-06
 
 - 🐛 **Recorder : pages de login sans `<form>`** (ex. n8n) : le blocage `password_field_outside_form` disparaît. Quand les champs sont dans des `<div>` (page construite en JavaScript, bouton `type=button`), le bloc qui contient le mot de passe, un bouton et l'identifiant est traité comme le formulaire : analyse, soumission factice interceptée et connexion avec compte de test fonctionnent, et le descripteur proposé utilise `use_form: false` avec la requête observée (JSON ou formulaire).

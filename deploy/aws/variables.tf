@@ -83,9 +83,9 @@ variable "tags" {
 }
 
 variable "sesame_version" {
-  description = "Version des images (tag de release)."
+  description = "Version des images (tag de release), fixée : changer cette valeur redéploie les services. Éviter « latest » : la définition de tâche ne change pas, Terraform ne redéploie rien."
   type        = string
-  default     = "latest"
+  default     = "v0.1.4"
 }
 
 variable "image_registry" {
