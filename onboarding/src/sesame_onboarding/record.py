@@ -56,14 +56,50 @@ CAPTCHA_SELECTORS = (
 )
 
 # Extraction de la structure des formulaires, sans aucune valeur.
-_ANALYZE_JS = """() => {
+# Page sans <form> (SPA : champs dans des <div>, bouton type=button, soumission par JavaScript).
+# Le « formulaire » est alors le plus petit bloc qui contient le champ mot de passe, un bouton
+# et, si possible, un champ identifiant. Marqué par l'attribut data-sesame-login pour être retrouvé.
+_CONTAINER_JS = """
   const visible = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
-  const forms = [...document.forms].map((f, index) => ({
+  const loginContainer = () => {
+    const pw = [...document.querySelectorAll('input[type=password]')].find(i => !i.form && visible(i));
+    if (!pw) return null;
+    const idents = 'input[type=text], input[type=email], input[type=tel], input:not([type])';
+    const buttons = 'button, input[type=submit], input[type=button]';
+    const has = (box, sel) => [...box.querySelectorAll(sel)].some(e => e !== pw && visible(e));
+    let best = null;
+    for (let box = pw.parentElement; box && box !== document.documentElement; box = box.parentElement) {
+      if (has(box, buttons)) {
+        best = best || box;
+        if (has(box, idents)) return box;
+      }
+    }
+    return best;
+  };
+"""
+
+_MARK_JS = (
+    "() => {"
+    + _CONTAINER_JS
+    + """
+  document.querySelectorAll('[data-sesame-login]').forEach(e => e.removeAttribute('data-sesame-login'));
+  const box = loginContainer();
+  if (box) box.setAttribute('data-sesame-login', '1');
+  return !!box;
+}"""
+)
+
+_ANALYZE_JS = (
+    "() => {"
+    + _CONTAINER_JS
+    + """
+  const describe = (f, index, formless) => ({
     index,
-    id: f.id || null,
-    name: f.getAttribute('name'),
-    action: f.getAttribute('action'),
-    method: (f.getAttribute('method') || 'GET').toUpperCase(),
+    formless,
+    id: formless ? null : (f.id || null),
+    name: formless ? null : f.getAttribute('name'),
+    action: formless ? null : f.getAttribute('action'),
+    method: formless ? 'POST' : (f.getAttribute('method') || 'GET').toUpperCase(),
     // Champs sans attribut name (fréquent avec React) : clé positionnelle « #n », n étant
     // le rang parmi les input/select/textarea du formulaire.
     fields: [...f.querySelectorAll('input, select, textarea')].map((e, pos) => ({
@@ -75,7 +111,13 @@ _ANALYZE_JS = """() => {
       autocomplete: e.getAttribute('autocomplete'),
       visible: visible(e),
     })).filter(x => x.named || x.tag === 'input'),
-  }));
+  });
+  const forms = [...document.forms].map((f, index) => describe(f, index, false));
+  const box = loginContainer();
+  if (box) {
+    box.setAttribute('data-sesame-login', '1');
+    forms.push(describe(box, -1, true));
+  }
   return {
     title: document.title,
     forms,
@@ -83,6 +125,7 @@ _ANALYZE_JS = """() => {
     metas: [...document.querySelectorAll('meta[name]')].map(m => m.getAttribute('name')),
   };
 }"""
+)
 
 
 class RecordError(RuntimeError):
@@ -153,6 +196,7 @@ class Recording:
     failure: FailureObservation | None = None
     login: LoginObservation | None = None
     form_index: int = 0
+    formless: bool = False  # champs hors de tout <form> (page construite en JavaScript)
     session_token_keys: list[str] = field(default_factory=list)  # session par jeton (handoff)
     use_form: bool = True  # False : formulaire absent du HTML servi (construit en JavaScript)
     # Déduits de la requête de login observée (soumission factice, puis connexion de test) :
@@ -497,8 +541,26 @@ def _response_text(response: Any) -> str:
     return ""
 
 
-def _submit(page: Any, form: Any, password_field: str) -> None:
+def _scope(page: Any, rec_or_info: Any) -> Any:
+    """Bloc de la page qui porte les champs de login : le <form> retenu, ou, pour une page sans
+    <form>, le bloc repéré par :data:`_MARK_JS`."""
+    formless = rec_or_info.formless if isinstance(rec_or_info, Recording) else rec_or_info["formless"]
+    if formless:
+        page.evaluate(_MARK_JS)
+        return page.locator("[data-sesame-login]").first
+    index = rec_or_info.form_index if isinstance(rec_or_info, Recording) else rec_or_info["index"]
+    return page.locator("form").nth(index)
+
+
+def _submit(page: Any, form: Any, password_field: str, *, formless: bool = False) -> None:
     button = form.locator("button[type=submit], input[type=submit], button:not([type])")
+    if not button.count() and formless:
+        # Sans <form>, le bouton est souvent un button type=button (le dernier visible du bloc :
+        # les bascules « afficher le mot de passe » le précèdent).
+        button = form.locator("button:visible, input[type=button]:visible").last
+        if button.count():
+            button.click(no_wait_after=True)
+            return
     if button.count():
         button.first.click(no_wait_after=True)
     else:
@@ -576,7 +638,10 @@ def record(
             else:
                 rec.blocking.append("login_form_not_found")
             return rec
-        rec.form_selector = _selector(form, info["forms"])
+        rec.formless = bool(form["formless"])
+        rec.form_selector = None if rec.formless else _selector(form, info["forms"])
+        if rec.formless:
+            rec.warnings.append("login_without_form_element: champs hors de tout <form> (page JavaScript)")
         passwords = [f["name"] for f in form["fields"] if f["type"] == "password"]
         rec.password_field = passwords[0]
         if len(passwords) > 1:
@@ -594,7 +659,7 @@ def record(
             and f["type"] not in ("submit", "button", "reset", "image")
         ]
         rec.method = form["method"] if form["method"] in ("GET", "POST") else "POST"
-        dom_form = page.locator("form").nth(form["index"])
+        dom_form = _scope(page, form)
         sources.collect(page, context, dom_form)
 
         before = {" ".join(t.split()) for t in page.locator(ERROR_SELECTORS).all_inner_texts()}
@@ -606,7 +671,7 @@ def record(
             _field(dom_form, rec.username_field).fill(user)
         _field(dom_form, rec.password_field).fill(password)
         state["armed"] = True
-        _submit(page, dom_form, rec.password_field)
+        _submit(page, dom_form, rec.password_field, formless=rec.formless)
         deadline = time.monotonic() + timeout
         while state["request"] is None and time.monotonic() < deadline:
             page.wait_for_timeout(100)
@@ -704,14 +769,19 @@ def observe_login(
         sources.raw_html = _response_text(page.goto(rec.login_url, wait_until="load"))
         with contextlib.suppress(Exception):
             page.wait_for_load_state("networkidle", timeout=5000)
+        if rec.formless:
+            with contextlib.suppress(Exception):  # champs rendus tardivement par le JavaScript
+                page.wait_for_selector(
+                    "input[type=password]", state="visible", timeout=min(timeout, 10) * 1000
+                )
         before = {c["name"]: c["value"] for c in context.cookies()}
-        form = page.locator("form").nth(rec.form_index)
+        form = _scope(page, rec)
         sources.collect(page, context, form)
 
         if rec.username_field:
             _field(form, rec.username_field).fill(user)
         _field(form, rec.password_field or "password").fill(password)
-        _submit(page, form, rec.password_field or "password")
+        _submit(page, form, rec.password_field or "password", formless=rec.formless)
         deadline = time.monotonic() + timeout
         while state["request"] is None and not state["foreign"] and time.monotonic() < deadline:
             page.wait_for_timeout(100)
