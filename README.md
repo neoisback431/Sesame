@@ -48,7 +48,7 @@ flowchart LR
 ### 1. Récupérer le kit de déploiement
 
 ```sh
-VERSION=v0.1.3   # dernière version : https://github.com/neoisback431/Sesame/releases
+VERSION=v0.1.4   # dernière version : https://github.com/neoisback431/Sesame/releases
 curl -fsSL https://github.com/neoisback431/Sesame/releases/download/$VERSION/sesame-deploy-$VERSION.tar.gz | tar -xz
 cd sesame
 ```

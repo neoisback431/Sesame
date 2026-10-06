@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 [project]
 name = "sesame-admin"
-version = "0.1.3"
+version = "0.1.4"
 description = "Interface web d'administration Sesame : applis, habilitations, registre des comptes, identifiants applicatifs."
 license = "Apache-2.0"
 requires-python = ">=3.11"
