@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+## [0.1.4] - 2026-10-06
+
 - 🐛 **Recorder : pages de login sans `<form>`** (ex. n8n) : le blocage `password_field_outside_form` disparaît. Quand les champs sont dans des `<div>` (page construite en JavaScript, bouton `type=button`), le bloc qui contient le mot de passe, un bouton et l'identifiant est traité comme le formulaire : analyse, soumission factice interceptée et connexion avec compte de test fonctionnent, et le descripteur proposé utilise `use_form: false` avec la requête observée (JSON ou formulaire).
 
 ## [0.1.3] - 2026-10-05
@@ -45,7 +47,8 @@ Première version publique. Notes complètes : [docs/releases/v0.1.0.md](docs/re
 - 🧭 Embarquement : recorder (avec compte de test facultatif), CLI `sesame-onboard` (`record`, `verify`, `fingerprint`, `health`).
 - 🐳 Images `sesame-portal`, `sesame-proxy`, `sesame-admin`, `sesame-recorder` sur GitHub Container Registry.
 
-[Non publié]: https://github.com/neoisback431/Sesame/compare/v0.1.3...HEAD
+[Non publié]: https://github.com/neoisback431/Sesame/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/neoisback431/Sesame/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/neoisback431/Sesame/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/neoisback431/Sesame/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/neoisback431/Sesame/compare/v0.1.0...v0.1.1
