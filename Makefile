@@ -7,7 +7,7 @@ PY_PROJECTS := dev/fake-app admin onboarding
 # REGISTRY=ghcr.io/<son-organisation>/sesame à `make release-images`.
 REGISTRY ?= ghcr.io/neoisback431/sesame
 
-.PHONY: help dev-certs up up-demo down logs health record test test-full test-rust test-python test-python-full test-postgres e2e lint lint-rust lint-python validate-descriptors check-dev-keys images release-images release-kit deny deny-python
+.PHONY: help dev-certs up up-demo down logs health record test test-full test-rust test-python test-python-full test-postgres e2e lint lint-rust lint-python validate-descriptors check-dev-keys check-kit-versions images release-images release-kit deny deny-python
 
 help:
 	@echo "dev-certs             certificat TLS de dev pour *.sesame.localhost"
@@ -99,7 +99,7 @@ test-postgres:
 e2e:
 	cd tests/e2e && uv run --group dev playwright install chromium && uv run --group dev pytest -q
 
-lint: lint-rust lint-python validate-descriptors check-dev-keys
+lint: lint-rust lint-python validate-descriptors check-dev-keys check-kit-versions
 
 lint-rust:
 	cargo fmt --all --check
@@ -116,6 +116,10 @@ validate-descriptors:
 # chargement de Compose, seulement au démarrage du service qui la lit (502 via Nginx).
 check-dev-keys:
 	uv run -q scripts/check_dev_keys.py
+
+# Les kits fixent la version des images (pas de « latest ») : à relever avec Cargo.toml.
+check-kit-versions:
+	python3 scripts/check_kit_versions.py
 
 deny: deny-python
 	cargo deny check licenses
@@ -159,7 +163,7 @@ release-kit:
 	tar -czf dist/sesame-deploy-$(VERSION).tar.gz -C dist sesame
 	rm -rf dist/sesame-aws && mkdir -p dist/sesame-aws
 	cp deploy/aws/*.tf deploy/aws/terraform.tfvars.example deploy/aws/README.md deploy/aws/.gitignore dist/sesame-aws/
-	sed -i -e '/variable "sesame_version"/,/^}/s|default *= "latest"|default     = "$(VERSION)"|' \
+	sed -i -e '/variable "sesame_version"/,/^}/s|default *= "v[0-9.]*"|default     = "$(VERSION)"|' \
 	    -e '/variable "image_registry"/,/^}/s|default *= ".*"|default     = "$(patsubst %/sesame,%,$(REGISTRY))"|' \
 	    dist/sesame-aws/variables.tf
 	tar -czf dist/sesame-aws-$(VERSION).tar.gz -C dist sesame-aws
