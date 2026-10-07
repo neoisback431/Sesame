@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- 🐛 **Déconnexion faite dans l'application** : après un « Se déconnecter » de l'appli elle-même, le clic suivant dans Sesame renvoyait sur la page de login de l'appli, sans moyen de se reconnecter. L'appli efface son cookie de session ; Sesame retirait bien le cookie de son jar mais gardait la session, et relayait sans cookie. Une session applicative à laquelle il manque un cookie de session est désormais supprimée et le login rejoué (y compris pour les sessions déjà enregistrées dans cet état). Une appli qui invalide sa session côté serveur sans effacer son cookie reste reconnue par `spec.expiry` ou `spec.logout.paths`.
+
 ## [0.1.4] - 2026-10-06
 
 - 🐛 **Recorder : pages de login sans `<form>`** (ex. n8n) : le blocage `password_field_outside_form` disparaît. Quand les champs sont dans des `<div>` (page construite en JavaScript, bouton `type=button`), le bloc qui contient le mot de passe, un bouton et l'identifiant est traité comme le formulaire : analyse, soumission factice interceptée et connexion avec compte de test fonctionnent, et le descripteur proposé utilise `use_form: false` avec la requête observée (JSON ou formulaire).

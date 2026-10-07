@@ -19,7 +19,7 @@ Exemple complet : [`descriptors/fake-app.yaml`](../descriptors/fake-app.yaml). G
 | `spec.login` | Rejeu : page de login, formulaire, champs, jetons CSRF, conditions de succès et d'échec, `max_attempts` |
 | `spec.session` | Cookies de session à capturer, `max_ttl`, `idle_ttl` |
 | `spec.expiry` | Conditions signalant une session applicative expirée sur une réponse relayée |
-| `spec.logout` | Chemins de déconnexion de l'appli et comportement associé |
+| `spec.logout` | Chemins de déconnexion de l'appli et comportement associé. À renseigner si l'appli invalide sa session côté serveur sans effacer son cookie ; sinon, un cookie de session effacé par l'appli suffit à déclencher une nouvelle connexion |
 | `spec.rewrite` | Réécriture de `Location` et des URLs absolues internes |
 | `spec.health` | Intervalle du test de santé, empreinte du formulaire validé |
 
