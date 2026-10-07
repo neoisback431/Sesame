@@ -10,3 +10,4 @@ deploy/release/.env
 deploy/release/certs/*
 !deploy/release/certs/README
 dist/
+.claude/settings.local.json
