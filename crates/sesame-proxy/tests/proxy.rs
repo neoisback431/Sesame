@@ -458,6 +458,18 @@ async fn expired_handed_off_session_is_handed_off_again() {
 }
 
 #[tokio::test]
+async fn handoff_cookie_cleared_by_the_app_is_handed_off_again() {
+    // Déconnexion faite dans l'appli : elle efface son cookie dans le navigateur, le marqueur
+    // subsiste. La navigation suivante déclenche une nouvelle remise (sans règle `expiry`).
+    let b = handoff_bench().await;
+    let logins = b.mock.logins.load(Ordering::SeqCst);
+    let r = b.send_raw(navigate(&b, "/", "__sesame_handoff=1")).await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.body);
+    assert!(set_cookie_value(&r, "APPSESS").is_some_and(|v| v.starts_with("sess-")));
+    assert_eq!(b.mock.logins.load(Ordering::SeqCst), logins + 1);
+}
+
+#[tokio::test]
 async fn no_diagnostic_is_kept_by_default() {
     let b = bench(&["fake-app-users"], "wrong-password", true).await;
     b.get("/").await;

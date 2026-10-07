@@ -9,6 +9,10 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+## [0.1.6] - 2026-10-07
+
+- 🐛 **Déconnexion faite dans l'application, mode `handoff`** (ex. n8n) : l'appli efface son cookie dans le navigateur, mais le marqueur de remise de Sesame subsistait ; Sesame relayait sans rien refaire et l'utilisateur restait sur la page de login de l'appli. Sur une navigation, l'absence d'un cookie remis (`session.handoff.set_cookies`) déclenche désormais une nouvelle remise, sans règle `spec.expiry` à écrire. Correctif du proxy.
+
 ## [0.1.5] - 2026-10-07
 
 - 🐛 **Déconnexion faite dans l'application** : après un « Se déconnecter » de l'appli elle-même, le clic suivant dans Sesame renvoyait sur la page de login de l'appli, sans moyen de se reconnecter. L'appli efface son cookie de session ; Sesame retirait bien le cookie de son jar mais gardait la session, et relayait sans cookie. Une session applicative à laquelle il manque un cookie de session est désormais supprimée et le login rejoué (y compris pour les sessions déjà enregistrées dans cet état). Une appli qui invalide sa session côté serveur sans effacer son cookie reste reconnue par `spec.expiry` ou `spec.logout.paths`.
