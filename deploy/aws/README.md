@@ -31,7 +31,7 @@ flowchart LR
 
 ```sh
 # Kit versionné joint à chaque Release (ou dossier deploy/aws/ du dépôt)
-VERSION=v0.1.4
+VERSION=v0.1.5
 curl -L https://github.com/neoisback431/Sesame/releases/download/$VERSION/sesame-aws-$VERSION.tar.gz | tar xz
 cd sesame-aws
 
