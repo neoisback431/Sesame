@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+## [0.1.5] - 2026-10-07
+
 - 🐛 **Déconnexion faite dans l'application** : après un « Se déconnecter » de l'appli elle-même, le clic suivant dans Sesame renvoyait sur la page de login de l'appli, sans moyen de se reconnecter. L'appli efface son cookie de session ; Sesame retirait bien le cookie de son jar mais gardait la session, et relayait sans cookie. Une session applicative à laquelle il manque un cookie de session est désormais supprimée et le login rejoué (y compris pour les sessions déjà enregistrées dans cet état). Une appli qui invalide sa session côté serveur sans effacer son cookie reste reconnue par `spec.expiry` ou `spec.logout.paths`.
 
 ## [0.1.4] - 2026-10-06
@@ -49,7 +51,8 @@ Première version publique. Notes complètes : [docs/releases/v0.1.0.md](docs/re
 - 🧭 Embarquement : recorder (avec compte de test facultatif), CLI `sesame-onboard` (`record`, `verify`, `fingerprint`, `health`).
 - 🐳 Images `sesame-portal`, `sesame-proxy`, `sesame-admin`, `sesame-recorder` sur GitHub Container Registry.
 
-[Non publié]: https://github.com/neoisback431/Sesame/compare/v0.1.4...HEAD
+[Non publié]: https://github.com/neoisback431/Sesame/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/neoisback431/Sesame/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/neoisback431/Sesame/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/neoisback431/Sesame/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/neoisback431/Sesame/compare/v0.1.1...v0.1.2
