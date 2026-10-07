@@ -811,10 +811,24 @@ impl Proxy {
     /// relais où le navigateur porte la session. Si l'appli signale alors une session expirée
     /// sur une navigation, nouvelle remise (reconnexion automatique).
     async fn serve_handoff(&self, ctx: &Ctx<'_>, parts: &Parts, body: &Bytes) -> Response {
-        if !handoff::done(&parts.headers) {
+        let renew = is_navigation(&parts.headers) && idempotent(&parts.method);
+        // Marqueur présent mais cookie remis effacé par l'appli (déconnexion faite dans l'appli) :
+        // sur une navigation, nouvelle remise, sans règle `expiry` à écrire.
+        let cookies_gone = renew
+            && ctx
+                .app
+                .descriptor
+                .spec
+                .session
+                .handoff
+                .as_ref()
+                .is_some_and(|h| !handoff::cookies_present(&parts.headers, h));
+        if !handoff::done(&parts.headers) || cookies_gone {
+            if cookies_gone {
+                tracing::info!(app = ctx.app.id(), correlation_id = %ctx.cid, "cookie remis effacé par l'appli : nouvelle remise");
+            }
             return self.handoff(ctx, path_and_query(parts)).await;
         }
-        let renew = is_navigation(&parts.headers) && idempotent(&parts.method);
         let upstream = match self
             .forward(ctx.app, parts, body, Injection::Browser, renew)
             .await

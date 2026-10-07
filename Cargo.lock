@@ -881,7 +881,7 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "foldhash"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
@@ -911,7 +911,7 @@ dependencies = [
 
 [[package]]
 name = "futf"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df420e2e84819663797d1ec6544b13c5be84629e7bb00dc960d6917db2987843"
 dependencies = [
@@ -1201,7 +1201,7 @@ dependencies = [
 
 [[package]]
 name = "http-body-util"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23169fe34a5fbcdd3f3862e78fb9b6fccd5f02a6dc6f732547005d45631ce71c"
 dependencies = [
@@ -2804,7 +2804,7 @@ dependencies = [
 
 [[package]]
 name = "sesame-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -2826,7 +2826,7 @@ dependencies = [
 
 [[package]]
 name = "sesame-portal"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2848,7 +2848,7 @@ dependencies = [
 
 [[package]]
 name = "sesame-proxy"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "axum",
  "bytes",
@@ -2874,7 +2874,7 @@ dependencies = [
 
 [[package]]
 name = "sesame-secrets-openbao"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "axum",
@@ -2890,7 +2890,7 @@ dependencies = [
 
 [[package]]
 name = "sesame-store-postgres"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3249,7 +3249,7 @@ dependencies = [
 
 [[package]]
 name = "stringprep"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b4df3d392d81bd458a8a621b8bffbd2302a12ffe288a9d931670948749463b1"
 dependencies = [

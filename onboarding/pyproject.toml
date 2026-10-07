@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 [project]
 name = "sesame-onboarding"
-version = "0.1.5"
+version = "0.1.6"
 description = "Module d'embarquement Sesame : capture d'un formulaire de login, génération et vérification de descripteur, test de santé."
 license = "Apache-2.0"
 requires-python = ">=3.11"

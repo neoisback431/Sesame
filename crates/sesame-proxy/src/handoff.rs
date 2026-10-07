@@ -27,6 +27,19 @@ pub fn done(headers: &HeaderMap) -> bool {
     sesame_core::cookies::find(values, MARKER).is_some()
 }
 
+/// Le navigateur porte-t-il encore tous les cookies remis (`set_cookies`) ? Faux quand l'appli
+/// les a effacés elle-même (déconnexion faite dans l'appli) alors que le marqueur subsiste :
+/// la remise est à refaire. Sans cookie remis (jeton en stockage local seul), rien à vérifier.
+pub fn cookies_present(headers: &HeaderMap, handoff: &Handoff) -> bool {
+    handoff.set_cookies.iter().all(|name| {
+        let values = headers
+            .get_all(header::COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok());
+        sesame_core::cookies::find(values, name).is_some_and(|v| !v.is_empty())
+    })
+}
+
 /// `Set-Cookie` de la remise : cookies capturés déclarés dans `set_cookies` (visibles du
 /// navigateur : c'est l'exception de l'ADR 0020), puis le marqueur. Durée : `ttl_secs`.
 pub fn set_cookie_headers(handoff: &Handoff, jar: &Jar, ttl_secs: u64) -> Vec<String> {
