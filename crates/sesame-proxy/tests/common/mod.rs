@@ -164,6 +164,29 @@ pub async fn logout(State(m): State<Mock>, headers: HeaderMap) -> Response {
     Redirect::to("/login").into_response()
 }
 
+/// Page d'une appli en JavaScript : toujours 200, connectée ou non (aucune redirection, donc
+/// aucune condition `spec.expiry` ne peut la reconnaître).
+pub async fn spa(State(m): State<Mock>, headers: HeaderMap) -> Response {
+    if authed(&m, &headers) {
+        Html("<h1>Bonjour amartin</h1>").into_response()
+    } else {
+        Html("<h1>Veuillez vous connecter</h1><form id=\"spa-login\"></form>").into_response()
+    }
+}
+
+/// Déconnexion faite dans l'appli (hors des chemins `spec.logout`) : session oubliée côté
+/// appli et cookie de session effacé par `Set-Cookie`.
+pub async fn signout(State(m): State<Mock>, headers: HeaderMap) -> Response {
+    if let Some(s) = cookie(&headers, "APPSESS") {
+        m.sessions.lock().unwrap().remove(s);
+    }
+    (
+        [(header::SET_COOKIE, "APPSESS=; Path=/; Max-Age=0")],
+        "signed out",
+    )
+        .into_response()
+}
+
 pub async fn redirect_abs(headers: HeaderMap) -> Response {
     let origin = headers
         .get("x-test-internal")
@@ -195,6 +218,8 @@ pub async fn spawn_mock() -> (Mock, String) {
         .route("/pref", get(pref))
         .route("/echo", get(echo))
         .route("/logout", get(logout))
+        .route("/spa", get(spa))
+        .route("/signout", get(signout))
         .route("/redirect-abs", get(redirect_abs))
         .route("/api/csrf-token", get(csrf_endpoint))
         .with_state(mock.clone());

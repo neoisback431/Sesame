@@ -496,6 +496,24 @@ impl Proxy {
             self.unavailable(&ctx.cid)
         })?;
         let Some(s) = found else { return Ok(None) };
+        // Un rejeu réussi garantit la présence de tous les `session.cookies` (replay.rs). Si l'un
+        // manque, l'appli l'a effacé (`Set-Cookie` vide ou expiré) : c'est une déconnexion faite
+        // dans l'appli elle-même, hors des chemins `spec.logout`. La session est morte : sans
+        // cela, les requêtes partiraient sans cookie et l'utilisateur resterait sur la page de
+        // login de l'appli, sans moyen de se reconnecter.
+        let required = &ctx.app.descriptor.spec.session.cookies;
+        if !required
+            .iter()
+            .all(|name| s.cookies.iter().any(|c| &c.name == name))
+        {
+            tracing::info!(
+                app = ctx.app.id(),
+                correlation_id = %ctx.cid,
+                "cookie de session effacé par l'appli : nouvelle connexion"
+            );
+            let _ = self.sessions.delete_app_session(sid, app_id).await;
+            return Ok(None);
+        }
         let now = SystemTime::now();
         let idle = ctx.app.descriptor.spec.session.idle_ttl;
         if s.last_used_at + idle <= now {

@@ -487,6 +487,41 @@ async fn app_logout_forgets_the_session() {
 }
 
 #[tokio::test]
+async fn logout_inside_the_app_triggers_a_new_login_on_the_next_visit() {
+    // L'appli efface son cookie de session (déconnexion hors des chemins `spec.logout`) et sa page
+    // reste en 200 : aucune condition d'expiration ne la reconnaît. Sans correctif, le clic suivant
+    // partait sans cookie et l'utilisateur restait sur la page de login de l'appli.
+    let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
+    assert!(b.get("/spa").await.body.contains("Bonjour"));
+    assert_eq!(b.mock.logins.load(Ordering::SeqCst), 1);
+    b.get("/signout").await; // le cookie effacé n'atteint pas le navigateur
+    let after = b.get("/spa").await;
+    assert!(after.body.contains("Bonjour amartin"), "{}", after.body);
+    assert_eq!(b.mock.logins.load(Ordering::SeqCst), 2, "nouveau rejeu");
+    after.assert_no_leak();
+    assert_eq!(b.secrets.reads(), 2);
+}
+
+#[tokio::test]
+async fn app_session_missing_a_session_cookie_is_dropped_before_relaying() {
+    // Session déjà enregistrée sans son cookie de session (état laissé par une version
+    // précédente après une déconnexion dans l'appli).
+    let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
+    b.get("/spa").await;
+    let sid = hash_token(PORTAL_TOKEN);
+    let mut stored = b
+        .sessions
+        .get_app_session(&sid, "fake-app")
+        .await
+        .unwrap()
+        .unwrap();
+    stored.cookies.clear();
+    b.sessions.put_app_session(stored).await.unwrap();
+    assert!(b.get("/spa").await.body.contains("Bonjour amartin"));
+    assert_eq!(b.mock.logins.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
 async fn concurrent_requests_trigger_a_single_replay() {
     let b = Arc::new(bench(&["fake-app-users"], APP_PASSWORD, true).await);
     let tasks: Vec<_> = (0..8)
