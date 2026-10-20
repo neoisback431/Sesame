@@ -9,7 +9,9 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
-- 🌐 Le proxy annonce l'adresse publique à chaque appli par `X-Forwarded-Host`, `X-Forwarded-Proto` et `X-Forwarded-Port` (requêtes relayées et rejeu du login), valeurs tirées du descripteur ; ceux fournis par le client ou un frontal sont remplacés (ADR 0032). Utile derrière l'ALB AWS, qui ne pose pas `X-Forwarded-Host`, et pour les applis qui génèrent leurs URLs d'après ces en-têtes (n8n avec `N8N_PROXY_HOPS=1`).
+## [0.1.7] - 2026-10-20
+
+- 🌐 **Adresse publique annoncée à l'appli** (ADR 0032) : le proxy pose `X-Forwarded-Host`, `X-Forwarded-Proto` et `X-Forwarded-Port` sur chaque requête relayée et sur le rejeu du login, avec les valeurs du descripteur ; ceux fournis par le client ou un frontal (et `Forwarded`) sont remplacés, `X-Forwarded-For` est conservé. Utile derrière l'ALB AWS, qui ne pose pas `X-Forwarded-Host`, et pour les applis qui génèrent leurs URLs d'après ces en-têtes (n8n avec `N8N_PROXY_HOPS=1`). Correctif du proxy.
 
 ## [0.1.6] - 2026-10-07
 
