@@ -64,7 +64,24 @@ pub fn authed(m: &MockApp, headers: &HeaderMap) -> bool {
     cookie(headers, "APPSESS").is_some_and(|s| m.sessions.lock().unwrap().contains(s))
 }
 
-pub async fn login_page(State(m): State<Mock>) -> Response {
+/// En-têtes d'adresse publique reçus, notés sous `préfixe` (voir `MockApp::seen`).
+pub fn note_forwarded(m: &MockApp, prefix: &str, headers: &HeaderMap) {
+    let mut seen = m.seen.lock().unwrap();
+    for name in [
+        "x-forwarded-host",
+        "x-forwarded-proto",
+        "x-forwarded-port",
+        "x-forwarded-for",
+        "forwarded",
+    ] {
+        for v in headers.get_all(name) {
+            seen.push(format!("{prefix} {name}: {}", v.to_str().unwrap_or("")));
+        }
+    }
+}
+
+pub async fn login_page(State(m): State<Mock>, headers: HeaderMap) -> Response {
+    note_forwarded(&m, "login", &headers);
     let n = m.counter.fetch_add(1, Ordering::SeqCst);
     let (pre, token) = (format!("pre-{n}"), format!("csrf-{n}"));
     m.csrf.lock().unwrap().insert(pre.clone(), token.clone());
@@ -148,6 +165,7 @@ pub async fn pref(State(m): State<Mock>, headers: HeaderMap) -> Response {
 }
 
 pub async fn echo(State(m): State<Mock>, headers: HeaderMap) -> Response {
+    note_forwarded(&m, "echo", &headers);
     let mut seen = m.seen.lock().unwrap();
     for name in [header::COOKIE, header::AUTHORIZATION] {
         for v in headers.get_all(&name) {

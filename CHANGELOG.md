@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- 🌐 Le proxy annonce l'adresse publique à chaque appli par `X-Forwarded-Host`, `X-Forwarded-Proto` et `X-Forwarded-Port` (requêtes relayées et rejeu du login), valeurs tirées du descripteur ; ceux fournis par le client ou un frontal sont remplacés (ADR 0032). Utile derrière l'ALB AWS, qui ne pose pas `X-Forwarded-Host`, et pour les applis qui génèrent leurs URLs d'après ces en-têtes (n8n avec `N8N_PROXY_HOPS=1`).
+
 ## [0.1.6] - 2026-10-07
 
 - 🐛 **Déconnexion faite dans l'application, mode `handoff`** (ex. n8n) : l'appli efface son cookie dans le navigateur, mais le marqueur de remise de Sesame subsistait ; Sesame relayait sans rien refaire et l'utilisateur restait sur la page de login de l'appli. Sur une navigation, l'absence d'un cookie remis (`session.handoff.set_cookies`) déclenche désormais une nouvelle remise, sans règle `spec.expiry` à écrire. Correctif du proxy.

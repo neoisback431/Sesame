@@ -158,7 +158,7 @@ async fn access_request(
     if let Err(e) = i
         .proxy
         .replayer
-        .verify(&app.http, d, &sub.user, &credential, &cid)
+        .verify(&app.http, d, &app.forwarded, &sub.user, &credential, &cid)
         .await
     {
         return match e {

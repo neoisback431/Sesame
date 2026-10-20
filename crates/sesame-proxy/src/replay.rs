@@ -28,6 +28,7 @@ use crate::diagnostic::{Capture, Masker};
 use crate::form::{endpoint_value, extract_csrf, parse_form};
 use crate::jar::Jar;
 use crate::matcher::{self, ResponseView};
+use crate::rewrite::Forwarded;
 
 const MAX_LOGIN_BODY: usize = 2 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
@@ -164,6 +165,7 @@ impl Replayer {
         &self,
         http: &reqwest::Client,
         d: &AppDescriptor,
+        fwd: &Forwarded,
         user: &UserIdentity,
         cid: &str,
     ) -> Result<ReplaySession, ReplayError> {
@@ -223,7 +225,7 @@ impl Replayer {
         let mut last = ReplayError::Upstream;
         let mut capture: Option<Capture> = None;
         for attempt in 1..=d.spec.login.max_attempts {
-            match self.login(http, d, &credential, &mut capture).await {
+            match self.login(http, d, fwd, &credential, &mut capture).await {
                 Ok(Outcome::Success(jar, login_body)) => {
                     self.audit(event(AuditAction::LoginReplay, AuditOutcome::Success))
                         .await?;
@@ -288,6 +290,7 @@ impl Replayer {
         &self,
         http: &reqwest::Client,
         d: &AppDescriptor,
+        fwd: &Forwarded,
         user: &UserIdentity,
         credential: &Credential,
         cid: &str,
@@ -298,7 +301,7 @@ impl Replayer {
                 .app(&d.metadata.id)
                 .correlation(cid)
         };
-        let result = match self.login(http, d, credential, &mut None).await {
+        let result = match self.login(http, d, fwd, credential, &mut None).await {
             Ok(Outcome::Success(..)) => Ok(()),
             Ok(Outcome::Failure(reason) | Outcome::Indeterminate(reason)) => {
                 Err(ReplayError::Rejected(reason))
@@ -360,6 +363,7 @@ impl Replayer {
         &self,
         http: &reqwest::Client,
         d: &AppDescriptor,
+        fwd: &Forwarded,
         cred: &Credential,
         capture: &mut Option<Capture>,
     ) -> Result<Outcome, reqwest::Error> {
@@ -380,6 +384,7 @@ impl Replayer {
             if let Some(h) = &spec.upstream.host_header {
                 req = req.header(HOST, h);
             }
+            req = fwd.apply(req);
             if let Some(c) = jar.header() {
                 req = req.header(COOKIE, c.expose_secret());
             }

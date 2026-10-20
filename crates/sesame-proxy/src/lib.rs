@@ -60,6 +60,8 @@ pub struct App {
     pub internal_origin: String,
     /// Origine publique (`https://app.sesame.example`).
     pub public_origin: String,
+    /// Adresse publique annoncée à l'appli (`X-Forwarded-*`, ADR 0032).
+    pub forwarded: rewrite::Forwarded,
     logout: Vec<Regex>,
 }
 
@@ -75,6 +77,7 @@ impl App {
         Self {
             internal_origin: rewrite::origin(&descriptor.spec.upstream.base_url).to_owned(),
             public_origin: format!("{scheme}://{}", descriptor.spec.public.host),
+            forwarded: rewrite::Forwarded::new(scheme, &descriptor.spec.public.host),
             descriptor,
             http,
             logout,
@@ -225,6 +228,12 @@ fn correlation_id(headers: &HeaderMap) -> String {
 /// En-têtes jamais relayés du navigateur vers l'appli.
 const DROP_REQUEST: &[&str] = &[
     "host",
+    // Adresse publique : posée par Sesame d'après le descripteur (ADR 0032), jamais celle du client
+    // ni d'un frontal. `x-forwarded-for` (adresse du client) reste relayé.
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-forwarded-port",
+    "forwarded",
     "cookie",
     "authorization",
     "proxy-authorization",
@@ -331,7 +340,13 @@ impl Proxy {
         };
         let session = match self
             .replayer
-            .replay(&ctx.app.http, &ctx.app.descriptor, &ctx.session.user, &ctx.cid)
+            .replay(
+                &ctx.app.http,
+                &ctx.app.descriptor,
+                &ctx.app.forwarded,
+                &ctx.session.user,
+                &ctx.cid,
+            )
             .await
         {
             Ok(s) => s,
@@ -461,7 +476,13 @@ impl Proxy {
             }
             let jar = self
                 .replayer
-                .replay(&ctx.app.http, &ctx.app.descriptor, &ctx.session.user, &ctx.cid)
+                .replay(
+                    &ctx.app.http,
+                    &ctx.app.descriptor,
+                    &ctx.app.forwarded,
+                    &ctx.session.user,
+                    &ctx.cid,
+                )
                 .await
                 .map_err(|e| self.replay_error(&e, &ctx.cid))?
                 .jar;
@@ -565,6 +586,7 @@ impl Proxy {
         if let Some(h) = &spec.upstream.host_header {
             req = req.header(header::HOST, h);
         }
+        req = app.forwarded.apply(req);
         if let Injection::Server(jar) = inject {
             if let Some(c) = jar.header() {
                 req = req.header(header::COOKIE, c.expose_secret());

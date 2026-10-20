@@ -27,7 +27,9 @@ Exemple complet : [`descriptors/fake-app.yaml`](../descriptors/fake-app.yaml). G
 
 - `base_url` : URL interne de l'appli, telle que le proxy la joint.
 - `timeout` : délai maximal d'une requête vers l'appli (défaut `30s`).
-- `host_header` : en-tête `Host` envoyé à l'appli, si différent de l'hôte de `base_url`.
+- `host_header` : en-tête `Host` envoyé à l'appli, si différent de l'hôte de `base_url`. À éviter pour
+  annoncer l'adresse publique : beaucoup d'applis ou de frontaux répondent `400` à un hôte inconnu.
+  Sesame envoie déjà `X-Forwarded-Host` / `-Proto` / `-Port` avec l'adresse publique (ADR 0032).
 - `tls.verify` : vérifier le certificat TLS de l'appli. **`false` par défaut** (choix de
   l'exploitant) : beaucoup d'applis internes ont un certificat signé par une PKI privée
   dont Sesame n'a pas la CA, et le rejeu échouerait sinon systématiquement

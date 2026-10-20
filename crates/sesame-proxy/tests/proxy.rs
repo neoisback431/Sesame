@@ -609,3 +609,39 @@ async fn failures_are_signalled_to_administrators_once_per_window() {
         .unwrap();
     assert_eq!(a.status, AccountStatus::Active);
 }
+
+#[tokio::test]
+async fn public_address_is_announced_to_the_app_and_cannot_be_spoofed() {
+    let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
+    let req = b
+        .request("GET", "/echo")
+        .header("x-forwarded-host", "evil.example")
+        .header("x-forwarded-proto", "http")
+        .header("x-forwarded-port", "1")
+        .header("forwarded", "host=evil.example")
+        .header("x-forwarded-for", "203.0.113.7")
+        .body(Body::empty())
+        .unwrap();
+    b.send(req).await;
+    let seen = b.mock.seen.lock().unwrap().join("\n");
+    // Valeurs du descripteur, pas celles du client ; l'adresse du client est conservée.
+    for expected in [
+        "echo x-forwarded-host: app.sesame.test",
+        "echo x-forwarded-proto: https",
+        "echo x-forwarded-port: 443",
+        "echo x-forwarded-for: 203.0.113.7",
+        // Le rejeu du login les reçoit aussi (cookies Secure, contrôles d'origine).
+        "login x-forwarded-host: app.sesame.test",
+        "login x-forwarded-proto: https",
+    ] {
+        assert!(seen.contains(expected), "{expected} absent : {seen}");
+    }
+    for forbidden in ["evil.example", "x-forwarded-proto: http\n", "forwarded: host"] {
+        assert!(!seen.contains(forbidden), "{forbidden} relayé : {seen}");
+    }
+    assert_eq!(
+        seen.matches("echo x-forwarded-host").count(),
+        1,
+        "pas de doublon : {seen}"
+    );
+}
