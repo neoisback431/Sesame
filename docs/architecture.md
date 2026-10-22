@@ -91,7 +91,16 @@ Compléments :
 
 ## Registre des comptes
 
-Le portail doit savoir quelles applis afficher sans accéder au coffre : seul le proxy le lit. Un **registre des comptes**, dans PostgreSQL, indique pour chaque couple (appli, utilisateur) qu'un compte applicatif existe, avec son état. Il ne contient **aucun secret**.
+Le portail doit savoir quelles applis afficher sans accéder au coffre : seul le proxy le lit. Un **registre des comptes**, dans PostgreSQL, indique pour chaque couple (appli, utilisateur) quels comptes applicatifs existent, avec leur état. Il ne contient **aucun secret**.
+
+### Comptes multiples (ADR 0034)
+
+Un utilisateur peut avoir **plusieurs comptes sur une même appli** (un compte d'administration, de support…). Un compte est désigné par (appli, utilisateur, `account_id`) : `default` pour le compte principal, un identifiant dérivé du libellé saisi dans l'administration pour les autres (« Admin prod » → `admin-prod`). Chaque couple a **un compte par défaut** (le premier créé, modifiable dans l'administration).
+
+- **Choix** : avec au moins deux comptes utilisables, la tuile porte un sélecteur (`POST /apps/<id>/account`, portail). Le choix est mémorisé **par utilisateur** (`app_account_selections`), pour toutes ses sessions portail ; les sessions applicatives ouvertes avec l'ancien compte sont détruites et l'éventuelle suspension (ADR 0033) levée. Audit `account_selected`.
+- **Compte effectif** : le compte choisi, sinon le compte par défaut, sinon le premier compte, en écartant d'abord les comptes désactivés. La tuile affiche l'état de ce compte ; le proxy rejoue avec lui.
+- **Un seul compte à la fois par appli** : même hôte, mêmes cookies. En mode handoff, le marqueur `__sesame_handoff` porte le compte remis et la remise est refaite si l'utilisateur en change.
+- Les **demandes d'accès** portent sur le compte `default` ; les comptes supplémentaires sont créés par un administrateur.
 
 | État | Sens | Tuile | Rejeu |
 |---|---|---|---|
@@ -100,6 +109,8 @@ Le portail doit savoir quelles applis afficher sans accéder au coffre : seul le
 | `failed` | Dernier rejeu en échec (identifiants refusés, formulaire changé…) | Affichée, signalée | Bloqué jusqu'à correction |
 | `disabled` | Désactivé par un administrateur | Masquée | Bloqué |
 | `pending` | Identifiants fournis par l'utilisateur depuis « Mes applications », en attente d'activation par un administrateur (ADR 0029) | Grisée (« demande en cours ») | Bloqué jusqu'à activation |
+
+L'état s'entend par compte ; avec plusieurs comptes, la tuile suit le compte effectif et n'est masquée que si tous sont désactivés.
 
 ### Demandes d'accès (ADR 0029)
 
@@ -272,7 +283,7 @@ sequenceDiagram
 ```
 
 - **Aucun chemin dédié** : la tuile mène à l'URL normale de l'appli ; la remise se fait à la première arrivée, puis redirige vers l'URL demandée.
-- **Marqueur** `__sesame_handoff` (`HttpOnly`, durée `session.max_ttl`) : tant qu'il est présent, Sesame relaie sans rien injecter ni rejouer. Le cookie du portail et le marqueur sont retirés avant le relais.
+- **Marqueur** `__sesame_handoff` (`HttpOnly`, durée `session.max_ttl`) : tant qu'il est présent, Sesame relaie sans rien injecter ni rejouer. Le cookie du portail et le marqueur sont retirés avant le relais. Sa valeur est le compte remis (ADR 0034) : si l'utilisateur en choisit un autre, la navigation suivante refait la remise.
 - **Reprise** : si une navigation relayée correspond aux règles `spec.expiry`, Sesame émet `app_session_expired` et refait une remise (nouveau rejeu). À l'expiration du marqueur, la prochaine arrivée en refait une aussi.
 - **Mot de passe** : jamais remis ; seul l'élément de session déclaré (`set_cookies`, `local_storage`) quitte le serveur.
 - **Contreparties** : élément de session visible du navigateur ; la déconnexion du portail coupe l'accès via Sesame mais pas la session côté appli ; la désactivation d'un compte ne prend effet qu'à l'expiration du marqueur ; audit limité à la connexion.
@@ -284,8 +295,9 @@ Schéma : [`crates/sesame-store-postgres/migrations/`](../crates/sesame-store-po
 | Table | Contenu |
 |---|---|
 | `portal_sessions` | Empreinte SHA-256 du jeton du cookie (jamais le jeton), identité, groupes, échéance |
-| `app_sessions` | Jar de cookies applicatifs **chiffré** (AES-256-GCM, lié par AAD au couple session / appli), dates, échéance ; `ON DELETE CASCADE` depuis la session portail |
-| `app_accounts` | Registre des comptes (voir plus haut), sans secret |
+| `app_sessions` | Jar de cookies applicatifs **chiffré** (AES-256-GCM, lié par AAD au couple session / appli), compte avec lequel la session a été ouverte, dates, échéance ; `ON DELETE CASCADE` depuis la session portail |
+| `app_accounts` | Registre des comptes (voir plus haut), un par (appli, utilisateur, compte), libellé et compte par défaut, sans secret |
+| `app_account_selections` | Compte choisi par l'utilisateur pour une appli (ADR 0034) ; `ON DELETE CASCADE` depuis le compte |
 | `users` | Nom et e-mail déclarés par le fournisseur d'identité, écrits par le portail à chaque connexion et lus par l'administration pour afficher « Nom Prénom » à la place de la clé utilisateur (ADR 0031) ; aucune autorisation n'en dépend |
 | `app_descriptors` / `app_descriptor_history` | Descripteurs créés dans l'administration et leur historique (voir « Catalogue des applis ») |
 | `replay_diagnostics` | Dernier rejeu en échec par compte, valeurs sensibles masquées (voir « Diagnostic des rejeux ») ; `ON DELETE CASCADE` depuis le compte |
@@ -298,12 +310,13 @@ Schéma : [`crates/sesame-store-postgres/migrations/`](../crates/sesame-store-po
 
 ## Coffre de secrets
 
-- Interface `SecretStore::get_credential(app_id, user_key)`, écriture par une interface
+- Interface `SecretStore::get_credential(compte)` (compte = appli, utilisateur, `account_id`, ADR 0034), écriture par une interface
   séparée côté admin (`SecretWriter`, `write_credential` / `delete_credential`, jamais de
   lecture). Deux implémentations interchangeables (`SESAME_SECRET_STORE`) :
   - **PostgreSQL, par défaut** (`postgres`, [ADR 0021](decisions/0021-coffre-postgresql-par-defaut.md)) : table `app_secrets`
     du même PostgreSQL que les sessions et le registre des comptes, une ligne par champ,
-    valeur chiffrée AES-256-GCM (liée par AAD au triplet appli / utilisateur / champ),
+    valeur chiffrée AES-256-GCM (liée par AAD au compte et au champ : `appli|utilisateur|champ`
+    pour le compte `default`, `appli|utilisateur#compte|champ` pour les autres),
     clé `SESAME_SECRETS_ENCRYPTION_KEY` **identique** entre le proxy (`PgSecretStore`,
     déchiffre) et l'admin (`PostgresSecretWriter`, chiffre), **distincte** de la clé de
     chiffrement des sessions. Aucune brique externe supplémentaire, mais la séparation
@@ -312,7 +325,8 @@ Schéma : [`crates/sesame-store-postgres/migrations/`](../crates/sesame-store-po
     sur des rôles PostgreSQL distincts (proxy en lecture seule, admin sans `SELECT` sur
     `app_secrets`).
   - **OpenBao / Vault** (`openbao` / `vault`, KV v2) : chemin
-    `<mount>/sesame/apps/<app_id>/users/<user_key>`. Le proxy s'authentifie par AppRole,
+    `<mount>/sesame/apps/<app_id>/users/<user_key>` (compte `default`), suivi de
+    `/accounts/<account_id>` pour les autres comptes. Le proxy s'authentifie par AppRole,
     policy limitée à la lecture de `sesame/apps/*` ; l'admin a une policy d'écriture sans
     lecture (`create`, `update`, `delete`) garantie par le serveur du coffre lui-même.
     Utile aux organisations qui en ont déjà un (rotation automatique, HSM…).

@@ -26,7 +26,8 @@ async def main() -> None:
     while conn is None:
         try:
             conn = await asyncpg.connect(dsn)
-            await conn.execute("SELECT 1 FROM app_secrets LIMIT 1")
+            # Colonne des comptes multiples (migration 0010, ADR 0034) : schéma à jour.
+            await conn.execute("SELECT account_id FROM app_secrets LIMIT 1")
         except (OSError, asyncpg.PostgresError):
             if conn is not None:
                 await conn.close()
@@ -38,8 +39,10 @@ async def main() -> None:
         for key, value in FIELDS.items():
             ciphertext = cipher.encrypt(value, field_aad(APP_ID, USER_KEY, key))
             await conn.execute(
-                """INSERT INTO app_secrets (app_id, user_key, key, ciphertext) VALUES ($1, $2, $3, $4)
-                   ON CONFLICT (app_id, user_key, key) DO UPDATE SET ciphertext = $4, updated_at = now()""",
+                """INSERT INTO app_secrets (app_id, user_key, account_id, key, ciphertext)
+                   VALUES ($1, $2, 'default', $3, $4)
+                   ON CONFLICT (app_id, user_key, account_id, key)
+                   DO UPDATE SET ciphertext = $4, updated_at = now()""",
                 APP_ID,
                 USER_KEY,
                 key,

@@ -1,6 +1,6 @@
 # 0010. Registre des comptes dans PostgreSQL
 
-**Statut** : acceptée (2026-09-27)
+**Statut** : acceptée (2026-09-27). Étendue par l'[ADR 0034](0034-plusieurs-comptes-par-application.md) : plusieurs comptes par couple (appli, utilisateur).
 
 ## Contexte
 
