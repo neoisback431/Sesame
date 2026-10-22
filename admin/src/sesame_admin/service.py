@@ -29,6 +29,7 @@ from .notifications import (
     validate_settings,
 )
 from .ports import (
+    DEFAULT_ACCOUNT,
     AccessRequest,
     AccessRequestStore,
     AccountStore,
@@ -40,6 +41,8 @@ from .ports import (
     SecretWriter,
     StoredDescriptor,
     Unavailable,
+    account_id_from_label,
+    valid_account_id,
 )
 
 log = logging.getLogger(__name__)
@@ -295,15 +298,32 @@ class AdminService:
     # --- Comptes -------------------------------------------------------------------
 
     async def provision(
-        self, actor: AdminUser, app_id: str, user_key: str, fields: dict[str, str], cid: str
-    ) -> None:
-        """Écrit les identifiants dans le coffre puis active le compte dans le registre."""
+        self,
+        actor: AdminUser,
+        app_id: str,
+        user_key: str,
+        fields: dict[str, str],
+        cid: str,
+        label: str | None = None,
+    ) -> str:
+        """Écrit les identifiants dans le coffre puis active le compte dans le registre.
+
+        Comptes multiples (ADR 0034) : sans libellé, il s'agit du compte ``default`` du couple
+        (créé, ou dont les identifiants sont remplacés) ; avec un libellé, du compte dont
+        l'identifiant en dérive (« Admin prod » → ``admin-prod``), créé ou mis à jour. Le premier
+        compte d'un couple devient son compte par défaut. Renvoie l'identifiant du compte."""
         app = await self.app(app_id)
         user_key = user_key.strip()
         if not valid_user_key(user_key):
             raise InvalidInput(
                 "Identifiant utilisateur invalide (caractères autorisés : A-Z a-z 0-9 @ . _ - +)."
             )
+        label = (label or "").strip() or None
+        if label is not None and len(label) > 64:
+            raise InvalidInput("Libellé trop long (64 caractères au plus).")
+        account_id = account_id_from_label(label) if label else DEFAULT_ACCOUNT
+        if not account_id:
+            raise InvalidInput("Libellé invalide : utilisez au moins une lettre ou un chiffre.")
         if set(fields) != set(app.credential_keys):
             raise InvalidInput("Champs attendus : " + ", ".join(app.credential_keys) + ".")
         for key, value in fields.items():
@@ -312,77 +332,156 @@ class AdminService:
 
         def event(action: str, outcome: str, reason: str | None = None) -> AuditEvent:
             return AuditEvent.of(
-                action, outcome, actor, app_id=app_id, target_user=user_key, correlation_id=cid, reason=reason
+                action,
+                outcome,
+                actor,
+                app_id=app_id,
+                account_id=account_id,
+                target_user=user_key,
+                correlation_id=cid,
+                reason=reason,
             )
 
         try:
-            await self.secrets.write_credential(app_id, user_key, fields)
+            await self.secrets.write_credential(app_id, user_key, fields, account_id)
         except Unavailable:
             await self.audit.record(event("credential_written", "failure", "secret_store_unavailable"))
             raise
         await self.audit.record(event("credential_written", "success"))
         try:
-            await self.accounts.upsert_active(app_id, user_key)
+            await self.accounts.upsert_active(app_id, user_key, account_id, label)
         except Exception:
             await self.audit.record(event("account_status_changed", "failure", "registry_unavailable"))
             raise
         await self.audit.record(event("account_status_changed", "success", "active:provisioned"))
-        await self._close_request(actor, app_id, user_key, cid, provisioned=True)
+        if account_id == DEFAULT_ACCOUNT:
+            await self._close_request(actor, app_id, user_key, cid, provisioned=True)
         log.info(
-            "compte provisionné", extra={"app_id": app_id, "target_user": user_key, "correlation_id": cid}
+            "compte provisionné",
+            extra={
+                "app_id": app_id,
+                "target_user": user_key,
+                "account_id": account_id,
+                "correlation_id": cid,
+            },
         )
+        return account_id
 
-    async def set_status(self, actor: AdminUser, app_id: str, user_key: str, status: str, cid: str) -> None:
+    async def set_status(
+        self,
+        actor: AdminUser,
+        app_id: str,
+        user_key: str,
+        status: str,
+        cid: str,
+        account_id: str = DEFAULT_ACCOUNT,
+    ) -> None:
         """Active ou désactive un compte existant (``failed`` est réservé au proxy)."""
         await self.app(app_id)
         if status not in ("active", "disabled"):
             raise InvalidInput("État demandé invalide.")
+        if not valid_account_id(account_id):
+            raise InvalidInput("Compte invalide.")
         reason = None if status == "active" else "disabled_by_admin"
         event = AuditEvent.of(
             "account_status_changed",
             "success",
             actor,
             app_id=app_id,
+            account_id=account_id,
             target_user=user_key,
             correlation_id=cid,
             reason=f"{status}:admin",
         )
         try:
-            await self.accounts.set_status(app_id, user_key, status, reason)  # type: ignore[arg-type]
+            await self.accounts.set_status(app_id, user_key, status, reason, account_id)  # type: ignore[arg-type]
         except NotFound:
             event.outcome, event.reason = "failure", "no_account"
             await self.audit.record(event)
             raise
         if status == "disabled":
-            await self.accounts.revoke_app_sessions(app_id, user_key)
+            await self.accounts.revoke_app_sessions(app_id, user_key, account_id)
         await self.audit.record(event)
         # Activer un compte en attente revient à approuver sa demande ; désactiver la refuse.
-        await self._close_request(actor, app_id, user_key, cid, approved=status == "active")
+        # Les demandes d'accès ne portent que sur le compte `default`.
+        if account_id == DEFAULT_ACCOUNT:
+            await self._close_request(actor, app_id, user_key, cid, approved=status == "active")
         if status == "disabled":
             await self._notify_sensitive(actor, "account_disabled", app_id, user_key)
 
-    async def delete(self, actor: AdminUser, app_id: str, user_key: str, cid: str) -> None:
-        """Supprime les identifiants du coffre puis l'entrée du registre."""
+    async def set_default(
+        self, actor: AdminUser, app_id: str, user_key: str, account_id: str, cid: str
+    ) -> None:
+        """Fait d'un compte le compte par défaut du couple (utilisé tant que l'utilisateur n'en
+        a pas choisi un autre depuis « Mes applications »)."""
         await self.app(app_id)
+        if not valid_account_id(account_id):
+            raise InvalidInput("Compte invalide.")
+        event = AuditEvent.of(
+            "account_default_changed",
+            "success",
+            actor,
+            app_id=app_id,
+            account_id=account_id,
+            target_user=user_key,
+            correlation_id=cid,
+        )
+        try:
+            await self.accounts.set_default(app_id, user_key, account_id)
+        except NotFound:
+            event.outcome, event.reason = "failure", "no_account"
+            await self.audit.record(event)
+            raise
+        await self.audit.record(event)
+
+    async def delete(
+        self, actor: AdminUser, app_id: str, user_key: str, cid: str, account_id: str = DEFAULT_ACCOUNT
+    ) -> None:
+        """Supprime les identifiants du coffre puis l'entrée du registre.
+
+        Le compte par défaut d'un couple ne se supprime qu'en dernier : il faut d'abord en
+        désigner un autre (ou supprimer les autres)."""
+        await self.app(app_id)
+        if not valid_account_id(account_id):
+            raise InvalidInput("Compte invalide.")
+        target = await self.accounts.get_account(app_id, user_key, account_id)
+        if target is not None and target.is_default:
+            others = [
+                a
+                for a in await self.accounts.list_user_accounts(user_key)
+                if a.app_id == app_id and a.account_id != account_id
+            ]
+            if others:
+                raise InvalidInput(
+                    "C'est le compte par défaut : désignez d'abord un autre compte par défaut."
+                )
 
         def event(action: str, outcome: str, reason: str | None = None) -> AuditEvent:
             return AuditEvent.of(
-                action, outcome, actor, app_id=app_id, target_user=user_key, correlation_id=cid, reason=reason
+                action,
+                outcome,
+                actor,
+                app_id=app_id,
+                account_id=account_id,
+                target_user=user_key,
+                correlation_id=cid,
+                reason=reason,
             )
 
         try:
-            await self.secrets.delete_credential(app_id, user_key)
+            await self.secrets.delete_credential(app_id, user_key, account_id)
         except Unavailable:
             await self.audit.record(event("credential_deleted", "failure", "secret_store_unavailable"))
             raise
         await self.audit.record(event("credential_deleted", "success"))
         try:
-            await self.accounts.delete_account(app_id, user_key)
+            await self.accounts.delete_account(app_id, user_key, account_id)
         except NotFound:
             pass
-        await self.accounts.revoke_app_sessions(app_id, user_key)
+        await self.accounts.revoke_app_sessions(app_id, user_key, account_id)
         await self.audit.record(event("account_status_changed", "success", "deleted:admin"))
-        await self._close_request(actor, app_id, user_key, cid, approved=False)
+        if account_id == DEFAULT_ACCOUNT:
+            await self._close_request(actor, app_id, user_key, cid, approved=False)
         await self._notify_sensitive(actor, "account_deleted", app_id, user_key)
 
     # --- Demandes d'accès (ADR 0029) ---------------------------------------------------
@@ -457,20 +556,24 @@ class AdminService:
         for account in await self.accounts.list_user_accounts(user_key):
             if account.status == "disabled":
                 continue
-            await self.accounts.set_status(account.app_id, user_key, "disabled", "disabled_by_admin")
-            await self.accounts.revoke_app_sessions(account.app_id, user_key)
+            await self.accounts.set_status(
+                account.app_id, user_key, "disabled", "disabled_by_admin", account.account_id
+            )
+            await self.accounts.revoke_app_sessions(account.app_id, user_key, account.account_id)
             await self.audit.record(
                 AuditEvent.of(
                     "account_status_changed",
                     "success",
                     actor,
                     app_id=account.app_id,
+                    account_id=account.account_id,
                     target_user=user_key,
                     correlation_id=cid,
                     reason="disabled:admin_bulk",
                 )
             )
-            await self._close_request(actor, account.app_id, user_key, cid, approved=False)
+            if account.account_id == DEFAULT_ACCOUNT:
+                await self._close_request(actor, account.app_id, user_key, cid, approved=False)
             count += 1
         if count:
             await self._notify_sensitive(actor, "disable_all", None, user_key)

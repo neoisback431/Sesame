@@ -746,3 +746,49 @@ def test_analyze_passes_handoff_flag(apps):
     assert recorder.handoff is True
     client.post("/apps/analyze", data={"csrf": token, "login_url": "https://spa.interne/login"})
     assert recorder.handoff is False
+
+
+def test_several_accounts_per_user(ctx):
+    """Comptes multiples (ADR 0034) : libellé au provisionnement, actions par compte."""
+    client, service, _, audit = ctx
+    login(client)
+    token = csrf(client)
+    for label, user in (("", "cdupont"), ("Admin", "cdupont-adm")):
+        r = client.post(
+            "/apps/fake-app/accounts",
+            data={
+                "csrf": token,
+                "user_key": "carol",
+                "label": label,
+                "cred_username": user,
+                "cred_password": SECRET,
+            },
+        )
+        assert r.status_code == 303
+    page = client.get("/apps/fake-app").text
+    assert "Compte « Admin » de « carol » enregistré et activé." in html.unescape(page)
+    assert "par défaut" in page and 'name="account_id" value="admin"' in page
+    assert_no_leak(page)
+
+    client.post(
+        "/apps/fake-app/accounts/carol/status",
+        data={"csrf": token, "status": "disabled", "account_id": "admin"},
+    )
+    assert (asyncio.run(service.accounts.get_account("fake-app", "carol", "admin"))).status == "disabled"
+    assert (asyncio.run(service.accounts.get_account("fake-app", "carol"))).status == "active"
+
+    # Suppression du compte par défaut refusée tant qu'il en reste un autre.
+    client.post("/apps/fake-app/accounts/carol/delete", data={"csrf": token})
+    assert "compte par défaut" in html.unescape(client.get("/apps/fake-app").text)
+    assert ("fake-app", "carol") in service.secrets.entries
+
+    client.post("/apps/fake-app/accounts/carol/default", data={"csrf": token, "account_id": "admin"})
+    assert asyncio.run(service.accounts.get_account("fake-app", "carol", "admin")).is_default
+    client.post("/apps/fake-app/accounts/carol/delete", data={"csrf": token, "account_id": "default"})
+    assert ("fake-app", "carol") not in service.secrets.entries
+    assert ("fake-app", "carol", "admin") in service.secrets.entries
+
+    r = client.get("/apps/fake-app/accounts/carol/diagnostic?account=admin")
+    assert r.status_code == 200 and "<code>admin</code>" in r.text
+    assert client.get("/apps/fake-app/accounts/carol/diagnostic?account=../x").status_code == 404
+    assert_no_leak(repr(audit.events))

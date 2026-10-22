@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import httpx
 
 from .identity import valid_user_key
-from .ports import Unavailable
+from .ports import DEFAULT_ACCOUNT, Unavailable, valid_account_id
 
 
 @dataclass(frozen=True)
@@ -55,11 +55,14 @@ class OpenBaoSecretWriter:
             h["X-Vault-Token"] = token
         return h
 
-    def _path(self, kind: str, app_id: str, user_key: str) -> str:
-        if not _segment_ok(app_id) or not valid_user_key(user_key):
-            raise ValueError("identifiant d'appli ou d'utilisateur invalide")
+    def _path(self, kind: str, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT) -> str:
+        """Compte ``default`` : chemin d'avant les comptes multiples ; autres comptes sous
+        ``…/users/<user>/accounts/<compte>`` (ADR 0034, même règle que le proxy)."""
+        if not _segment_ok(app_id) or not valid_user_key(user_key) or not valid_account_id(account_id):
+            raise ValueError("identifiant d'appli, d'utilisateur ou de compte invalide")
         c = self._cfg
-        return f"{c.addr.rstrip('/')}/v1/{c.mount}/{kind}/{c.path_prefix}/{app_id}/users/{user_key}"
+        path = f"{c.addr.rstrip('/')}/v1/{c.mount}/{kind}/{c.path_prefix}/{app_id}/users/{user_key}"
+        return path if account_id == DEFAULT_ACCOUNT else f"{path}/accounts/{account_id}"
 
     async def _login(self, force: bool = False) -> str:
         async with self._lock:
@@ -90,12 +93,14 @@ class OpenBaoSecretWriter:
                 return r
         return r
 
-    async def write_credential(self, app_id: str, user_key: str, fields: dict[str, str]) -> None:
-        r = await self._call("POST", self._path("data", app_id, user_key), json={"data": fields})
+    async def write_credential(
+        self, app_id: str, user_key: str, fields: dict[str, str], account_id: str = DEFAULT_ACCOUNT
+    ) -> None:
+        r = await self._call("POST", self._path("data", app_id, user_key, account_id), json={"data": fields})
         if r.status_code not in (200, 204):
             raise Unavailable(f"écriture dans le coffre refusée (HTTP {r.status_code})")
 
-    async def delete_credential(self, app_id: str, user_key: str) -> None:
-        r = await self._call("DELETE", self._path("metadata", app_id, user_key))
+    async def delete_credential(self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT) -> None:
+        r = await self._call("DELETE", self._path("metadata", app_id, user_key, account_id))
         if r.status_code not in (200, 204, 404):
             raise Unavailable(f"suppression dans le coffre refusée (HTTP {r.status_code})")

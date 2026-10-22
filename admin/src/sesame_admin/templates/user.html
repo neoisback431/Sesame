@@ -6,12 +6,13 @@
 <p><a href="/users">← Utilisateurs</a></p>
 <h1>Comptes de {{ who(user_key, people) }}</h1>
 <table>
-  <thead><tr><th>Application</th><th>État</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Application</th><th>Compte</th><th>État</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
   <tbody>
   {% for a in accounts %}
     {% set app = apps.get(a.app_id) %}
     <tr>
       <td>{% if app %}<a href="/apps/{{ a.app_id }}">{{ app.name }}</a>{% else %}<code>{{ a.app_id }}</code><br><span class="muted">descripteur absent</span>{% endif %}</td>
+      <td>{{ a.display_label }}{% if a.is_default %} <span class="tag">par défaut</span>{% endif %}</td>
       <td><span class="status {{ a.status }}">{{ {"active": "actif", "failed": "en échec", "disabled": "désactivé", "pending": "en attente"}[a.status] }}</span>
         {% if a.status_reason %}<br><span class="muted">{{ a.status_reason }}</span>{% endif %}</td>
       <td>{{ a.last_login_at.strftime("%Y-%m-%d %H:%M") if a.last_login_at else "—" }}</td>
@@ -19,17 +20,19 @@
         {% if app %}
         <form class="inline" method="post" action="/apps/{{ a.app_id }}/accounts/{{ user_key }}/status">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/users/{{ user_key }}">
+          <input type="hidden" name="account_id" value="{{ a.account_id }}">
           <input type="hidden" name="status" value="{{ 'disabled' if a.status == 'active' else 'active' }}">
           <button type="submit">{{ "Désactiver" if a.status == "active" else "Réactiver" }}</button></form>
         <form class="inline" method="post" action="/apps/{{ a.app_id }}/accounts/{{ user_key }}/delete"
               onsubmit="return confirm('Supprimer ce compte du coffre et du registre ?')">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/users/{{ user_key }}">
+          <input type="hidden" name="account_id" value="{{ a.account_id }}">
           <button type="submit">Supprimer</button></form>
         {% endif %}
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="4">Aucun compte pour cet utilisateur.</td></tr>
+    <tr><td colspan="5">Aucun compte pour cet utilisateur.</td></tr>
   {% endfor %}
   </tbody>
 </table>

@@ -113,10 +113,13 @@ async def test_user_profiles_and_name_search_contract(store):
     assert await store.search_users(f"introuvable-{tag}", 10) == []
 
 
-async def seed_app_session(store, app_id: str, user_key: str) -> None:
+async def seed_app_session(store, app_id: str, user_key: str, account_id: str = "default") -> None:
     """Session applicative ouverte, créée comme le feraient le portail et le proxy."""
     if isinstance(store, MemoryAccountStore):
-        store.app_sessions[(app_id, user_key)] = store.app_sessions.get((app_id, user_key), 0) + 1
+        from sesame_admin.memory import key
+
+        k = key(app_id, user_key, account_id)
+        store.app_sessions[k] = store.app_sessions.get(k, 0) + 1
         return
     pool = await store.pool()
     sid = uuid.uuid4().hex
@@ -127,10 +130,12 @@ async def seed_app_session(store, app_id: str, user_key: str) -> None:
         user_key,
     )
     await pool.execute(
-        """INSERT INTO app_sessions (portal_session, app_id, cookies, created_at, last_used_at, expires_at)
-           VALUES ($1, $2, '\\x00', now(), now(), now() + interval '1 hour')""",
+        """INSERT INTO app_sessions (portal_session, app_id, account_id, cookies, created_at, last_used_at,
+                                     expires_at)
+           VALUES ($1, $2, $3, '\\x00', now(), now(), now() + interval '1 hour')""",
         sid,
         app_id,
+        account_id,
     )
 
 
@@ -174,6 +179,75 @@ async def test_user_views_and_session_revocation_contract(store):
 
     for app, u in ((f"app-a-{tag}", user), (f"app-b-{tag}", user), (f"app-a-{tag}", other)):
         await store.delete_account(app, u)
+
+
+async def test_multiple_accounts_contract(store):
+    """Plusieurs comptes par couple (ADR 0034) : le premier est le compte par défaut, chaque
+    compte a son état, sa révocation de sessions et sa suppression propres."""
+    tag = uuid.uuid4().hex[:8]
+    app, user = f"app-{tag}", f"gina-{tag}"
+    await store.upsert_active(app, user)
+    await store.upsert_active(app, user, "admin", "Admin")
+    accounts = await store.list_accounts(app)
+    assert [(a.account_id, a.is_default, a.label) for a in accounts] == [
+        ("default", True, None),
+        ("admin", False, "Admin"),
+    ]
+    assert accounts[1].display_label == "Admin" and accounts[0].display_label == "default"
+    admin = await store.get_account(app, user, "admin")
+    assert admin and admin.status == "active" and admin.user_key == user
+    assert await store.get_account(app, user, "inconnu") is None
+    # Réenregistrement sans libellé : le libellé est conservé.
+    await store.upsert_active(app, user, "admin")
+    assert (await store.get_account(app, user, "admin")).label == "Admin"
+
+    # État propre à chaque compte.
+    await store.set_status(app, user, "disabled", "disabled_by_admin", "admin")
+    assert (await store.get_account(app, user, "admin")).status == "disabled"
+    assert (await store.get_account(app, user)).status == "active"
+    with pytest.raises(NotFound):
+        await store.set_status(app, user, "active", None, "inconnu")
+    assert [a.account_id for a in await store.list_user_accounts(user)] == ["default", "admin"]
+    assert dict(await store.search_users(user, 10)) == {user: {"active": 1, "disabled": 1}}
+
+    # Compte par défaut déplacé : un seul à la fois.
+    await store.set_default(app, user, "admin")
+    flags = {a.account_id: a.is_default for a in await store.list_accounts(app)}
+    assert flags == {"default": False, "admin": True}
+    with pytest.raises(NotFound):
+        await store.set_default(app, user, "inconnu")
+    await store.set_default(app, user, "default")
+
+    # Révocation des sessions d'un seul compte, ou de tous.
+    await seed_app_session(store, app, user, "admin")
+    await seed_app_session(store, app, user)
+    assert await store.revoke_app_sessions(app, user, "admin") == 1
+    assert await store.revoke_app_sessions(app, user, "admin") == 0
+    await seed_app_session(store, app, user, "admin")
+    assert await store.revoke_app_sessions(app, user) == 2
+
+    # Suppression d'un compte : le choix de l'utilisateur part avec lui.
+    if isinstance(store, MemoryAccountStore):
+        store.selections[(app, user)] = "admin"
+    else:
+        await (await store.pool()).execute(
+            "INSERT INTO app_account_selections (app_id, user_key, account_id) VALUES ($1, $2, 'admin')",
+            app,
+            user,
+        )
+    await store.delete_account(app, user, "admin")
+    assert await store.get_account(app, user, "admin") is None
+    assert await store.get_account(app, user) is not None
+    if isinstance(store, MemoryAccountStore):
+        assert (app, user) not in store.selections
+    else:
+        n = await (await store.pool()).fetchval(
+            "SELECT count(*) FROM app_account_selections WHERE app_id = $1 AND user_key = $2", app, user
+        )
+        assert n == 0
+    with pytest.raises(NotFound):
+        await store.delete_account(app, user, "admin")
+    await store.delete_account(app, user)
 
 
 @pytest.fixture(params=["memory", "postgres"])
@@ -322,6 +396,29 @@ async def test_secret_writer_contract(secrets):
             "SELECT key FROM app_secrets WHERE app_id = $1 AND user_key = $2", app, user
         )
         assert {r["key"] for r in rows} == {"password"}
+
+    # Autre compte du même couple (ADR 0034) : champs à part, AAD propre au compte.
+    await secrets.write_credential(app, user, {"password": "adm-1"}, "admin")
+    if isinstance(secrets, MemorySecretWriter):
+        assert secrets.entries[(app, user, "admin")] == {"password": "adm-1"}
+        assert secrets.entries[(app, user)] == {"password": "pw-2"}
+    else:
+        row = await (await secrets.pool()).fetchrow(
+            """SELECT ciphertext FROM app_secrets
+               WHERE app_id = $1 AND user_key = $2 AND account_id = 'admin' AND key = 'password'""",
+            app,
+            user,
+        )
+        assert (
+            secrets._cipher.decrypt(row["ciphertext"], field_aad(app, user, "password", "admin")) == "adm-1"
+        )
+        with pytest.raises(ValueError):
+            secrets._cipher.decrypt(row["ciphertext"], field_aad(app, user, "password"))
+        with pytest.raises(ValueError):
+            await secrets.write_credential(app, user, {"password": "x"}, "Pas/valide")
+    await secrets.delete_credential(app, user, "admin")
+    if isinstance(secrets, MemorySecretWriter):
+        assert (app, user, "admin") not in secrets.entries
 
     await secrets.delete_credential(app, user)
     if isinstance(secrets, MemorySecretWriter):

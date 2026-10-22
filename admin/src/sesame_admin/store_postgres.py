@@ -15,6 +15,7 @@ import asyncpg
 from .crypto import SecretCipher, field_aad
 from .identity import valid_user_key
 from .ports import (
+    DEFAULT_ACCOUNT,
     AccessRequest,
     Account,
     Conflict,
@@ -27,9 +28,10 @@ from .ports import (
     StoredDescriptor,
     Unavailable,
     UserProfile,
+    valid_account_id,
 )
 
-_COLUMNS = "app_id, user_key, status, status_reason, last_login_at, updated_at"
+_COLUMNS = "app_id, user_key, status, status_reason, last_login_at, updated_at, account_id, label, is_default"
 
 
 def _segment_ok(s: str) -> bool:
@@ -38,7 +40,15 @@ def _segment_ok(s: str) -> bool:
 
 def _account(r: asyncpg.Record) -> Account:
     return Account(
-        r["app_id"], r["user_key"], r["status"], r["status_reason"], r["last_login_at"], r["updated_at"]
+        r["app_id"],
+        r["user_key"],
+        r["status"],
+        r["status_reason"],
+        r["last_login_at"],
+        r["updated_at"],
+        r["account_id"],
+        r["label"],
+        r["is_default"],
     )
 
 
@@ -81,43 +91,96 @@ class PostgresAccountStore:
 
     async def list_accounts(self, app_id: str) -> list[Account]:
         rows = await (await self.pool()).fetch(
-            f"SELECT {_COLUMNS} FROM app_accounts WHERE app_id = $1 ORDER BY user_key",  # noqa: S608 (colonnes constantes)
+            f"""SELECT {_COLUMNS} FROM app_accounts WHERE app_id = $1
+                ORDER BY user_key, is_default DESC, account_id""",  # noqa: S608 (colonnes constantes)
             app_id,
         )
         return [_account(r) for r in rows]
 
-    async def get_account(self, app_id: str, user_key: str) -> Account | None:
+    async def get_account(
+        self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT
+    ) -> Account | None:
         r = await (await self.pool()).fetchrow(
-            f"SELECT {_COLUMNS} FROM app_accounts WHERE app_id = $1 AND user_key = $2",  # noqa: S608 (colonnes constantes)
+            f"""SELECT {_COLUMNS} FROM app_accounts
+                WHERE app_id = $1 AND user_key = $2 AND account_id = $3""",  # noqa: S608 (colonnes constantes)
             app_id,
             user_key,
+            account_id,
         )
         return _account(r) if r else None
 
-    async def upsert_active(self, app_id: str, user_key: str) -> None:
+    async def upsert_active(
+        self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT, label: str | None = None
+    ) -> None:
+        if not valid_account_id(account_id):
+            raise ValueError("identifiant de compte invalide")
+        # Compte par défaut si le couple n'en a pas encore (index unique partiel côté base).
         await (await self.pool()).execute(
-            """INSERT INTO app_accounts (app_id, user_key, status) VALUES ($1, $2, 'active')
-               ON CONFLICT (app_id, user_key) DO UPDATE
-               SET status = 'active', status_reason = NULL, updated_at = now()""",
+            """INSERT INTO app_accounts (app_id, user_key, account_id, label, is_default, status)
+               VALUES ($1, $2, $3, $4, NOT EXISTS (
+                   SELECT 1 FROM app_accounts WHERE app_id = $1 AND user_key = $2 AND is_default), 'active')
+               ON CONFLICT (app_id, user_key, account_id) DO UPDATE
+               SET status = 'active', status_reason = NULL, updated_at = now(),
+                   label = COALESCE($4, app_accounts.label)""",
             app_id,
             user_key,
+            account_id,
+            label,
         )
 
-    async def set_status(self, app_id: str, user_key: str, status: Status, reason: str | None) -> None:
+    async def set_status(
+        self,
+        app_id: str,
+        user_key: str,
+        status: Status,
+        reason: str | None,
+        account_id: str = DEFAULT_ACCOUNT,
+    ) -> None:
         done = await (await self.pool()).execute(
             """UPDATE app_accounts SET status = $3, status_reason = $4, updated_at = now()
-               WHERE app_id = $1 AND user_key = $2""",
+               WHERE app_id = $1 AND user_key = $2 AND account_id = $5""",
             app_id,
             user_key,
             status,
             reason,
+            account_id,
         )
         if done.endswith(" 0"):
             raise NotFound(user_key)
 
-    async def delete_account(self, app_id: str, user_key: str) -> None:
+    async def set_default(self, app_id: str, user_key: str, account_id: str) -> None:
+        async with (await self.pool()).acquire() as conn, conn.transaction():
+            exists = await conn.fetchval(
+                """SELECT 1 FROM app_accounts
+                   WHERE app_id = $1 AND user_key = $2 AND account_id = $3 FOR UPDATE""",
+                app_id,
+                user_key,
+                account_id,
+            )
+            if not exists:
+                raise NotFound(account_id)
+            await conn.execute(
+                """UPDATE app_accounts SET is_default = false, updated_at = now()
+                   WHERE app_id = $1 AND user_key = $2 AND is_default AND account_id <> $3""",
+                app_id,
+                user_key,
+                account_id,
+            )
+            await conn.execute(
+                """UPDATE app_accounts SET is_default = true, updated_at = now()
+                   WHERE app_id = $1 AND user_key = $2 AND account_id = $3""",
+                app_id,
+                user_key,
+                account_id,
+            )
+
+    async def delete_account(self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT) -> None:
+        # Le diagnostic et le choix du compte par l'utilisateur partent avec lui (clés étrangères).
         done = await (await self.pool()).execute(
-            "DELETE FROM app_accounts WHERE app_id = $1 AND user_key = $2", app_id, user_key
+            "DELETE FROM app_accounts WHERE app_id = $1 AND user_key = $2 AND account_id = $3",
+            app_id,
+            user_key,
+            account_id,
         )
         if done.endswith(" 0"):
             raise NotFound(user_key)
@@ -141,17 +204,21 @@ class PostgresAccountStore:
         )
         return [r["user_key"] for r in rows]
 
-    async def get_diagnostic(self, app_id: str, user_key: str) -> Diagnostic | None:
+    async def get_diagnostic(
+        self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT
+    ) -> Diagnostic | None:
         row = await (await self.pool()).fetchrow(
-            "SELECT document FROM replay_diagnostics WHERE app_id = $1 AND user_key = $2",
+            "SELECT document FROM replay_diagnostics WHERE app_id = $1 AND user_key = $2 AND account_id = $3",
             app_id,
             user_key,
+            account_id,
         )
         return Diagnostic.from_document(json.loads(row["document"])) if row else None
 
     async def list_user_accounts(self, user_key: str) -> list[Account]:
         rows = await (await self.pool()).fetch(
-            f"SELECT {_COLUMNS} FROM app_accounts WHERE user_key = $1 ORDER BY app_id",  # noqa: S608 (colonnes constantes)
+            f"""SELECT {_COLUMNS} FROM app_accounts WHERE user_key = $1
+                ORDER BY app_id, is_default DESC, account_id""",  # noqa: S608 (colonnes constantes)
             user_key,
         )
         return [_account(r) for r in rows]
@@ -184,12 +251,14 @@ class PostgresAccountStore:
         )
         return {r["user_key"]: UserProfile(r["display_name"], r["email"]) for r in rows}
 
-    async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:
+    async def revoke_app_sessions(self, app_id: str, user_key: str, account_id: str | None = None) -> int:
         done = await (await self.pool()).execute(
             """DELETE FROM app_sessions WHERE app_id = $1 AND portal_session IN
-               (SELECT id_hash FROM portal_sessions WHERE user_key = $2)""",
+               (SELECT id_hash FROM portal_sessions WHERE user_key = $2)
+               AND ($3::text IS NULL OR account_id = $3)""",
             app_id,
             user_key,
+            account_id,
         )
         return int(done.rsplit(" ", 1)[-1])
 
@@ -522,41 +591,50 @@ class PostgresSecretWriter:
     async def close(self) -> None:
         await self._db.close()
 
-    def _check(self, app_id: str, user_key: str) -> None:
-        if not _segment_ok(app_id) or not valid_user_key(user_key):
-            raise ValueError("identifiant d'appli ou d'utilisateur invalide")
+    def _check(self, app_id: str, user_key: str, account_id: str) -> None:
+        if not _segment_ok(app_id) or not valid_user_key(user_key) or not valid_account_id(account_id):
+            raise ValueError("identifiant d'appli, d'utilisateur ou de compte invalide")
 
-    async def write_credential(self, app_id: str, user_key: str, fields: dict[str, str]) -> None:
-        self._check(app_id, user_key)
+    async def write_credential(
+        self, app_id: str, user_key: str, fields: dict[str, str], account_id: str = DEFAULT_ACCOUNT
+    ) -> None:
+        self._check(app_id, user_key, account_id)
         pool = await self.pool()
         try:
             async with pool.acquire() as conn, conn.transaction():
                 await conn.execute(
                     """DELETE FROM app_secrets
-                       WHERE app_id = $1 AND user_key = $2 AND NOT (key = ANY($3::text[]))""",
+                       WHERE app_id = $1 AND user_key = $2 AND account_id = $3
+                         AND NOT (key = ANY($4::text[]))""",
                     app_id,
                     user_key,
+                    account_id,
                     list(fields.keys()),
                 )
                 for key, value in fields.items():
-                    ciphertext = self._cipher.encrypt(value, field_aad(app_id, user_key, key))
+                    ciphertext = self._cipher.encrypt(value, field_aad(app_id, user_key, key, account_id))
                     await conn.execute(
-                        """INSERT INTO app_secrets (app_id, user_key, key, ciphertext) VALUES ($1, $2, $3, $4)
-                           ON CONFLICT (app_id, user_key, key)
-                           DO UPDATE SET ciphertext = $4, updated_at = now()""",
+                        """INSERT INTO app_secrets (app_id, user_key, account_id, key, ciphertext)
+                           VALUES ($1, $2, $3, $4, $5)
+                           ON CONFLICT (app_id, user_key, account_id, key)
+                           DO UPDATE SET ciphertext = $5, updated_at = now()""",
                         app_id,
                         user_key,
+                        account_id,
                         key,
                         ciphertext,
                     )
         except (OSError, asyncpg.PostgresError) as e:
             raise Unavailable(f"coffre injoignable ({type(e).__name__})") from None
 
-    async def delete_credential(self, app_id: str, user_key: str) -> None:
-        self._check(app_id, user_key)
+    async def delete_credential(self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT) -> None:
+        self._check(app_id, user_key, account_id)
         try:
             await (await self.pool()).execute(
-                "DELETE FROM app_secrets WHERE app_id = $1 AND user_key = $2", app_id, user_key
+                "DELETE FROM app_secrets WHERE app_id = $1 AND user_key = $2 AND account_id = $3",
+                app_id,
+                user_key,
+                account_id,
             )
         except (OSError, asyncpg.PostgresError) as e:
             raise Unavailable(f"coffre injoignable ({type(e).__name__})") from None

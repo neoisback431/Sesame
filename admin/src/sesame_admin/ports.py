@@ -7,6 +7,8 @@ PostgreSQL, mémoire) sont choisies par configuration.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +16,26 @@ from typing import Any, Literal, Protocol
 
 # ``pending`` : identifiants fournis par l'utilisateur, en attente d'activation (ADR 0029).
 Status = Literal["active", "failed", "disabled", "pending"]
+
+# Compte créé en premier pour un couple (appli, utilisateur), y compris les comptes antérieurs
+# aux comptes multiples (ADR 0034) et ceux des demandes d'accès (ADR 0029).
+DEFAULT_ACCOUNT = "default"
+
+_ACCOUNT_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+
+
+def valid_account_id(account_id: str) -> bool:
+    """Identifiant de compte : 1 à 32 caractères ``[a-z0-9-]``, sans tiret en tête (comme
+    ``account_id_ok`` côté Rust et la contrainte de la table ``app_accounts``)."""
+    return bool(_ACCOUNT_ID.match(account_id))
+
+
+def account_id_from_label(label: str) -> str:
+    """Identifiant dérivé d'un libellé (« Admin prod » → ``admin-prod``) ; vide si le libellé
+    ne contient aucun caractère utilisable."""
+    ascii_label = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_label).strip("-")[:32].strip("-")
+    return slug if valid_account_id(slug) else ""
 
 
 class Unavailable(RuntimeError):
@@ -36,6 +58,15 @@ class Account:
     status_reason: str | None
     last_login_at: datetime | None
     updated_at: datetime | None
+    # Comptes multiples (ADR 0034) : identifiant, libellé choisi par l'administrateur, et
+    # compte par défaut du couple (un seul), utilisé tant que l'utilisateur n'en choisit pas un autre.
+    account_id: str = DEFAULT_ACCOUNT
+    label: str | None = None
+    is_default: bool = True
+
+    @property
+    def display_label(self) -> str:
+        return self.label or self.account_id
 
 
 @dataclass(frozen=True)
@@ -186,25 +217,51 @@ class NotificationStore(Protocol):
 
 
 class SecretWriter(Protocol):
-    """Coffre en écriture seule : l'UI d'admin ne relit jamais un secret."""
+    """Coffre en écriture seule : l'UI d'admin ne relit jamais un secret. Un jeu de champs
+    par compte (ADR 0034)."""
 
-    async def write_credential(self, app_id: str, user_key: str, fields: dict[str, str]) -> None: ...
+    async def write_credential(
+        self, app_id: str, user_key: str, fields: dict[str, str], account_id: str = DEFAULT_ACCOUNT
+    ) -> None: ...
 
-    async def delete_credential(self, app_id: str, user_key: str) -> None: ...
+    async def delete_credential(
+        self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT
+    ) -> None: ...
 
 
 class AccountStore(Protocol):
-    """Registre des comptes, côté administration."""
+    """Registre des comptes, côté administration. Un utilisateur peut avoir plusieurs comptes
+    sur une appli (ADR 0034) ; sans ``account_id``, il s'agit du compte ``default``."""
 
-    async def list_accounts(self, app_id: str) -> list[Account]: ...
+    async def list_accounts(self, app_id: str) -> list[Account]:
+        """Comptes de l'appli, par utilisateur, compte par défaut en tête."""
+        ...
 
-    async def get_account(self, app_id: str, user_key: str) -> Account | None: ...
+    async def get_account(
+        self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT
+    ) -> Account | None: ...
 
-    async def upsert_active(self, app_id: str, user_key: str) -> None: ...
+    async def upsert_active(
+        self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT, label: str | None = None
+    ) -> None:
+        """Crée le compte actif (compte par défaut s'il n'y en a pas encore pour le couple) ou
+        le réactive ; ``label`` remplace le libellé s'il est fourni."""
+        ...
 
-    async def set_status(self, app_id: str, user_key: str, status: Status, reason: str | None) -> None: ...
+    async def set_status(
+        self,
+        app_id: str,
+        user_key: str,
+        status: Status,
+        reason: str | None,
+        account_id: str = DEFAULT_ACCOUNT,
+    ) -> None: ...
 
-    async def delete_account(self, app_id: str, user_key: str) -> None: ...
+    async def set_default(self, app_id: str, user_key: str, account_id: str) -> None:
+        """Fait de ce compte le compte par défaut du couple. ``NotFound`` s'il n'existe pas."""
+        ...
+
+    async def delete_account(self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT) -> None: ...
 
     async def count_by_app(self) -> dict[str, dict[str, int]]: ...
 
@@ -212,8 +269,9 @@ class AccountStore(Protocol):
         """Tous les comptes d'un utilisateur, toutes applis confondues."""
         ...
 
-    async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:
-        """Supprime les sessions applicatives ouvertes de l'utilisateur sur l'appli.
+    async def revoke_app_sessions(self, app_id: str, user_key: str, account_id: str | None = None) -> int:
+        """Supprime les sessions applicatives ouvertes de l'utilisateur sur l'appli (celles du
+        seul compte ``account_id`` s'il est donné).
 
         Sans cela, un compte désactivé resterait utilisable jusqu'à l'expiration de sa
         session en cours. Renvoie le nombre de sessions supprimées.
@@ -234,7 +292,9 @@ class AccountStore(Protocol):
         titulaires d'un compte et personnes déjà connectées au portail. Triées."""
         ...
 
-    async def get_diagnostic(self, app_id: str, user_key: str) -> Diagnostic | None:
+    async def get_diagnostic(
+        self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT
+    ) -> Diagnostic | None:
         """Diagnostic du dernier rejeu en échec (écrit par le proxy), s'il existe."""
         ...
 

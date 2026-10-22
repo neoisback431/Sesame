@@ -28,7 +28,7 @@ from .auth import Authenticator, AuthError, SamlAuthenticator
 from .descriptors import draft
 from .identity import AdminUser, ClaimsError, identity_from_claims, valid_user_key
 from .notifications import EVENTS, NotificationWorker, parse_recipients
-from .ports import NotFound, NotificationSettings, Unavailable, UserProfile
+from .ports import DEFAULT_ACCOUNT, NotFound, NotificationSettings, Unavailable, UserProfile, valid_account_id
 from .recorder import Recorder, RecorderError
 from .service import AdminService, InvalidDescriptor, InvalidInput
 
@@ -564,16 +564,26 @@ def create_app(
         return render(request, "history.html", admin=admin, app_id=app_id, revisions=revisions)
 
     @app.get("/apps/{app_id}/accounts/{user_key}/diagnostic")
-    async def account_diagnostic(request: Request, app_id: str, user_key: str, admin: Admin) -> Response:
+    async def account_diagnostic(
+        request: Request, app_id: str, user_key: str, admin: Admin, account: str = DEFAULT_ACCOUNT
+    ) -> Response:
+        if not valid_account_id(account):
+            return error(request, 404, "Compte inconnu", "Identifiant de compte invalide.")
         try:
             target = await service.app(app_id)
-            diagnostic = await service.accounts.get_diagnostic(app_id, user_key)
+            diagnostic = await service.accounts.get_diagnostic(app_id, user_key, account)
         except NotFound:
             return error(request, 404, "Application inconnue", "Aucun descripteur ne porte cet identifiant.")
         except Unavailable:
             return error(request, 503, "Service indisponible", "La base de données est injoignable.")
         return render(
-            request, "diagnostic.html", admin=admin, app=target, user_key=user_key, diagnostic=diagnostic
+            request,
+            "diagnostic.html",
+            admin=admin,
+            app=target,
+            user_key=user_key,
+            account_id=account,
+            diagnostic=diagnostic,
         )
 
     @app.get("/apps/{app_id}")
@@ -636,35 +646,69 @@ def create_app(
 
     @app.post("/apps/{app_id}/accounts")
     async def provision(
-        request: Request, app_id: str, admin: Admin, user_key: Annotated[str, Form()]
+        request: Request,
+        app_id: str,
+        admin: Admin,
+        user_key: Annotated[str, Form()],
+        label: Annotated[str, Form()] = "",
     ) -> Response:
         async def op(cid: str) -> str:
             target = await service.app(app_id)
             form = await request.form()
             fields = {k: str(form.get(f"cred_{k}", "")) for k in target.credential_keys}
-            await service.provision(admin, app_id, user_key, fields, cid)
-            done = f"Compte de « {user_key.strip()} » enregistré et activé."
+            account_id = await service.provision(admin, app_id, user_key, fields, cid, label)
+            which = "" if account_id == DEFAULT_ACCOUNT else f" « {label.strip()} »"
+            done = f"Compte{which} de « {user_key.strip()} » enregistré et activé."
             if not target.access_open:
                 done += " Attention : accès restreint à des groupes, l'appli n'apparaîtra qu'à leurs membres."
             return done
 
         return await act(request, app_id, op)
 
+    def which(account_id: str) -> str:
+        return "" if account_id == DEFAULT_ACCOUNT else f" « {account_id} »"
+
     @app.post("/apps/{app_id}/accounts/{user_key}/status")
     async def set_status(
-        request: Request, app_id: str, user_key: str, admin: Admin, status: Annotated[str, Form()]
+        request: Request,
+        app_id: str,
+        user_key: str,
+        admin: Admin,
+        status: Annotated[str, Form()],
+        account_id: Annotated[str, Form()] = DEFAULT_ACCOUNT,
     ) -> Response:
         async def op(cid: str) -> str:
-            await service.set_status(admin, app_id, user_key, status, cid)
-            return f"Compte de « {user_key} » {'réactivé' if status == 'active' else 'désactivé'}."
+            await service.set_status(admin, app_id, user_key, status, cid, account_id)
+            verb = "réactivé" if status == "active" else "désactivé"
+            return f"Compte{which(account_id)} de « {user_key} » {verb}."
+
+        return await act(request, app_id, op)
+
+    @app.post("/apps/{app_id}/accounts/{user_key}/default")
+    async def set_default(
+        request: Request,
+        app_id: str,
+        user_key: str,
+        admin: Admin,
+        account_id: Annotated[str, Form()],
+    ) -> Response:
+        async def op(cid: str) -> str:
+            await service.set_default(admin, app_id, user_key, account_id, cid)
+            return f"Compte{which(account_id)} désormais utilisé par défaut pour « {user_key} »."
 
         return await act(request, app_id, op)
 
     @app.post("/apps/{app_id}/accounts/{user_key}/delete")
-    async def delete(request: Request, app_id: str, user_key: str, admin: Admin) -> Response:
+    async def delete(
+        request: Request,
+        app_id: str,
+        user_key: str,
+        admin: Admin,
+        account_id: Annotated[str, Form()] = DEFAULT_ACCOUNT,
+    ) -> Response:
         async def op(cid: str) -> str:
-            await service.delete(admin, app_id, user_key, cid)
-            return f"Compte de « {user_key} » supprimé (coffre et registre)."
+            await service.delete(admin, app_id, user_key, cid, account_id)
+            return f"Compte{which(account_id)} de « {user_key} » supprimé (coffre et registre)."
 
         return await act(request, app_id, op)
 
