@@ -12,6 +12,10 @@
 //!
 //! Dans les deux cas, les cookies propres à Sesame (portail, marqueur de remise) ne sont
 //! jamais relayés à l'appli.
+//!
+//! **Connexion automatique suspendue** (ADR 0033) : après « Déconnecter » sur la tuile, ni rejeu
+//! ni remise pour cet utilisateur et cette appli ; la requête est relayée telle quelle, le
+//! navigateur portant ses propres cookies (connexion manuelle à un autre compte possible).
 
 pub mod config;
 pub mod diagnostic;
@@ -41,13 +45,17 @@ use sesame_core::cookies::{self, PortalCookie};
 use sesame_core::crypto::hash_token;
 use sesame_core::descriptor::{AppDescriptor, LogoutAction, SessionMode};
 use sesame_core::html::error_page;
-use sesame_core::ports::{AppSession, AuditSink, PortalSession, SessionStore};
+use sesame_core::ports::{AccountStatus, AppSession, AuditSink, PortalSession, SessionStore};
 use sesame_core::secret::ExposeSecret;
 use url::Url;
 
 use crate::jar::Jar;
 use crate::matcher::ResponseView;
 use crate::replay::{ReplayError, Replayer};
+
+/// Chemin réservé de l'appli, appelé par le portail après « Déconnecter » : efface l'état de
+/// session que le navigateur porte pour cette appli (cookies, stockage local).
+const DISCONNECT_PATH: &str = "/.sesame/disconnect";
 
 /// Délai minimal entre deux mises à jour de `last_used_at` d'une session applicative.
 const TOUCH_INTERVAL: Duration = Duration::from_secs(30);
@@ -782,6 +790,10 @@ async fn handle(State(p): State<Arc<Proxy>>, req: Request) -> Response {
         cid,
     };
 
+    if parts.uri.path() == DISCONNECT_PATH {
+        return p.clear_browser_state(&ctx, &parts).await;
+    }
+
     if !app
         .descriptor
         .spec
@@ -828,6 +840,97 @@ impl Proxy {
         self.replay_error(&ReplayError::Upstream, &ctx.cid)
     }
 
+    /// La connexion automatique de l'utilisateur à cette appli est-elle suspendue (ADR 0033) ?
+    async fn suspended(&self, ctx: &Ctx<'_>) -> Result<bool, Response> {
+        self.sessions
+            .is_app_suspended(&ctx.session.user.user_key, ctx.app.id())
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, correlation_id = %ctx.cid, "lecture de la suspension impossible");
+                self.unavailable(&ctx.cid)
+            })
+    }
+
+    /// Connexion automatique suspendue : ni rejeu ni lecture du coffre. La requête est relayée
+    /// telle quelle, le navigateur portant ses propres cookies, et les `Set-Cookie` de l'appli
+    /// lui reviennent : l'utilisateur se connecte à la main (éventuellement avec un autre compte
+    /// de l'appli). Un compte désactivé par un administrateur reste refusé.
+    async fn serve_passthrough(&self, ctx: &Ctx<'_>, parts: &Parts, body: &Bytes) -> Response {
+        let usable = matches!(
+            self.replayer
+                .accounts
+                .get_account(ctx.app.id(), &ctx.session.user.user_key)
+                .await,
+            Ok(Some(a)) if matches!(a.status, AccountStatus::Active | AccountStatus::Failed)
+        );
+        if !usable {
+            let event = self
+                .event(ctx, AuditAction::AccessDenied, AuditOutcome::Failure)
+                .reason("account_not_active");
+            if self.audit.record(event).await.is_err() {
+                return self.unavailable(&ctx.cid);
+            }
+            return self.replay_error(&ReplayError::AccessDenied("account_not_active"), &ctx.cid);
+        }
+        match self
+            .forward(ctx.app, parts, body, Injection::Browser, false)
+            .await
+        {
+            Ok(upstream) => self.to_browser(ctx.app, upstream, true),
+            Err(e) => self.upstream_error(ctx, e),
+        }
+    }
+
+    /// Chemin réservé appelé par le portail juste après « Déconnecter » : efface les cookies et
+    /// le stockage local que le navigateur porte pour cette appli (mode handoff, connexion
+    /// manuelle pendant la suspension), puis renvoie au portail. N'agit que si la connexion
+    /// automatique est suspendue : un lien piégé ne peut donc pas déconnecter quelqu'un qui ne
+    /// l'a pas demandé depuis le portail.
+    async fn clear_browser_state(&self, ctx: &Ctx<'_>, parts: &Parts) -> Response {
+        let back = self.portal_url.as_str();
+        if !matches!(self.suspended(ctx).await, Ok(true)) {
+            return redirect(StatusCode::FOUND, back);
+        }
+        let secure = if self.cookie.secure { "; Secure" } else { "" };
+        let mut clears: Vec<String> = Vec::new();
+        for value in parts.headers.get_all(header::COOKIE) {
+            for pair in value.to_str().unwrap_or("").split(';') {
+                let name = pair.split('=').next().unwrap_or("").trim();
+                let plain = !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+                if plain && name != self.cookie.name && !clears.iter().any(|n| n == name) {
+                    clears.push(name.to_owned());
+                }
+            }
+        }
+        tracing::info!(
+            app = ctx.app.id(),
+            correlation_id = %ctx.cid,
+            cookies = clears.len(),
+            "état du navigateur effacé après déconnexion"
+        );
+        let target = serde_json::Value::String(back.to_owned());
+        let html = sesame_core::html::page(
+            "Déconnexion",
+            &format!(
+                "<h1>Déconnexion…</h1><p class=\"muted\"><a href=\"{}\">Retour à Mes applications</a></p>\
+<script>try{{localStorage.clear();sessionStorage.clear();}}catch(e){{}}location.replace({target});</script>",
+                sesame_core::html::escape(back),
+            ),
+            back,
+        );
+        let mut resp = ([(header::CACHE_CONTROL, "no-store")], Html(html)).into_response();
+        for name in clears {
+            let cookie = format!("{name}=; Path=/; Max-Age=0{secure}; SameSite=Lax");
+            if let Ok(v) = HeaderValue::from_str(&cookie) {
+                resp.headers_mut().append(header::SET_COOKIE, v);
+            }
+        }
+        resp
+    }
+
     /// Mode handoff (ADR 0020), sans chemin dédié. Sans marqueur : remise (rejeu, élément de
     /// session et marqueur posés au navigateur, retour à l'URL demandée). Avec marqueur :
     /// relais où le navigateur porte la session. Si l'appli signale alors une session expirée
@@ -846,6 +949,11 @@ impl Proxy {
                 .as_ref()
                 .is_some_and(|h| !handoff::cookies_present(&parts.headers, h));
         if !handoff::done(&parts.headers) || cookies_gone {
+            match self.suspended(ctx).await {
+                Ok(true) => return self.serve_passthrough(ctx, parts, body).await,
+                Ok(false) => {}
+                Err(resp) => return resp,
+            }
             if cookies_gone {
                 tracing::info!(app = ctx.app.id(), correlation_id = %ctx.cid, "cookie remis effacé par l'appli : nouvelle remise");
             }
@@ -859,6 +967,12 @@ impl Proxy {
             Err(e) => return self.upstream_error(ctx, e),
         };
         if renew && self.expired(ctx.app, &upstream, &set_cookie_names(&upstream)) {
+            // Suspendu depuis (autre navigateur) : la page de login de l'appli est montrée telle quelle.
+            match self.suspended(ctx).await {
+                Ok(true) => return self.to_browser(ctx.app, upstream, true),
+                Ok(false) => {}
+                Err(resp) => return resp,
+            }
             tracing::info!(app = ctx.app.id(), correlation_id = %ctx.cid, "session remise expirée");
             if self
                 .audit
@@ -878,9 +992,24 @@ impl Proxy {
     async fn serve_proxy(&self, ctx: &Ctx<'_>, parts: &Parts, body: &Bytes) -> Response {
         let app = ctx.app;
         let session = ctx.session;
-        let mut app_session = match self.app_session(ctx).await {
+        let existing = match self.fresh_app_session(ctx).await {
             Ok(s) => s,
             Err(resp) => return resp,
+        };
+        let mut app_session = match existing {
+            Some(s) => s,
+            None => {
+                // Pas de session : rejeu, sauf connexion automatique suspendue (ADR 0033).
+                match self.suspended(ctx).await {
+                    Ok(true) => return self.serve_passthrough(ctx, parts, body).await,
+                    Ok(false) => {}
+                    Err(resp) => return resp,
+                }
+                match self.app_session(ctx).await {
+                    Ok(s) => s,
+                    Err(resp) => return resp,
+                }
+            }
         };
 
         let jar = Jar::from_cookies(app_session.cookies.clone());

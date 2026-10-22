@@ -25,6 +25,8 @@ fn locked<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 pub struct MemorySessionStore {
     portal: Mutex<HashMap<String, PortalSession>>,
     apps: Mutex<HashMap<(String, String), AppSession>>,
+    /// (appli, utilisateur) dont la connexion automatique est suspendue.
+    suspended: Mutex<std::collections::HashSet<(String, String)>>,
 }
 
 #[async_trait]
@@ -79,6 +81,32 @@ impl SessionStore for MemorySessionStore {
     async fn delete_app_session(&self, portal_session_id: &str, app_id: &str) -> PortResult<()> {
         locked(&self.apps).remove(&(portal_session_id.to_owned(), app_id.to_owned()));
         Ok(())
+    }
+
+    async fn suspend_app(&self, user_key: &str, app_id: &str) -> PortResult<()> {
+        locked(&self.suspended).insert((app_id.to_owned(), user_key.to_owned()));
+        let portal = locked(&self.portal);
+        locked(&self.apps)
+            .retain(|(p, a), _| a != app_id || portal.get(p).is_none_or(|s| s.user.user_key != user_key));
+        Ok(())
+    }
+
+    async fn resume_app(&self, user_key: &str, app_id: &str) -> PortResult<bool> {
+        Ok(locked(&self.suspended).remove(&(app_id.to_owned(), user_key.to_owned())))
+    }
+
+    async fn is_app_suspended(&self, user_key: &str, app_id: &str) -> PortResult<bool> {
+        Ok(locked(&self.suspended).contains(&(app_id.to_owned(), user_key.to_owned())))
+    }
+
+    async fn suspended_apps(&self, user_key: &str) -> PortResult<Vec<String>> {
+        let mut out: Vec<String> = locked(&self.suspended)
+            .iter()
+            .filter(|(_, u)| u == user_key)
+            .map(|(a, _)| a.clone())
+            .collect();
+        out.sort();
+        Ok(out)
     }
 
     async fn purge_expired(&self, now: SystemTime) -> PortResult<u64> {

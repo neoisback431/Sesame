@@ -88,6 +88,7 @@ pub fn router(portal: Arc<Portal>) -> Router {
         .route("/auth/logout", post(logout))
         .route("/auth/logged-out", get(logged_out))
         .route("/apps/{app_id}/disconnect", post(disconnect_app))
+        .route("/apps/{app_id}/open", get(open_app))
         .route("/apps/{app_id}/request", get(access::form))
         .route(
             "/apps/{app_id}/request/credentials",
@@ -286,7 +287,11 @@ async fn home(State(p): State<AppState>, headers: HeaderMap, Query(q): Query<Hom
         }
     };
     let descriptors = p.descriptors();
-    let tiles = catalog::tiles(&descriptors, &session.user, &accounts, &requests);
+    let mut tiles = catalog::tiles(&descriptors, &session.user, &accounts, &requests);
+    match p.sessions.suspended_apps(&session.user.user_key).await {
+        Ok(suspended) => catalog::mark_suspended(&mut tiles, &suspended),
+        Err(e) => tracing::warn!(error = %e, correlation_id = %cid, "applis suspendues illisibles"),
+    }
     let admin_url = p
         .admin_url
         .as_ref()
@@ -295,7 +300,6 @@ async fn home(State(p): State<AppState>, headers: HeaderMap, Query(q): Query<Hom
     let html = catalog::render(
         &session.user,
         &tiles,
-        p.public_url.scheme(),
         p.public_url.as_str(),
         admin_url,
         q.request.as_deref(),
@@ -303,9 +307,41 @@ async fn home(State(p): State<AppState>, headers: HeaderMap, Query(q): Query<Hom
     ([(CACHE_CONTROL, "no-store")], Html(html)).into_response()
 }
 
-/// Force la déconnexion d'une seule appli depuis « Mes applications » : supprime la
-/// session applicative stockée, sans appeler l'appli elle-même. Le prochain accès
-/// déclenche un nouveau rejeu (même mécanisme qu'une session expirée).
+/// Appli du catalogue ouverte à l'utilisateur (habilitation `spec.access`), sinon page d'erreur.
+#[allow(clippy::result_large_err)]
+fn accessible_app(
+    p: &Portal,
+    user: &UserIdentity,
+    app_id: &str,
+    cid: &str,
+) -> Result<AppDescriptor, Response> {
+    p.descriptors()
+        .iter()
+        .find(|d| d.metadata.id == app_id && d.spec.access.allows(&user.user_key, &user.groups))
+        .cloned()
+        .ok_or_else(|| {
+            p.error(
+                StatusCode::NOT_FOUND,
+                "Application inconnue",
+                "Cette application n'existe pas.",
+                cid,
+            )
+        })
+}
+
+/// Adresse de l'appli exposée par Sesame (jamais son adresse réelle) pour un chemin donné.
+fn app_url(p: &Portal, d: &AppDescriptor, path: &str) -> String {
+    format!("{}://{}{path}", p.public_url.scheme(), d.spec.public.host)
+}
+
+/// « Déconnecter » sur une tuile (ADR 0022, 0033) : détruit les sessions applicatives de
+/// l'utilisateur sur cette appli, dans **toutes** ses sessions portail, et **suspend** la
+/// connexion automatique tant qu'il n'a pas recliqué sur la tuile. Sans cette suspension, la
+/// déconnexion serait aussitôt effacée par un rejeu transparent, et il serait impossible de se
+/// connecter à l'appli avec un autre compte, y compris depuis une fenêtre de navigation privée.
+/// Le navigateur passe ensuite par l'hôte de l'appli (chemin réservé du proxy) pour y effacer ce
+/// qu'il porte (mode handoff, connexion manuelle), puis revient ici. Ne touche ni au portail ni
+/// à l'appli elle-même.
 async fn disconnect_app(
     State(p): State<AppState>,
     Path(app_id): Path<String>,
@@ -315,25 +351,72 @@ async fn disconnect_app(
     let Some(session) = p.current_session(&headers).await else {
         return p.start_login(p.public_url.to_string());
     };
-    if !p.descriptors().iter().any(|d| d.metadata.id == app_id) {
-        return p.error(
-            StatusCode::NOT_FOUND,
-            "Application inconnue",
-            "Cette application n'existe pas.",
-            &cid,
-        );
-    }
+    let app = match accessible_app(&p, &session.user, &app_id, &cid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
     let event = AuditEvent::new(AuditAction::AppLogout, AuditOutcome::Success)
         .actor(&session.user)
         .app(&app_id)
         .correlation(&cid)
         .reason("manual_from_portal");
-    if let Err(e) = p.sessions.delete_app_session(&session.id, &app_id).await {
+    // L'audit fait partie de l'opération : pas de suspension sans trace.
+    let done = async {
+        p.audit.record(event).await?;
+        p.sessions.suspend_app(&session.user.user_key, &app_id).await
+    };
+    if let Err(e) = done.await {
         tracing::error!(correlation_id = %cid, app_id = %app_id, error = %e, "déconnexion de l'appli impossible");
-    } else if let Err(e) = p.audit.record(event).await {
-        tracing::error!(correlation_id = %cid, error = %e, "audit de déconnexion d'appli impossible");
+        return p.error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Service indisponible",
+            "La déconnexion n'a pas pu être faite. Réessayez dans quelques instants.",
+            &cid,
+        );
     }
-    redirect("/", &[])
+    let mut resp = redirect(&app_url(&p, &app, "/.sesame/disconnect"), &[]);
+    *resp.status_mut() = StatusCode::SEE_OTHER;
+    resp
+}
+
+/// Clic sur une tuile : rétablit la connexion automatique si elle était suspendue (ADR 0033),
+/// puis ouvre l'appli à sa page d'arrivée. Aucune lecture du coffre ici : le rejeu est fait par
+/// le proxy à l'arrivée sur l'appli.
+async fn open_app(State(p): State<AppState>, Path(app_id): Path<String>, headers: HeaderMap) -> Response {
+    let cid = correlation_id(&headers);
+    let Some(session) = p.current_session(&headers).await else {
+        let back = p
+            .public_url
+            .join(&format!("apps/{app_id}/open"))
+            .map_or_else(|_| p.public_url.to_string(), |u| u.to_string());
+        return p.start_login(back);
+    };
+    let app = match accessible_app(&p, &session.user, &app_id, &cid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    match p.sessions.resume_app(&session.user.user_key, &app_id).await {
+        Ok(true) => {
+            let event = AuditEvent::new(AuditAction::AppResumed, AuditOutcome::Success)
+                .actor(&session.user)
+                .app(&app_id)
+                .correlation(&cid);
+            if let Err(e) = p.audit.record(event).await {
+                tracing::error!(correlation_id = %cid, error = %e, "audit de reconnexion d'appli impossible");
+            }
+        }
+        Ok(false) => {}
+        Err(e) => {
+            tracing::error!(correlation_id = %cid, app_id = %app_id, error = %e, "reconnexion de l'appli impossible");
+            return p.error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Service indisponible",
+                "Réessayez dans quelques instants.",
+                &cid,
+            );
+        }
+    }
+    redirect(&app_url(&p, &app, &app.spec.public.start_path), &[])
 }
 
 #[derive(Deserialize)]

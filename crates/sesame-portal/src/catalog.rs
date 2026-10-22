@@ -10,6 +10,9 @@ use sesame_core::ports::{AccessRequest, AccessRequestKind, AccountStatus, AppAcc
 pub enum TileState {
     /// Compte actif : tuile cliquable, avec un bouton pour forcer la déconnexion.
     Active,
+    /// Compte actif mais connexion automatique suspendue après « Déconnecter » (ADR 0033) :
+    /// la tuile reste cliquable et rétablit la connexion automatique.
+    Suspended,
     /// Dernier rejeu en échec : tuile affichée mais signalée, non cliquable.
     Failed,
     /// Habilité mais sans compte : tuile grisée, non cliquable, avec « Demander l'accès » (ADR 0029).
@@ -59,6 +62,16 @@ pub fn tiles<'a>(
         .collect()
 }
 
+/// Marque « suspendue » les tuiles actives dont la connexion automatique est suspendue.
+pub fn mark_suspended(tiles: &mut [Tile<'_>], suspended: &[String]) {
+    for t in tiles
+        .iter_mut()
+        .filter(|t| t.state == TileState::Active && suspended.contains(&t.descriptor.metadata.id))
+    {
+        t.state = TileState::Suspended;
+    }
+}
+
 /// Messages de retour d'une demande d'accès, désignés par un code fixe dans l'URL
 /// (`/?request=<code>`) : aucun texte fourni par l'appelant n'est jamais affiché.
 pub fn notice_text(code: &str) -> Option<&'static str> {
@@ -86,7 +99,6 @@ fn initial(name: &str) -> String {
 pub fn render(
     user: &UserIdentity,
     tiles: &[Tile<'_>],
-    scheme: &str,
     portal_url: &str,
     admin_url: Option<&str>,
     notice: Option<&str>,
@@ -150,16 +162,24 @@ pub fn render(
                         "Demande envoyée : un administrateur va créer votre compte."
                     },
                 )),
+                // La tuile passe par le portail (`/apps/<id>/open`) : un clic rétablit la connexion
+                // automatique d'une appli suspendue avant d'ouvrir l'appli (ADR 0033).
                 TileState::Active => body.push_str(&format!(
-                    "<li class=\"tile\"><a href=\"{scheme}://{}{}\" target=\"_blank\" rel=\"noopener noreferrer\">\
+                    "<li class=\"tile\"><a href=\"/apps/{id}/open\" target=\"_blank\" rel=\"noopener noreferrer\">\
 <span class=\"ico\" aria-hidden=\"true\">{}</span><span><strong>{}</strong><br>{desc}</span></a>\
-<form class=\"disconnect\" method=\"post\" action=\"/apps/{}/disconnect\">\
+<form class=\"disconnect\" method=\"post\" action=\"/apps/{id}/disconnect\">\
 <button type=\"submit\" class=\"link\">Déconnecter</button></form></li>",
-                    escape(&d.spec.public.host),
-                    escape(&d.spec.public.start_path),
                     escape(&initial(&d.metadata.name)),
                     escape(&d.metadata.name),
-                    escape(&d.metadata.id),
+                    id = escape(&d.metadata.id),
+                )),
+                TileState::Suspended => body.push_str(&format!(
+                    "<li class=\"tile\"><a href=\"/apps/{id}/open\" target=\"_blank\" rel=\"noopener noreferrer\">\
+<span class=\"ico\" aria-hidden=\"true\">{}</span><span><strong>{}</strong><br>{desc}<br>\
+<span class=\"muted\">Déconnecté : cliquez pour vous reconnecter automatiquement.</span></span></a></li>",
+                    escape(&initial(&d.metadata.name)),
+                    escape(&d.metadata.name),
+                    id = escape(&d.metadata.id),
                 )),
             }
         }
@@ -230,12 +250,11 @@ mod tests {
         let html = render(
             &u,
             &tiles(&ds, &u, &active, &[]),
-            "https",
             "https://sesame.test/",
             None,
             None,
         );
-        assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/\""));
+        assert!(html.contains("href=\"/apps/fake-app/open\""));
         assert!(
             html.contains("target=\"_blank\" rel=\"noopener noreferrer\""),
             "nouvel onglet"
@@ -246,19 +265,8 @@ mod tests {
         );
         assert!(!html.contains("Administration"));
 
-        // Page d'arrivée : la tuile y mène directement (échappée).
-        let mut d = AppDescriptor::from_yaml(FAKE_APP).unwrap();
-        d.spec.public.start_path = "/chat?a=1&b=\"x".into();
-        let ds = vec![d];
-        let html = render(
-            &u,
-            &tiles(&ds, &u, &active, &[]),
-            "https",
-            "https://sesame.test/",
-            None,
-            None,
-        );
-        assert!(html.contains("href=\"https://fake-app.sesame.localhost:8443/chat?a=1&amp;b=&quot;x\""));
+        // La page d'arrivée (`start_path`) n'apparaît plus : la route `open` y redirige.
+        assert!(!html.contains("fake-app.sesame.localhost"));
         assert!(html.contains("<span class=\"ico\" aria-hidden=\"true\">A</span>"));
         assert!(html.contains("https://sesame.test/static/logo-64.png"));
         assert!(html.contains("Alice &lt;admin&gt;"));
@@ -269,12 +277,34 @@ mod tests {
         let ds = vec![AppDescriptor::from_yaml(FAKE_APP).unwrap()];
         let u = user(&["fake-app-users"]);
         let t = tiles(&ds, &u, &[], &[]);
-        let html = render(&u, &t, "https", "https://sesame.test/", None, None);
+        let html = render(&u, &t, "https://sesame.test/", None, None);
         assert!(html.contains("class=\"unavailable\""));
         assert!(html.contains("Vous n'avez pas de compte sur cette application."));
         // Grisée, non cliquable : pas de lien vers l'appli ni de bouton de déconnexion.
-        assert!(!html.contains("href=\"https://fake-app.sesame.localhost:8443/\""));
+        assert!(!html.contains("href=\"/apps/fake-app/open\""));
         assert!(!html.contains("action=\"/apps/fake-app/disconnect\""));
+    }
+
+    #[test]
+    fn suspended_tile_stays_clickable_without_disconnect_button() {
+        let ds = vec![AppDescriptor::from_yaml(FAKE_APP).unwrap()];
+        let u = user(&["fake-app-users"]);
+        let active = [account(AccountStatus::Active)];
+        let mut t = tiles(&ds, &u, &active, &[]);
+        mark_suspended(&mut t, &["autre-appli".to_owned()]);
+        assert_eq!(t[0].state, TileState::Active, "autre appli : sans effet");
+        mark_suspended(&mut t, &["fake-app".to_owned()]);
+        assert_eq!(t[0].state, TileState::Suspended);
+        let html = render(&u, &t, "https://sesame.test/", None, None);
+        assert!(html.contains("href=\"/apps/fake-app/open\""), "reste cliquable");
+        assert!(html.contains("cliquez pour vous reconnecter"));
+        assert!(!html.contains("action=\"/apps/fake-app/disconnect\""));
+
+        // Un compte en échec n'est jamais « suspendu ».
+        let failed = [account(AccountStatus::Failed)];
+        let mut t = tiles(&ds, &u, &failed, &[]);
+        mark_suspended(&mut t, &["fake-app".to_owned()]);
+        assert_eq!(t[0].state, TileState::Failed);
     }
 
     #[test]
@@ -286,7 +316,6 @@ mod tests {
         let html = render(
             &u,
             &t,
-            "https",
             "https://sesame.test/",
             Some("https://admin.sesame.test/"),
             None,
@@ -308,35 +337,28 @@ mod tests {
 
         // Sans compte ni demande : bouton « Demander l'accès » vers le formulaire du portail.
         let t = tiles(&ds, &u, &[], &[]);
-        let html = render(&u, &t, "https", "https://sesame.test/", None, None);
+        let html = render(&u, &t, "https://sesame.test/", None, None);
         assert!(html.contains("action=\"/apps/fake-app/request\""));
         assert!(html.contains("Demander l'accès"));
 
         // Demande « sans compte » ouverte : grisé, plus de bouton.
         let t = tiles(&ds, &u, &[], &[request(AccessRequestKind::NoAccount)]);
         assert_eq!(t[0].state, TileState::Requested);
-        let html = render(&u, &t, "https", "https://sesame.test/", None, None);
+        let html = render(&u, &t, "https://sesame.test/", None, None);
         assert!(!html.contains("action=\"/apps/fake-app/request\""));
         assert!(html.contains("Demande envoyée"));
 
         // Compte en attente d'activation (identifiants fournis).
         let t = tiles(&ds, &u, &[account(AccountStatus::Pending)], &[]);
         assert_eq!(t[0].state, TileState::PendingApproval);
-        let html = render(&u, &t, "https", "https://sesame.test/", None, None);
+        let html = render(&u, &t, "https://sesame.test/", None, None);
         assert!(html.contains("Demande en cours"));
-        assert!(!html.contains("href=\"https://fake-app.sesame.localhost:8443/\""));
+        assert!(!html.contains("href=\"/apps/fake-app/open\""));
 
         // Message de retour : code fixe uniquement, jamais de texte de l'appelant.
-        let html = render(&u, &t, "https", "https://sesame.test/", None, Some("credentials"));
+        let html = render(&u, &t, "https://sesame.test/", None, Some("credentials"));
         assert!(html.contains("class=\"notice\""));
-        let html = render(
-            &u,
-            &t,
-            "https",
-            "https://sesame.test/",
-            None,
-            Some("<script>x</script>"),
-        );
+        let html = render(&u, &t, "https://sesame.test/", None, Some("<script>x</script>"));
         assert!(!html.contains("class=\"notice\"") && !html.contains("<script>x"));
     }
 }
