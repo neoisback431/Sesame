@@ -147,3 +147,66 @@ async def test_disable_and_delete_revoke_open_sessions(service):
     service.accounts.app_sessions[("fake-app", "carol")] = 1
     await service.delete(ADMIN, "fake-app", "carol", "c")
     assert ("fake-app", "carol") not in service.accounts.app_sessions
+
+
+# --- Comptes multiples (ADR 0034) ----------------------------------------------------------
+
+
+async def test_labelled_accounts_live_beside_the_default_account(service):
+    creds = {"username": "cdupont", "password": SECRET}
+    assert await service.provision(ADMIN, "fake-app", "carol", creds, "c1") == "default"
+    admin_creds = {"username": "cdupont-adm", "password": SECRET + "-adm"}
+    assert (
+        await service.provision(ADMIN, "fake-app", "carol", admin_creds, "c2", " Admin prod ") == "admin-prod"
+    )
+
+    assert service.secrets.entries[("fake-app", "carol", "admin-prod")] == admin_creds
+    assert service.secrets.entries[("fake-app", "carol")] == creds
+    default = await service.accounts.get_account("fake-app", "carol")
+    extra = await service.accounts.get_account("fake-app", "carol", "admin-prod")
+    assert default.is_default and not extra.is_default and extra.label == "Admin prod"
+    written = [e for e in service.audit.events if e.action == "credential_written"]
+    assert [e.account_id for e in written] == ["default", "admin-prod"]
+    assert SECRET not in repr(service.audit.events)
+
+    # Même libellé : identifiants remplacés, pas de nouveau compte.
+    await service.provision(ADMIN, "fake-app", "carol", creds, "c3", "admin prod")
+    assert len(await service.accounts.list_accounts("fake-app")) == 2
+    for bad in ("!!!", "x" * 65):
+        with pytest.raises(InvalidInput):
+            await service.provision(ADMIN, "fake-app", "carol", creds, "c4", bad)
+
+
+async def test_account_operations_target_one_account(service):
+    creds = {"username": "u", "password": SECRET}
+    await service.provision(ADMIN, "fake-app", "carol", creds, "c1")
+    await service.provision(ADMIN, "fake-app", "carol", creds, "c2", "Admin")
+    service.accounts.app_sessions[("fake-app", "carol")] = 1
+    service.accounts.app_sessions[("fake-app", "carol", "admin")] = 1
+
+    # Désactiver un compte ne révoque que ses sessions.
+    await service.set_status(ADMIN, "fake-app", "carol", "disabled", "c3", "admin")
+    assert (await service.accounts.get_account("fake-app", "carol", "admin")).status == "disabled"
+    assert (await service.accounts.get_account("fake-app", "carol")).status == "active"
+    assert service.accounts.app_sessions == {("fake-app", "carol"): 1}
+    assert service.audit.events[-1].account_id == "admin"
+
+    # Le compte par défaut ne se supprime pas tant qu'il en reste d'autres.
+    with pytest.raises(InvalidInput):
+        await service.delete(ADMIN, "fake-app", "carol", "c4")
+    await service.set_default(ADMIN, "fake-app", "carol", "admin", "c5")
+    assert service.audit.events[-1].action == "account_default_changed"
+    await service.delete(ADMIN, "fake-app", "carol", "c6")  # « default » n'est plus le compte par défaut
+    assert ("fake-app", "carol") not in service.secrets.entries
+    assert await service.accounts.get_account("fake-app", "carol") is None
+    assert (await service.accounts.get_account("fake-app", "carol", "admin")).is_default
+    with pytest.raises(NotFound):
+        await service.set_default(ADMIN, "fake-app", "carol", "inconnu", "c7")
+    with pytest.raises(InvalidInput):
+        await service.set_status(ADMIN, "fake-app", "carol", "active", "c8", "../x")
+
+    # Tout désactiver couvre tous les comptes.
+    await service.set_status(ADMIN, "fake-app", "carol", "active", "c9", "admin")
+    await service.provision(ADMIN, "fake-app", "carol", creds, "c10", "Support")
+    assert await service.disable_all(ADMIN, "carol", "c11") == 2
+    assert {a.status for a in await service.accounts.list_user_accounts("carol")} == {"disabled"}

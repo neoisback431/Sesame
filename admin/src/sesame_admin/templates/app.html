@@ -50,36 +50,44 @@
 
 <h2>Comptes</h2>
 <table>
-  <thead><tr><th>Utilisateur</th><th>État</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Utilisateur</th><th>Compte</th><th>État</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
   <tbody>
   {% for a in accounts %}
+    {% set acc = '<input type="hidden" name="account_id" value="' ~ a.account_id ~ '">' %}
     <tr>
       <td>{{ who(a.user_key, people) }}</td>
+      <td>{{ a.display_label }}{% if a.is_default %} <span class="tag">par défaut</span>{% endif %}
+        {% if a.label %}<br><code class="muted">{{ a.account_id }}</code>{% endif %}</td>
       <td><span class="status {{ a.status }}">{{ {"active": "actif", "failed": "en échec", "disabled": "désactivé", "pending": "en attente"}[a.status] }}</span>
         {% if a.status_reason %}<br><span class="muted">{{ a.status_reason }}</span>{% endif %}
-        {% if a.status == "failed" %}<br><a href="/apps/{{ app.id }}/accounts/{{ a.user_key }}/diagnostic">Voir la réponse de l'appli</a>{% endif %}</td>
+        {% if a.status == "failed" %}<br><a href="/apps/{{ app.id }}/accounts/{{ a.user_key }}/diagnostic?account={{ a.account_id }}">Voir la réponse de l'appli</a>{% endif %}</td>
       <td>{{ a.last_login_at.strftime("%Y-%m-%d %H:%M") if a.last_login_at else "—" }}</td>
       <td>
         {% if a.status == "active" %}
         <form class="inline" method="post" action="/apps/{{ app.id }}/accounts/{{ a.user_key }}/status">
-          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="status" value="disabled">
+          <input type="hidden" name="csrf" value="{{ csrf }}">{{ acc | safe }}<input type="hidden" name="status" value="disabled">
           <button type="submit">Désactiver</button></form>
         {% elif a.status == "pending" %}
         <form class="inline" method="post" action="/apps/{{ app.id }}/accounts/{{ a.user_key }}/status">
-          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="status" value="active">
+          <input type="hidden" name="csrf" value="{{ csrf }}">{{ acc | safe }}<input type="hidden" name="status" value="active">
           <button type="submit">Activer</button></form>
         {% else %}
         <form class="inline" method="post" action="/apps/{{ app.id }}/accounts/{{ a.user_key }}/status">
-          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="status" value="active">
+          <input type="hidden" name="csrf" value="{{ csrf }}">{{ acc | safe }}<input type="hidden" name="status" value="active">
           <button type="submit">Réactiver</button></form>
+        {% endif %}
+        {% if not a.is_default %}
+        <form class="inline" method="post" action="/apps/{{ app.id }}/accounts/{{ a.user_key }}/default">
+          <input type="hidden" name="csrf" value="{{ csrf }}">{{ acc | safe }}
+          <button type="submit">Par défaut</button></form>
         {% endif %}
         <form class="inline" method="post" action="/apps/{{ app.id }}/accounts/{{ a.user_key }}/delete"
               onsubmit="return confirm('Supprimer ce compte du coffre et du registre ?')">
-          <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Supprimer</button></form>
+          <input type="hidden" name="csrf" value="{{ csrf }}">{{ acc | safe }}<button type="submit">Supprimer</button></form>
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="4">Aucun compte.</td></tr>
+    <tr><td colspan="5">Aucun compte.</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -87,7 +95,7 @@
 <div class="card">
   <h2>Enregistrer un compte</h2>
   <p class="muted">Les identifiants sont écrits dans le coffre et ne peuvent pas être relus, ni ici ni ailleurs.
-    Réenregistrer un compte existant remplace ses identifiants et le réactive.</p>
+    Réenregistrer un compte existant (même utilisateur, même libellé) remplace ses identifiants et le réactive.</p>
   <form method="post" action="/apps/{{ app.id }}/accounts" autocomplete="off">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="user_key">Utilisateur Sesame</label>
@@ -100,6 +108,12 @@
       (le claim OIDC configuré, ex. <code>sub</code> ou <code>preferred_username</code>) — sinon le compte
       n'est rattaché à personne. La liste propose les utilisateurs déjà connus (déjà connectés au portail ou
       titulaires d'un compte) ; une nouvelle clé reste saisissable.</p>
+    <label for="label">Libellé du compte <span class="muted">(facultatif)</span></label>
+    <input type="text" id="label" name="label" maxlength="64" autocomplete="off" placeholder="ex. Admin, Support">
+    <p class="muted">Un utilisateur peut avoir plusieurs comptes sur l'appli (un compte d'administration, par
+      exemple) : donnez un libellé à chaque compte supplémentaire. Laissé vide, il s'agit du compte principal.
+      L'utilisateur choisit ensuite le compte à utiliser depuis « Mes applications » ; le premier compte enregistré
+      est utilisé par défaut.</p>
     {% for key in app.credential_keys %}
     <label for="cred_{{ key }}">{{ key }}</label>
     <input type="password" id="cred_{{ key }}" name="cred_{{ key }}" required autocomplete="new-password">

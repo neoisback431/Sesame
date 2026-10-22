@@ -47,5 +47,10 @@ class SecretCipher:
             raise ValueError("secret indéchiffrable") from e
 
 
-def field_aad(app_id: str, user_key: str, key: str) -> bytes:
-    return f"{app_id}|{user_key}|{key}".encode()
+def field_aad(app_id: str, user_key: str, key: str, account_id: str = "default") -> bytes:
+    """Donnée authentifiée d'un champ, identique à ``aad`` de ``secrets.rs`` : compte
+    ``default`` au format d'avant les comptes multiples (ADR 0034), autres comptes en
+    ``appli|utilisateur#compte|champ`` (``#`` et ``|`` sont interdits dans une clé utilisateur)."""
+    if account_id == "default":
+        return f"{app_id}|{user_key}|{key}".encode()
+    return f"{app_id}|{user_key}#{account_id}|{key}".encode()

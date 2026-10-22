@@ -4,7 +4,7 @@
 {% block content %}
 <p><a href="/apps/{{ app.id }}">← {{ app.name }}</a></p>
 <h1>Dernier rejeu en échec</h1>
-<p class="muted">Compte <code>{{ user_key }}</code> sur <code>{{ app.id }}</code>.</p>
+<p class="muted">Compte <code>{{ user_key }}</code>{% if account_id != "default" %} (<code>{{ account_id }}</code>){% endif %} sur <code>{{ app.id }}</code>.</p>
 {% if not diagnostic %}
 <div class="card">
   <p>Aucun diagnostic enregistré pour ce compte.</p>

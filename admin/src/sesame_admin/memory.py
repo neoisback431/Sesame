@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .ports import (
+    DEFAULT_ACCOUNT,
     AccessRequest,
     Account,
     Conflict,
@@ -24,54 +25,101 @@ from .ports import (
     UserProfile,
 )
 
+# Clé des dictionnaires en mémoire : (appli, utilisateur) pour le compte `default`, comme avant
+# les comptes multiples (ADR 0034), (appli, utilisateur, compte) pour les autres.
+Key = tuple[str, ...]
+
+
+def key(app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT) -> Key:
+    return (app_id, user_key) if account_id == DEFAULT_ACCOUNT else (app_id, user_key, account_id)
+
 
 class MemorySecretWriter:
     def __init__(self) -> None:
-        self.entries: dict[tuple[str, str], dict[str, str]] = {}
+        self.entries: dict[Key, dict[str, str]] = {}
 
-    async def write_credential(self, app_id: str, user_key: str, fields: dict[str, str]) -> None:
-        self.entries[(app_id, user_key)] = dict(fields)
+    async def write_credential(
+        self, app_id: str, user_key: str, fields: dict[str, str], account_id: str = DEFAULT_ACCOUNT
+    ) -> None:
+        self.entries[key(app_id, user_key, account_id)] = dict(fields)
 
-    async def delete_credential(self, app_id: str, user_key: str) -> None:
-        self.entries.pop((app_id, user_key), None)
+    async def delete_credential(self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT) -> None:
+        self.entries.pop(key(app_id, user_key, account_id), None)
 
 
 class MemoryAccountStore:
     def __init__(self) -> None:
-        self.accounts: dict[tuple[str, str], Account] = {}
-        # Sessions applicatives ouvertes simulées : (appli, utilisateur) -> nombre.
-        self.app_sessions: dict[tuple[str, str], int] = {}
+        self.accounts: dict[Key, Account] = {}
+        # Sessions applicatives ouvertes simulées : (appli, utilisateur[, compte]) -> nombre.
+        self.app_sessions: dict[Key, int] = {}
         # Personnes déjà connectées au portail (simulées dans les tests).
         self.portal_users: set[str] = set()
         # Profils (écrits par le portail en production) : clé utilisateur -> nom, e-mail.
         self.profiles: dict[str, UserProfile] = {}
         # Diagnostics de rejeu (écrits par le proxy en production) : documents JSON.
-        self.diagnostics: dict[tuple[str, str], dict[str, Any]] = {}
+        self.diagnostics: dict[Key, dict[str, Any]] = {}
+        # Comptes choisis par les utilisateurs (écrits par le portail en production).
+        self.selections: dict[tuple[str, str], str] = {}
+
+    @staticmethod
+    def _order(a: Account) -> tuple[str, str, bool, str]:
+        return (a.app_id, a.user_key, not a.is_default, a.account_id)
 
     async def list_accounts(self, app_id: str) -> list[Account]:
-        return sorted((a for a in self.accounts.values() if a.app_id == app_id), key=lambda a: a.user_key)
+        return sorted((a for a in self.accounts.values() if a.app_id == app_id), key=self._order)
 
-    async def get_account(self, app_id: str, user_key: str) -> Account | None:
-        return self.accounts.get((app_id, user_key))
+    async def get_account(
+        self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT
+    ) -> Account | None:
+        return self.accounts.get(key(app_id, user_key, account_id))
 
-    async def upsert_active(self, app_id: str, user_key: str) -> None:
-        old = self.accounts.get((app_id, user_key))
-        self.accounts[(app_id, user_key)] = Account(
-            app_id, user_key, "active", None, old.last_login_at if old else None, datetime.now(UTC)
+    async def upsert_active(
+        self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT, label: str | None = None
+    ) -> None:
+        old = self.accounts.get(key(app_id, user_key, account_id))
+        has_default = any(
+            a.is_default for a in self.accounts.values() if (a.app_id, a.user_key) == (app_id, user_key)
+        )
+        self.accounts[key(app_id, user_key, account_id)] = Account(
+            app_id,
+            user_key,
+            "active",
+            None,
+            old.last_login_at if old else None,
+            datetime.now(UTC),
+            account_id,
+            label if label is not None else (old.label if old else None),
+            old.is_default if old else not has_default,
         )
 
-    async def set_status(self, app_id: str, user_key: str, status: Status, reason: str | None) -> None:
-        old = self.accounts.get((app_id, user_key))
+    async def set_status(
+        self,
+        app_id: str,
+        user_key: str,
+        status: Status,
+        reason: str | None,
+        account_id: str = DEFAULT_ACCOUNT,
+    ) -> None:
+        old = self.accounts.get(key(app_id, user_key, account_id))
         if old is None:
             raise NotFound(user_key)
-        self.accounts[(app_id, user_key)] = Account(
-            app_id, user_key, status, reason, old.last_login_at, datetime.now(UTC)
+        self.accounts[key(app_id, user_key, account_id)] = replace(
+            old, status=status, status_reason=reason, updated_at=datetime.now(UTC)
         )
 
-    async def delete_account(self, app_id: str, user_key: str) -> None:
-        if self.accounts.pop((app_id, user_key), None) is None:
+    async def set_default(self, app_id: str, user_key: str, account_id: str) -> None:
+        if key(app_id, user_key, account_id) not in self.accounts:
+            raise NotFound(account_id)
+        for k, a in list(self.accounts.items()):
+            if (a.app_id, a.user_key) == (app_id, user_key):
+                self.accounts[k] = replace(a, is_default=a.account_id == account_id)
+
+    async def delete_account(self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT) -> None:
+        if self.accounts.pop(key(app_id, user_key, account_id), None) is None:
             raise NotFound(user_key)
-        self.diagnostics.pop((app_id, user_key), None)  # ON DELETE CASCADE en base
+        self.diagnostics.pop(key(app_id, user_key, account_id), None)  # ON DELETE CASCADE en base
+        if self.selections.get((app_id, user_key)) == account_id:
+            del self.selections[(app_id, user_key)]
 
     async def count_by_app(self) -> dict[str, dict[str, int]]:
         counts: dict[str, Counter[str]] = {}
@@ -80,7 +128,7 @@ class MemoryAccountStore:
         return {k: dict(v) for k, v in counts.items()}
 
     async def list_user_accounts(self, user_key: str) -> list[Account]:
-        return sorted((a for a in self.accounts.values() if a.user_key == user_key), key=lambda a: a.app_id)
+        return sorted((a for a in self.accounts.values() if a.user_key == user_key), key=self._order)
 
     async def search_users(self, query: str, limit: int) -> list[tuple[str, dict[str, int]]]:
         counts: dict[str, Counter[str]] = {}
@@ -97,14 +145,19 @@ class MemoryAccountStore:
         return {k: self.profiles[k] for k in user_keys if k in self.profiles}
 
     async def known_users(self, limit: int) -> list[str]:
-        keys = {u for _, u in self.accounts} | self.portal_users
+        keys = {k[1] for k in self.accounts} | self.portal_users
         return sorted(keys)[:limit]
 
-    async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:
-        return self.app_sessions.pop((app_id, user_key), 0)
+    async def revoke_app_sessions(self, app_id: str, user_key: str, account_id: str | None = None) -> int:
+        if account_id is not None:
+            return self.app_sessions.pop(key(app_id, user_key, account_id), 0)
+        mine = [k for k in self.app_sessions if k[:2] == (app_id, user_key)]
+        return sum(self.app_sessions.pop(k) for k in mine)
 
-    async def get_diagnostic(self, app_id: str, user_key: str) -> Diagnostic | None:
-        doc = self.diagnostics.get((app_id, user_key))
+    async def get_diagnostic(
+        self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT
+    ) -> Diagnostic | None:
+        doc = self.diagnostics.get(key(app_id, user_key, account_id))
         return Diagnostic.from_document(doc) if doc is not None else None
 
 

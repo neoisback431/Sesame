@@ -25,6 +25,8 @@ class AuditEvent:
     outcome: str  # "success" | "failure"
     actor: str | None = None
     app_id: str | None = None
+    # Compte applicatif concerné (ADR 0034), comme ``account_id`` côté Rust.
+    account_id: str | None = None
     target_user: str | None = None
     correlation_id: str | None = None
     reason: str | None = None

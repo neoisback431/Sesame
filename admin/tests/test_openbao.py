@@ -36,6 +36,11 @@ async def test_writes_and_deletes_with_relogin_on_revoked_token():
     assert json.loads(calls[0][2]) == {"data": {"username": "u", "password": "p"}}
     assert calls[1][:2] == ("DELETE", "/v1/secret/metadata/sesame/apps/fake-app/users/carol")
     assert logins == 2
+    # Autre compte que `default` (ADR 0034) : chemin propre, même règle que le proxy.
+    await w.write_credential("fake-app", "carol", {"password": "p"}, "admin")
+    await w.delete_credential("fake-app", "carol", "admin")
+    assert calls[2][:2] == ("POST", "/v1/secret/data/sesame/apps/fake-app/users/carol/accounts/admin")
+    assert calls[3][:2] == ("DELETE", "/v1/secret/metadata/sesame/apps/fake-app/users/carol/accounts/admin")
 
 
 async def test_errors_never_contain_secrets():
@@ -55,6 +60,9 @@ async def test_rejects_path_traversal():
     for app, user in [("fake-app", "../x"), ("../x", "carol"), ("a/b", "carol")]:
         with pytest.raises(ValueError):
             await w.write_credential(app, user, {"k": "v"})
+    for account in ("../x", "a/b", "Admin", ""):
+        with pytest.raises(ValueError):
+            await w.write_credential("fake-app", "carol", {"k": "v"}, account)
 
 
 async def test_unreachable_store():
