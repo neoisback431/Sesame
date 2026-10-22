@@ -105,14 +105,15 @@ def test_disconnect_suspends_the_automatic_login_until_the_tile_is_clicked(brows
         "WHERE p.user_key = 'alice' AND s.app_id = 'fake-app'"
     )
     suspended = "SELECT count(*) FROM app_suspensions WHERE user_key = 'alice' AND app_id = 'fake-app'"
-    assert int(sql(count)) == 1
+    # D'autres sessions portail d'alice (tests précédents) peuvent aussi avoir une session sur l'appli.
+    assert int(sql(count)) >= 1
     page.goto(PORTAL)
-    page.get_by_role("button", name="Déconnecter").click()
+    page.get_by_role("button", name="Déconnecter", exact=True).click()
     expect(page.locator("h1")).to_have_text("Mes applications")
     assert int(sql(count)) == 0
     assert int(sql(suspended)) == 1
     expect(page.get_by_text("cliquez pour vous reconnecter")).to_be_visible()
-    expect(page.get_by_role("button", name="Déconnecter")).to_have_count(0)
+    expect(page.get_by_role("button", name="Déconnecter", exact=True)).to_have_count(0)
 
     # Suspendu : un accès direct (autre fenêtre, navigation privée…) montre le formulaire de
     # l'appli, sans rejeu ; on peut s'y connecter à la main avec un autre compte.
