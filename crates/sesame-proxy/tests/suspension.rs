@@ -13,7 +13,7 @@ use axum::http::{header, Request, StatusCode};
 use common::*;
 use sesame_core::audit::AuditAction;
 use sesame_core::descriptor::{Handoff, SessionMode};
-use sesame_core::ports::{AccountRegistry, AccountStatus, SessionStore};
+use sesame_core::ports::{AccountKey, AccountRegistry, AccountStatus, SessionStore};
 
 async fn suspend(b: &Bench) {
     b.sessions.suspend_app("alice", "fake-app").await.unwrap();
@@ -155,7 +155,11 @@ async fn suspended_does_not_bypass_an_account_disabled_by_an_administrator() {
     let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
     suspend(&b).await;
     b.accounts
-        .set_status("fake-app", "alice", AccountStatus::Disabled, None)
+        .set_status(
+            &AccountKey::default_of("fake-app", "alice"),
+            AccountStatus::Disabled,
+            None,
+        )
         .await
         .unwrap();
     let r = b.get_raw("/echo").await;

@@ -13,9 +13,10 @@ use chrono::{DateTime, Utc};
 use sesame_core::crypto::CookieCipher;
 use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{
-    AccessRequest, AccessRequestKind, AccessRequests, AccountRegistry, AccountStatus, AppAccount, AppSession,
-    DescriptorStore, DiagnosticStore, NotificationEvent, Notifier, PortError, PortResult, PortalSession,
-    ReplayDiagnostic, SessionStore, StoredDescriptor, SubmitOutcome, UserDirectory, UserProfile,
+    AccessRequest, AccessRequestKind, AccessRequests, AccountKey, AccountRegistry, AccountStatus, AppAccount,
+    AppSession, DescriptorStore, DiagnosticStore, NotificationEvent, Notifier, PortError, PortResult,
+    PortalSession, ReplayDiagnostic, SessionStore, StoredDescriptor, SubmitOutcome, UserDirectory,
+    UserProfile,
 };
 use sesame_core::secret::{AppCookie, ExposeSecret, SecretString};
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -89,14 +90,31 @@ impl PgStore {
             .map_err(|e| PortError::Other(format!("migrations : {e}")))
     }
 
-    /// Crée ou réactive un compte (usage : seed de dev et tests ; en production, l'UI d'admin).
+    /// Crée ou réactive le compte `default` d'un couple, compte par défaut (usage : seed de dev
+    /// et tests ; en production, l'UI d'admin).
     pub async fn seed_account(&self, app_id: &str, user_key: &str) -> PortResult<()> {
+        self.seed_extra_account(&AccountKey::default_of(app_id, user_key), None, true)
+            .await
+    }
+
+    /// Crée ou réactive un compte quelconque (usage : seed de dev et tests).
+    pub async fn seed_extra_account(
+        &self,
+        key: &AccountKey,
+        label: Option<&str>,
+        is_default: bool,
+    ) -> PortResult<()> {
         sqlx::query(
-            "INSERT INTO app_accounts (app_id, user_key, status) VALUES ($1, $2, 'active')
-             ON CONFLICT (app_id, user_key) DO UPDATE SET status = 'active', status_reason = NULL, updated_at = now()",
+            "INSERT INTO app_accounts (app_id, user_key, account_id, label, is_default, status)
+             VALUES ($1, $2, $3, $4, $5, 'active')
+             ON CONFLICT (app_id, user_key, account_id) DO UPDATE
+             SET status = 'active', status_reason = NULL, label = $4, updated_at = now()",
         )
-        .bind(app_id)
-        .bind(user_key)
+        .bind(&key.app_id)
+        .bind(&key.user_key)
+        .bind(&key.account_id)
+        .bind(label)
+        .bind(is_default)
         .execute(&self.pool)
         .await
         .map_err(db_err)?;
@@ -208,11 +226,12 @@ impl SessionStore for PgStore {
     async fn put_app_session(&self, s: AppSession) -> PortResult<()> {
         let jar = self.encrypt_jar(&s)?;
         sqlx::query(
-            "INSERT INTO app_sessions (portal_session, app_id, cookies, created_at, last_used_at, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6)
+            "INSERT INTO app_sessions (portal_session, app_id, cookies, created_at, last_used_at, expires_at, account_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT (portal_session, app_id) DO UPDATE
              SET cookies = EXCLUDED.cookies, created_at = EXCLUDED.created_at,
-                 last_used_at = EXCLUDED.last_used_at, expires_at = EXCLUDED.expires_at",
+                 last_used_at = EXCLUDED.last_used_at, expires_at = EXCLUDED.expires_at,
+                 account_id = EXCLUDED.account_id",
         )
         .bind(&s.portal_session_id)
         .bind(&s.app_id)
@@ -220,6 +239,7 @@ impl SessionStore for PgStore {
         .bind(ts(s.created_at))
         .bind(ts(s.last_used_at))
         .bind(ts(s.expires_at))
+        .bind(&s.account_id)
         .execute(&self.pool)
         .await
         .map_err(db_err)?;
@@ -228,7 +248,7 @@ impl SessionStore for PgStore {
 
     async fn get_app_session(&self, portal_session_id: &str, app_id: &str) -> PortResult<Option<AppSession>> {
         let row = sqlx::query(
-            "SELECT cookies, created_at, last_used_at, expires_at FROM app_sessions
+            "SELECT cookies, created_at, last_used_at, expires_at, account_id FROM app_sessions
              WHERE portal_session = $1 AND app_id = $2 AND expires_at > now()",
         )
         .bind(portal_session_id)
@@ -246,6 +266,7 @@ impl SessionStore for PgStore {
         Ok(Some(AppSession {
             portal_session_id: portal_session_id.to_owned(),
             app_id: app_id.to_owned(),
+            account_id: r.try_get("account_id").map_err(db_err)?,
             cookies: self.decrypt_jar(&data, portal_session_id, app_id)?,
             created_at: get_ts("created_at")?,
             last_used_at: get_ts("last_used_at")?,
@@ -276,6 +297,19 @@ impl SessionStore for PgStore {
             .execute(&self.pool)
             .await
             .map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn delete_user_app_sessions(&self, user_key: &str, app_id: &str) -> PortResult<()> {
+        sqlx::query(
+            "DELETE FROM app_sessions WHERE app_id = $1
+             AND portal_session IN (SELECT id_hash FROM portal_sessions WHERE user_key = $2)",
+        )
+        .bind(app_id)
+        .bind(user_key)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
         Ok(())
     }
 
@@ -351,6 +385,9 @@ fn account_from_row(r: &sqlx::postgres::PgRow) -> PortResult<AppAccount> {
     Ok(AppAccount {
         app_id: r.try_get("app_id").map_err(db_err)?,
         user_key: r.try_get("user_key").map_err(db_err)?,
+        account_id: r.try_get("account_id").map_err(db_err)?,
+        label: r.try_get("label").map_err(db_err)?,
+        is_default: r.try_get("is_default").map_err(db_err)?,
         status: parse_status(&status)?,
         status_reason: r.try_get("status_reason").map_err(db_err)?,
         last_login_at: r
@@ -360,16 +397,18 @@ fn account_from_row(r: &sqlx::postgres::PgRow) -> PortResult<AppAccount> {
     })
 }
 
-const ACCOUNT_COLUMNS: &str = "app_id, user_key, status, status_reason, last_login_at";
+const ACCOUNT_COLUMNS: &str =
+    "app_id, user_key, account_id, label, is_default, status, status_reason, last_login_at";
 
 #[async_trait]
 impl AccountRegistry for PgStore {
-    async fn get_account(&self, app_id: &str, user_key: &str) -> PortResult<Option<AppAccount>> {
+    async fn get_account(&self, key: &AccountKey) -> PortResult<Option<AppAccount>> {
         let row = sqlx::query(&format!(
-            "SELECT {ACCOUNT_COLUMNS} FROM app_accounts WHERE app_id = $1 AND user_key = $2"
+            "SELECT {ACCOUNT_COLUMNS} FROM app_accounts WHERE app_id = $1 AND user_key = $2 AND account_id = $3"
         ))
-        .bind(app_id)
-        .bind(user_key)
+        .bind(&key.app_id)
+        .bind(&key.user_key)
+        .bind(&key.account_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(db_err)?;
@@ -378,7 +417,8 @@ impl AccountRegistry for PgStore {
 
     async fn list_accounts(&self, user_key: &str) -> PortResult<Vec<AppAccount>> {
         let rows = sqlx::query(&format!(
-            "SELECT {ACCOUNT_COLUMNS} FROM app_accounts WHERE user_key = $1 ORDER BY app_id"
+            "SELECT {ACCOUNT_COLUMNS} FROM app_accounts WHERE user_key = $1
+             ORDER BY app_id, is_default DESC, account_id"
         ))
         .bind(user_key)
         .fetch_all(&self.pool)
@@ -389,17 +429,17 @@ impl AccountRegistry for PgStore {
 
     async fn set_status(
         &self,
-        app_id: &str,
-        user_key: &str,
+        key: &AccountKey,
         status: AccountStatus,
         reason: Option<&str>,
     ) -> PortResult<()> {
         let done = sqlx::query(
-            "UPDATE app_accounts SET status = $3, status_reason = $4, updated_at = now()
-             WHERE app_id = $1 AND user_key = $2",
+            "UPDATE app_accounts SET status = $4, status_reason = $5, updated_at = now()
+             WHERE app_id = $1 AND user_key = $2 AND account_id = $3",
         )
-        .bind(app_id)
-        .bind(user_key)
+        .bind(&key.app_id)
+        .bind(&key.user_key)
+        .bind(&key.account_id)
         .bind(status_str(status))
         .bind(reason)
         .execute(&self.pool)
@@ -411,15 +451,61 @@ impl AccountRegistry for PgStore {
         Ok(())
     }
 
-    async fn record_login(&self, app_id: &str, user_key: &str, at: SystemTime) -> PortResult<()> {
-        sqlx::query("UPDATE app_accounts SET last_login_at = $3 WHERE app_id = $1 AND user_key = $2")
-            .bind(app_id)
-            .bind(user_key)
-            .bind(ts(at))
-            .execute(&self.pool)
-            .await
-            .map_err(db_err)?;
+    async fn record_login(&self, key: &AccountKey, at: SystemTime) -> PortResult<()> {
+        sqlx::query(
+            "UPDATE app_accounts SET last_login_at = $4
+             WHERE app_id = $1 AND user_key = $2 AND account_id = $3",
+        )
+        .bind(&key.app_id)
+        .bind(&key.user_key)
+        .bind(&key.account_id)
+        .bind(ts(at))
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
         Ok(())
+    }
+
+    async fn select_account(&self, key: &AccountKey) -> PortResult<()> {
+        // INSERT … SELECT : rien n'est écrit si le compte n'existe pas.
+        let done = sqlx::query(
+            "INSERT INTO app_account_selections (app_id, user_key, account_id)
+             SELECT app_id, user_key, account_id FROM app_accounts
+             WHERE app_id = $1 AND user_key = $2 AND account_id = $3
+             ON CONFLICT (app_id, user_key) DO UPDATE
+             SET account_id = EXCLUDED.account_id, selected_at = now()",
+        )
+        .bind(&key.app_id)
+        .bind(&key.user_key)
+        .bind(&key.account_id)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        if done.rows_affected() == 0 {
+            return Err(PortError::NotFound);
+        }
+        Ok(())
+    }
+
+    async fn selected_account(&self, app_id: &str, user_key: &str) -> PortResult<Option<String>> {
+        sqlx::query_scalar(
+            "SELECT account_id FROM app_account_selections WHERE app_id = $1 AND user_key = $2",
+        )
+        .bind(app_id)
+        .bind(user_key)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_err)
+    }
+
+    async fn selected_accounts(&self, user_key: &str) -> PortResult<Vec<(String, String)>> {
+        sqlx::query_as(
+            "SELECT app_id, account_id FROM app_account_selections WHERE user_key = $1 ORDER BY app_id",
+        )
+        .bind(user_key)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)
     }
 }
 
@@ -503,20 +589,31 @@ impl AccessRequests for PgStore {
         let recorded = match kind {
             // Création du compte en attente, ou maintien s'il l'est déjà ; jamais d'écrasement
             // d'un compte actif, en échec ou désactivé (la condition WHERE le garantit).
+            // Toujours le compte `default` (ADR 0034) ; refus si le couple a un autre compte.
             AccessRequestKind::Credentials => {
-                sqlx::query(
-                    "INSERT INTO app_accounts (app_id, user_key, status, status_reason)
-                 VALUES ($1, $2, 'pending', 'access_request')
-                 ON CONFLICT (app_id, user_key) DO UPDATE SET updated_at = now()
-                 WHERE app_accounts.status = 'pending'",
+                let other = sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS (SELECT 1 FROM app_accounts WHERE app_id = $1 AND user_key = $2
+                                    AND (account_id <> 'default' OR status <> 'pending'))",
                 )
                 .bind(app_id)
                 .bind(user_key)
-                .execute(&mut *tx)
+                .fetch_one(&mut *tx)
                 .await
-                .map_err(db_err)?
-                .rows_affected()
-                    == 1
+                .map_err(db_err)?;
+                !other
+                    && sqlx::query(
+                        "INSERT INTO app_accounts (app_id, user_key, account_id, is_default, status, status_reason)
+                         VALUES ($1, $2, 'default', true, 'pending', 'access_request')
+                         ON CONFLICT (app_id, user_key, account_id) DO UPDATE SET updated_at = now()
+                         WHERE app_accounts.status = 'pending'",
+                    )
+                    .bind(app_id)
+                    .bind(user_key)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?
+                    .rows_affected()
+                        == 1
             }
             AccessRequestKind::NoAccount => !sqlx::query_scalar::<_, bool>(
                 "SELECT EXISTS (SELECT 1 FROM app_accounts WHERE app_id = $1 AND user_key = $2)",
@@ -555,12 +652,15 @@ impl AccessRequests for PgStore {
             .execute(&mut *tx)
             .await
             .map_err(db_err)?;
-        sqlx::query("DELETE FROM app_accounts WHERE app_id = $1 AND user_key = $2 AND status = 'pending'")
-            .bind(app_id)
-            .bind(user_key)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
+        sqlx::query(
+            "DELETE FROM app_accounts
+             WHERE app_id = $1 AND user_key = $2 AND account_id = 'default' AND status = 'pending'",
+        )
+        .bind(app_id)
+        .bind(user_key)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
         tx.commit().await.map_err(db_err)
     }
 
@@ -600,11 +700,12 @@ impl DiagnosticStore for PgStore {
     async fn put_diagnostic(&self, diagnostic: ReplayDiagnostic) -> PortResult<()> {
         let document = serde_json::to_value(&diagnostic).map_err(|e| PortError::Other(e.to_string()))?;
         sqlx::query(
-            "INSERT INTO replay_diagnostics (app_id, user_key, document) VALUES ($1, $2, $3)
-             ON CONFLICT (app_id, user_key) DO UPDATE SET document = $3, created_at = now()",
+            "INSERT INTO replay_diagnostics (app_id, user_key, account_id, document) VALUES ($1, $2, $3, $4)
+             ON CONFLICT (app_id, user_key, account_id) DO UPDATE SET document = $4, created_at = now()",
         )
         .bind(&diagnostic.app_id)
         .bind(&diagnostic.user_key)
+        .bind(&diagnostic.account_id)
         .bind(document)
         .execute(&self.pool)
         .await
@@ -612,13 +713,16 @@ impl DiagnosticStore for PgStore {
         Ok(())
     }
 
-    async fn get_diagnostic(&self, app_id: &str, user_key: &str) -> PortResult<Option<ReplayDiagnostic>> {
-        let row = sqlx::query("SELECT document FROM replay_diagnostics WHERE app_id = $1 AND user_key = $2")
-            .bind(app_id)
-            .bind(user_key)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(db_err)?;
+    async fn get_diagnostic(&self, key: &AccountKey) -> PortResult<Option<ReplayDiagnostic>> {
+        let row = sqlx::query(
+            "SELECT document FROM replay_diagnostics WHERE app_id = $1 AND user_key = $2 AND account_id = $3",
+        )
+        .bind(&key.app_id)
+        .bind(&key.user_key)
+        .bind(&key.account_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_err)?;
         row.map(|r| {
             let doc: serde_json::Value = r.try_get("document").map_err(db_err)?;
             serde_json::from_value(doc).map_err(|e| PortError::Other(e.to_string()))

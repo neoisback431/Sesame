@@ -10,9 +10,9 @@ use async_trait::async_trait;
 
 use crate::audit::AuditEvent;
 use crate::ports::{
-    AccessRequest, AccessRequestKind, AccessRequests, AccountRegistry, AccountStatus, AppAccount, AppSession,
-    AuditSink, DescriptorStore, DiagnosticStore, NotificationEvent, Notifier, PortError, PortResult,
-    PortalSession, ReplayDiagnostic, SecretStore, SecretWriter, SessionStore, StoredDescriptor,
+    AccessRequest, AccessRequestKind, AccessRequests, AccountKey, AccountRegistry, AccountStatus, AppAccount,
+    AppSession, AuditSink, DescriptorStore, DiagnosticStore, NotificationEvent, Notifier, PortError,
+    PortResult, PortalSession, ReplayDiagnostic, SecretStore, SecretWriter, SessionStore, StoredDescriptor,
     SubmitOutcome, UserDirectory, UserProfile,
 };
 use crate::secret::{Credential, ExposeSecret, SecretString};
@@ -83,12 +83,16 @@ impl SessionStore for MemorySessionStore {
         Ok(())
     }
 
-    async fn suspend_app(&self, user_key: &str, app_id: &str) -> PortResult<()> {
-        locked(&self.suspended).insert((app_id.to_owned(), user_key.to_owned()));
+    async fn delete_user_app_sessions(&self, user_key: &str, app_id: &str) -> PortResult<()> {
         let portal = locked(&self.portal);
         locked(&self.apps)
             .retain(|(p, a), _| a != app_id || portal.get(p).is_none_or(|s| s.user.user_key != user_key));
         Ok(())
+    }
+
+    async fn suspend_app(&self, user_key: &str, app_id: &str) -> PortResult<()> {
+        locked(&self.suspended).insert((app_id.to_owned(), user_key.to_owned()));
+        self.delete_user_app_sessions(user_key, app_id).await
     }
 
     async fn resume_app(&self, user_key: &str, app_id: &str) -> PortResult<bool> {
@@ -121,36 +125,38 @@ impl SessionStore for MemorySessionStore {
 
 #[derive(Default)]
 pub struct MemoryAccountRegistry {
-    accounts: Mutex<HashMap<(String, String), AppAccount>>,
+    accounts: Mutex<HashMap<AccountKey, AppAccount>>,
+    /// (appli, utilisateur) -> compte choisi.
+    selected: Mutex<HashMap<(String, String), String>>,
 }
 
 impl MemoryAccountRegistry {
+    /// Comptes `default` actifs.
     pub fn with_active(accounts: &[(&str, &str)]) -> Self {
         let registry = Self::default();
         for (app_id, user_key) in accounts {
-            registry.upsert(AppAccount {
-                app_id: (*app_id).into(),
-                user_key: (*user_key).into(),
-                status: AccountStatus::Active,
-                status_reason: None,
-                last_login_at: None,
-            });
+            registry.upsert(AppAccount::new(
+                &AccountKey::default_of(app_id, user_key),
+                AccountStatus::Active,
+                true,
+            ));
         }
         registry
     }
 
     pub fn upsert(&self, account: AppAccount) {
-        let key = (account.app_id.clone(), account.user_key.clone());
-        locked(&self.accounts).insert(key, account);
+        locked(&self.accounts).insert(account.key(), account);
+    }
+
+    fn remove(&self, key: &AccountKey) {
+        locked(&self.accounts).remove(key);
     }
 }
 
 #[async_trait]
 impl AccountRegistry for MemoryAccountRegistry {
-    async fn get_account(&self, app_id: &str, user_key: &str) -> PortResult<Option<AppAccount>> {
-        Ok(locked(&self.accounts)
-            .get(&(app_id.to_owned(), user_key.to_owned()))
-            .cloned())
+    async fn get_account(&self, key: &AccountKey) -> PortResult<Option<AppAccount>> {
+        Ok(locked(&self.accounts).get(key).cloned())
     }
 
     async fn list_accounts(&self, user_key: &str) -> PortResult<Vec<AppAccount>> {
@@ -159,68 +165,91 @@ impl AccountRegistry for MemoryAccountRegistry {
             .filter(|a| a.user_key == user_key)
             .cloned()
             .collect();
-        out.sort_by(|a, b| a.app_id.cmp(&b.app_id));
+        out.sort_by(|a, b| {
+            (&a.app_id, !a.is_default, &a.account_id).cmp(&(&b.app_id, !b.is_default, &b.account_id))
+        });
         Ok(out)
     }
 
     async fn set_status(
         &self,
-        app_id: &str,
-        user_key: &str,
+        key: &AccountKey,
         status: AccountStatus,
         reason: Option<&str>,
     ) -> PortResult<()> {
         let mut accounts = locked(&self.accounts);
-        let account = accounts
-            .get_mut(&(app_id.to_owned(), user_key.to_owned()))
-            .ok_or(PortError::NotFound)?;
+        let account = accounts.get_mut(key).ok_or(PortError::NotFound)?;
         account.status = status;
         account.status_reason = reason.map(str::to_owned);
         Ok(())
     }
 
-    async fn record_login(&self, app_id: &str, user_key: &str, at: SystemTime) -> PortResult<()> {
+    async fn record_login(&self, key: &AccountKey, at: SystemTime) -> PortResult<()> {
         let mut accounts = locked(&self.accounts);
-        let account = accounts
-            .get_mut(&(app_id.to_owned(), user_key.to_owned()))
-            .ok_or(PortError::NotFound)?;
+        let account = accounts.get_mut(key).ok_or(PortError::NotFound)?;
         account.last_login_at = Some(at);
         Ok(())
     }
+
+    async fn select_account(&self, key: &AccountKey) -> PortResult<()> {
+        if !locked(&self.accounts).contains_key(key) {
+            return Err(PortError::NotFound);
+        }
+        locked(&self.selected).insert((key.app_id.clone(), key.user_key.clone()), key.account_id.clone());
+        Ok(())
+    }
+
+    async fn selected_account(&self, app_id: &str, user_key: &str) -> PortResult<Option<String>> {
+        Ok(locked(&self.selected)
+            .get(&(app_id.to_owned(), user_key.to_owned()))
+            .cloned())
+    }
+
+    async fn selected_accounts(&self, user_key: &str) -> PortResult<Vec<(String, String)>> {
+        let mut out: Vec<_> = locked(&self.selected)
+            .iter()
+            .filter(|((_, u), _)| u == user_key)
+            .map(|((a, _), id)| (a.clone(), id.clone()))
+            .collect();
+        out.sort();
+        Ok(out)
+    }
 }
 
-/// Diagnostics de rejeu en mémoire : (appli, utilisateur) -> dernier diagnostic.
+/// Diagnostics de rejeu en mémoire : compte -> dernier diagnostic.
 #[derive(Default)]
 pub struct MemoryDiagnosticStore {
-    entries: Mutex<HashMap<(String, String), ReplayDiagnostic>>,
+    entries: Mutex<HashMap<AccountKey, ReplayDiagnostic>>,
 }
 
 #[async_trait]
 impl DiagnosticStore for MemoryDiagnosticStore {
     async fn put_diagnostic(&self, diagnostic: ReplayDiagnostic) -> PortResult<()> {
-        let key = (diagnostic.app_id.clone(), diagnostic.user_key.clone());
-        locked(&self.entries).insert(key, diagnostic);
+        locked(&self.entries).insert(diagnostic.key(), diagnostic);
         Ok(())
     }
 
-    async fn get_diagnostic(&self, app_id: &str, user_key: &str) -> PortResult<Option<ReplayDiagnostic>> {
-        Ok(locked(&self.entries)
-            .get(&(app_id.to_owned(), user_key.to_owned()))
-            .cloned())
+    async fn get_diagnostic(&self, key: &AccountKey) -> PortResult<Option<ReplayDiagnostic>> {
+        Ok(locked(&self.entries).get(key).cloned())
     }
 }
 
-/// Coffre en mémoire : (appli, utilisateur) -> champs.
+/// Coffre en mémoire : compte -> champs.
 #[derive(Default)]
 pub struct MemorySecretStore {
-    entries: Mutex<HashMap<(String, String), BTreeMap<String, String>>>,
+    entries: Mutex<HashMap<AccountKey, BTreeMap<String, String>>>,
     reads: Mutex<u64>,
 }
 
 impl MemorySecretStore {
+    /// Identifiants du compte `default`.
     pub fn insert(&self, app_id: &str, user_key: &str, fields: &[(&str, &str)]) {
+        self.insert_account(&AccountKey::default_of(app_id, user_key), fields);
+    }
+
+    pub fn insert_account(&self, key: &AccountKey, fields: &[(&str, &str)]) {
         let fields = fields.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect();
-        locked(&self.entries).insert((app_id.into(), user_key.into()), fields);
+        locked(&self.entries).insert(key.clone(), fields);
     }
 
     /// Nombre de lectures effectuées (pour vérifier qu'un chemin ne lit pas le coffre).
@@ -231,12 +260,10 @@ impl MemorySecretStore {
 
 #[async_trait]
 impl SecretStore for MemorySecretStore {
-    async fn get_credential(&self, app_id: &str, user_key: &str) -> PortResult<Credential> {
+    async fn get_credential(&self, key: &AccountKey) -> PortResult<Credential> {
         *locked(&self.reads) += 1;
         let entries = locked(&self.entries);
-        let fields = entries
-            .get(&(app_id.to_owned(), user_key.to_owned()))
-            .ok_or(PortError::NotFound)?;
+        let fields = entries.get(key).ok_or(PortError::NotFound)?;
         Ok(Credential::new(
             fields
                 .iter()
@@ -248,7 +275,7 @@ impl SecretStore for MemorySecretStore {
 
 #[async_trait]
 impl SecretWriter for MemorySecretStore {
-    async fn put_credential(&self, app_id: &str, user_key: &str, credential: &Credential) -> PortResult<()> {
+    async fn put_credential(&self, key: &AccountKey, credential: &Credential) -> PortResult<()> {
         let fields = credential
             .keys()
             .filter_map(|k| {
@@ -257,7 +284,7 @@ impl SecretWriter for MemorySecretStore {
                     .map(|v| (k.to_owned(), v.expose_secret().to_owned()))
             })
             .collect();
-        locked(&self.entries).insert((app_id.into(), user_key.into()), fields);
+        locked(&self.entries).insert(key.clone(), fields);
         Ok(())
     }
 }
@@ -323,17 +350,17 @@ impl AccessRequests for MemoryAccessRequests {
         kind: AccessRequestKind,
         note: Option<&str>,
     ) -> PortResult<SubmitOutcome> {
-        let existing = self.accounts.get_account(app_id, user_key).await?;
-        match (existing.map(|a| a.status), kind) {
-            (None, AccessRequestKind::NoAccount) => {}
-            (None | Some(AccountStatus::Pending), AccessRequestKind::Credentials) => {
-                self.accounts.upsert(AppAccount {
-                    app_id: app_id.into(),
-                    user_key: user_key.into(),
-                    status: AccountStatus::Pending,
-                    status_reason: Some("access_request".into()),
-                    last_login_at: None,
-                });
+        let key = AccountKey::default_of(app_id, user_key);
+        let existing = self.accounts.app_accounts(app_id, user_key).await?;
+        let only_pending_default = existing
+            .iter()
+            .all(|a| a.status == AccountStatus::Pending && a.account_id == key.account_id);
+        match (existing.is_empty(), only_pending_default, kind) {
+            (true, _, AccessRequestKind::NoAccount) => {}
+            (_, true, AccessRequestKind::Credentials) => {
+                let mut account = AppAccount::new(&key, AccountStatus::Pending, true);
+                account.status_reason = Some("access_request".into());
+                self.accounts.upsert(account);
             }
             _ => return Ok(SubmitOutcome::AccountExists),
         }
@@ -352,9 +379,10 @@ impl AccessRequests for MemoryAccessRequests {
 
     async fn withdraw(&self, app_id: &str, user_key: &str) -> PortResult<()> {
         locked(&self.requests).remove(&(app_id.to_owned(), user_key.to_owned()));
-        if let Some(a) = self.accounts.get_account(app_id, user_key).await? {
+        let key = AccountKey::default_of(app_id, user_key);
+        if let Some(a) = self.accounts.get_account(&key).await? {
             if a.status == AccountStatus::Pending {
-                locked(&self.accounts.accounts).remove(&(app_id.to_owned(), user_key.to_owned()));
+                self.accounts.remove(&key);
             }
         }
         Ok(())
@@ -464,6 +492,43 @@ pub fn cookie_value(session: &AppSession, name: &str) -> Option<String> {
         .iter()
         .find(|c| c.name == name)
         .map(|c| c.value.expose_secret().to_owned())
+}
+
+#[cfg(test)]
+mod effective_account_tests {
+    use crate::ports::{effective_account, AccountKey, AccountStatus, AppAccount};
+
+    fn acc(id: &str, status: AccountStatus, is_default: bool) -> AppAccount {
+        AppAccount::new(&AccountKey::new("app", "alice", id), status, is_default)
+    }
+
+    fn pick(accounts: Vec<AppAccount>, selected: Option<&str>) -> Option<String> {
+        effective_account(accounts, selected).map(|a| a.account_id)
+    }
+
+    #[test]
+    fn selected_then_default_then_any_usable() {
+        use AccountStatus::*;
+        let all = || {
+            vec![
+                acc("default", Active, true),
+                acc("admin", Active, false),
+                acc("off", Disabled, false),
+            ]
+        };
+        assert_eq!(pick(all(), None).as_deref(), Some("default"));
+        assert_eq!(pick(all(), Some("admin")).as_deref(), Some("admin"));
+        // Choix devenu invalide (supprimé ou désactivé) : compte par défaut.
+        assert_eq!(pick(all(), Some("gone")).as_deref(), Some("default"));
+        assert_eq!(pick(all(), Some("off")).as_deref(), Some("default"));
+        // Compte par défaut désactivé : un autre compte utilisable.
+        let v = vec![acc("default", Disabled, true), acc("admin", Failed, false)];
+        assert_eq!(pick(v, None).as_deref(), Some("admin"));
+        // Rien d'utilisable : le compte par défaut, pour tracer le refus.
+        let v = vec![acc("x", Disabled, false), acc("default", Disabled, true)];
+        assert_eq!(pick(v, None).as_deref(), Some("default"));
+        assert_eq!(pick(vec![], Some("admin")), None);
+    }
 }
 
 #[cfg(test)]

@@ -2,7 +2,9 @@
 //! Coffre de secrets OpenBao / Vault : authentification AppRole, lecture KV v2.
 //!
 //! API HTTP commune à OpenBao et Vault, sans SDK. Chemin lu :
-//! `<mount>/data/<path_prefix>/<app_id>/users/<user_key>`.
+//! `<mount>/data/<path_prefix>/<app_id>/users/<user_key>` pour le compte `default` (chemin
+//! d'avant les comptes multiples, ADR 0034), et
+//! `<mount>/data/<path_prefix>/<app_id>/users/<user_key>/accounts/<account_id>` pour les autres.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -12,7 +14,7 @@ use reqwest::StatusCode;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use sesame_core::identity::validate_user_key;
-use sesame_core::ports::{PortError, PortResult, SecretStore};
+use sesame_core::ports::{account_id_ok, AccountKey, PortError, PortResult, SecretStore};
 use sesame_core::secret::Credential;
 use tokio::sync::Mutex;
 use url::Url;
@@ -170,16 +172,24 @@ impl OpenBaoSecretStore {
 
 #[async_trait]
 impl SecretStore for OpenBaoSecretStore {
-    async fn get_credential(&self, app_id: &str, user_key: &str) -> PortResult<Credential> {
-        if !segment_ok(app_id) || validate_user_key(user_key).is_err() {
+    async fn get_credential(&self, account: &AccountKey) -> PortResult<Credential> {
+        let AccountKey {
+            app_id,
+            user_key,
+            account_id,
+        } = account;
+        if !segment_ok(app_id) || validate_user_key(user_key).is_err() || !account_id_ok(account_id) {
             return Err(PortError::Other(
-                "identifiant d'appli ou d'utilisateur invalide".into(),
+                "identifiant d'appli, d'utilisateur ou de compte invalide".into(),
             ));
         }
-        let path = format!(
+        let mut path = format!(
             "v1/{}/data/{}/{}/users/{}",
             self.cfg.mount, self.cfg.path_prefix, app_id, user_key
         );
+        if !account.is_default_id() {
+            path.push_str(&format!("/accounts/{account_id}"));
+        }
         let token = self.token(false).await?;
         let resp = match self.read(&path, &token).await? {
             Some(resp) => resp,
@@ -237,6 +247,10 @@ mod tests {
                 StatusCode::OK,
                 Json(json!({"data": {"data": {"username": "amartin", "password": "pw-123"}}})),
             ),
+            "sesame/apps/fake-app/users/alice/accounts/admin" => (
+                StatusCode::OK,
+                Json(json!({"data": {"data": {"username": "amartin-adm", "password": "adm-pw"}}})),
+            ),
             _ => (StatusCode::NOT_FOUND, Json(json!({"errors": []}))),
         }
     }
@@ -263,12 +277,20 @@ mod tests {
     #[tokio::test]
     async fn reads_credential_after_relogin() {
         let s = store().await;
-        let cred = s.get_credential("fake-app", "alice").await.unwrap();
+        let cred = s
+            .get_credential(&AccountKey::default_of("fake-app", "alice"))
+            .await
+            .unwrap();
         assert_eq!(cred.get("username").unwrap().expose_secret(), "amartin");
         assert_eq!(cred.get("password").unwrap().expose_secret(), "pw-123");
         assert!(!format!("{cred:?}").contains("pw-123"));
+        let admin = s
+            .get_credential(&AccountKey::new("fake-app", "alice", "admin"))
+            .await
+            .unwrap();
+        assert_eq!(admin.get("username").unwrap().expose_secret(), "amartin-adm");
         assert!(matches!(
-            s.get_credential("fake-app", "bob").await,
+            s.get_credential(&AccountKey::default_of("fake-app", "bob")).await,
             Err(PortError::NotFound)
         ));
     }
@@ -276,14 +298,16 @@ mod tests {
     #[tokio::test]
     async fn rejects_path_traversal() {
         let s = store().await;
-        for (app, user) in [
-            ("fake-app", "../x"),
-            ("fake-app", "a/b"),
-            ("..", "alice"),
-            ("a/b", "alice"),
+        for (app, user, account) in [
+            ("fake-app", "../x", "default"),
+            ("fake-app", "a/b", "default"),
+            ("..", "alice", "default"),
+            ("a/b", "alice", "default"),
+            ("fake-app", "alice", "../x"),
+            ("fake-app", "alice", "a/b"),
         ] {
             assert!(matches!(
-                s.get_credential(app, user).await,
+                s.get_credential(&AccountKey::new(app, user, account)).await,
                 Err(PortError::Other(_))
             ));
         }

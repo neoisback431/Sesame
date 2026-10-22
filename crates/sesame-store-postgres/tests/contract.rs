@@ -4,6 +4,7 @@
 use base64::Engine;
 use sesame_core::contract;
 use sesame_core::crypto::CookieCipher;
+use sesame_core::ports::AccountKey;
 use sesame_core::secret::{ExposeSecret, SecretString};
 use sesame_store_postgres::PgStore;
 
@@ -43,7 +44,11 @@ async fn postgres_account_registry() {
     };
     let user = unique("alice");
     store.seed_account("app1", &user).await.unwrap();
-    contract::account_registry(&store, "app1", &user).await;
+    store
+        .seed_extra_account(&AccountKey::new("app1", &user, "admin"), Some("Admin"), false)
+        .await
+        .unwrap();
+    contract::account_registry(&store, "app1", &user, "admin").await;
 }
 
 #[tokio::test]
@@ -63,7 +68,11 @@ async fn diagnostic_store_contract() {
     };
     let user = unique("diag");
     store.seed_account("app1", &user).await.unwrap();
-    contract::diagnostic_store(&store, "app1", &user).await;
+    store
+        .seed_extra_account(&AccountKey::new("app1", &user, "admin"), None, false)
+        .await
+        .unwrap();
+    contract::diagnostic_store(&store, "app1", &user, "admin").await;
 }
 
 #[tokio::test]
@@ -81,9 +90,13 @@ async fn access_requests_contract() {
         eprintln!("SESAME_TEST_DATABASE_URL absente : test ignoré");
         return;
     };
-    let (fresh, existing) = (unique("nouveau"), unique("titulaire"));
+    let (fresh, existing, extra_only) = (unique("nouveau"), unique("titulaire"), unique("autre"));
     store.seed_account("app1", &existing).await.unwrap();
-    contract::access_requests(&store, &store, "app1", &fresh, &existing).await;
+    store
+        .seed_extra_account(&AccountKey::new("app1", &extra_only, "admin"), None, true)
+        .await
+        .unwrap();
+    contract::access_requests(&store, &store, "app1", &fresh, &existing, &extra_only).await;
 }
 
 // Coffre de secrets PostgreSQL (ADR 0021). SecretStore n'expose que la lecture (seul
@@ -98,9 +111,11 @@ async fn postgres_secret_store() {
     let key = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
     let secrets = store.secrets(CookieCipher::from_base64(&SecretString::from(key)).unwrap());
     let user = unique("secret-user");
+    let account = AccountKey::default_of("app1", &user);
+    let admin = AccountKey::new("app1", &user, "admin");
 
     assert!(matches!(
-        secrets.get_credential("app1", &user).await,
+        secrets.get_credential(&account).await,
         Err(PortError::NotFound)
     ));
 
@@ -108,21 +123,38 @@ async fn postgres_secret_store() {
         ("username".to_string(), "amartin".to_string()),
         ("password".to_string(), "s3cret-pw".to_string()),
     ]);
-    secrets.put_credential("app1", &user, &fields).await.unwrap();
-    let cred = secrets.get_credential("app1", &user).await.unwrap();
+    secrets.put_credential(&account, &fields).await.unwrap();
+    let cred = secrets.get_credential(&account).await.unwrap();
     assert_eq!(cred.get("username").unwrap().expose_secret(), "amartin");
     assert_eq!(cred.get("password").unwrap().expose_secret(), "s3cret-pw");
 
+    // Comptes multiples (ADR 0034) : un jeu de champs par compte, isolés l'un de l'autre.
+    assert!(matches!(
+        secrets.get_credential(&admin).await,
+        Err(PortError::NotFound)
+    ));
+    let admin_fields = std::collections::BTreeMap::from([
+        ("username".to_string(), "amartin-adm".to_string()),
+        ("password".to_string(), "adm-pw".to_string()),
+    ]);
+    secrets.put_credential(&admin, &admin_fields).await.unwrap();
+    let cred = secrets.get_credential(&admin).await.unwrap();
+    assert_eq!(cred.get("username").unwrap().expose_secret(), "amartin-adm");
+    let cred = secrets.get_credential(&account).await.unwrap();
+    assert_eq!(cred.get("username").unwrap().expose_secret(), "amartin");
+    secrets.delete_credential(&admin).await.unwrap();
+    assert!(secrets.get_credential(&account).await.is_ok());
+
     // Remplace l'ensemble des champs (comme un PUT KV v2) : « username » disparaît.
     let fields2 = std::collections::BTreeMap::from([("password".to_string(), "new-pw".to_string())]);
-    secrets.put_credential("app1", &user, &fields2).await.unwrap();
-    let cred2 = secrets.get_credential("app1", &user).await.unwrap();
+    secrets.put_credential(&account, &fields2).await.unwrap();
+    let cred2 = secrets.get_credential(&account).await.unwrap();
     assert!(cred2.get("username").is_none());
     assert_eq!(cred2.get("password").unwrap().expose_secret(), "new-pw");
 
-    secrets.delete_credential("app1", &user).await.unwrap();
+    secrets.delete_credential(&account).await.unwrap();
     assert!(matches!(
-        secrets.get_credential("app1", &user).await,
+        secrets.get_credential(&account).await,
         Err(PortError::NotFound)
     ));
 }

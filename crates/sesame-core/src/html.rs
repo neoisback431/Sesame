@@ -108,6 +108,7 @@ font-weight:700;background:linear-gradient(135deg,var(--blue),var(--cyan))}\
 button,a.button{display:inline-block;padding:7px 16px;border:0;border-radius:6px;background:var(--blue);\
 color:#fff;font:inherit;text-decoration:none;cursor:pointer}button:hover,a.button:hover{background:var(--navy)}\
 form.disconnect{text-align:right;margin-top:4px}\
+form.accounts{text-align:right;margin-top:2px;font-size:.9em}form.accounts select{font:inherit;margin-left:4px}\
 button.link{background:none;padding:0;color:var(--muted);font-size:.85em;text-decoration:underline}\
 button.link:hover{background:none;color:var(--navy)}\
 form.logout{margin-top:32px}\
