@@ -77,10 +77,17 @@ async fn eligible(
             cid,
         ));
     };
-    match p.accounts.get_account(app_id, &session.user.user_key).await {
-        Ok(None) => Ok(d.clone()),
-        Ok(Some(a)) if a.status == AccountStatus::Pending => Err(redirect("/", &[])),
-        Ok(Some(_)) => Err(redirect("/?request=exists", &[])),
+    // Demande sur le compte `default` (ADR 0034) : un autre compte du couple suffit à la refuser.
+    match p.accounts.app_accounts(app_id, &session.user.user_key).await {
+        Ok(accounts) if accounts.is_empty() => Ok(d.clone()),
+        Ok(accounts)
+            if accounts
+                .iter()
+                .all(|a| a.status == AccountStatus::Pending && a.key().is_default_id()) =>
+        {
+            Err(redirect("/", &[]))
+        }
+        Ok(_) => Err(redirect("/?request=exists", &[])),
         Err(e) => {
             tracing::error!(correlation_id = %cid, error = %e, "registre des comptes indisponible");
             Err(unavailable(p, cid))

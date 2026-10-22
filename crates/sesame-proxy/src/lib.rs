@@ -45,7 +45,9 @@ use sesame_core::cookies::{self, PortalCookie};
 use sesame_core::crypto::hash_token;
 use sesame_core::descriptor::{AppDescriptor, LogoutAction, SessionMode};
 use sesame_core::html::error_page;
-use sesame_core::ports::{AccountStatus, AppSession, AuditSink, PortalSession, SessionStore};
+use sesame_core::ports::{
+    AccountStatus, AppSession, AuditSink, PortalSession, SessionStore, DEFAULT_ACCOUNT,
+};
 use sesame_core::secret::ExposeSecret;
 use url::Url;
 
@@ -336,6 +338,23 @@ impl Proxy {
             })
     }
 
+    /// Compte à utiliser pour cette appli (ADR 0034) : celui choisi par l'utilisateur, sinon son
+    /// compte par défaut. Sans compte, `default` : le rejeu le refusera et le tracera.
+    async fn effective_account_id(&self, ctx: &Ctx<'_>) -> Result<String, Response> {
+        match self
+            .replayer
+            .accounts
+            .effective_account(ctx.app.id(), &ctx.session.user.user_key)
+            .await
+        {
+            Ok(a) => Ok(a.map_or_else(|| DEFAULT_ACCOUNT.to_owned(), |a| a.account_id)),
+            Err(e) => {
+                tracing::error!(error = %e, correlation_id = %ctx.cid, "lecture du registre des comptes impossible");
+                Err(self.unavailable(&ctx.cid))
+            }
+        }
+    }
+
     /// Mode handoff (ADR 0020), première arrivée : rejeu côté serveur, remise de l'élément de
     /// session au navigateur (cookies en `Set-Cookie`, valeurs de stockage local via une page
     /// dédiée) et d'un marqueur, puis redirection vers `return_path`. Les requêtes suivantes
@@ -346,6 +365,10 @@ impl Proxy {
             Some(h) => h,
             None => return self.unavailable(&ctx.cid), // écarté par validate()
         };
+        let account_id = match self.effective_account_id(ctx).await {
+            Ok(a) => a,
+            Err(resp) => return resp,
+        };
         let session = match self
             .replayer
             .replay(
@@ -353,6 +376,7 @@ impl Proxy {
                 &ctx.app.descriptor,
                 &ctx.app.forwarded,
                 &ctx.session.user,
+                &account_id,
                 &ctx.cid,
             )
             .await
@@ -368,6 +392,7 @@ impl Proxy {
                     .audit
                     .record(
                         self.event(ctx, AuditAction::SessionHandoff, AuditOutcome::Failure)
+                            .account(&account_id)
                             .reason(reason),
                     )
                     .await;
@@ -381,11 +406,14 @@ impl Proxy {
         };
 
         let cookie_headers =
-            handoff::set_cookie_headers(handoff, &session.jar, spec.session.max_ttl.as_secs());
+            handoff::set_cookie_headers(handoff, &session.jar, spec.session.max_ttl.as_secs(), &account_id);
 
         if self
             .audit
-            .record(self.event(ctx, AuditAction::SessionHandoff, AuditOutcome::Success))
+            .record(
+                self.event(ctx, AuditAction::SessionHandoff, AuditOutcome::Success)
+                    .account(&account_id),
+            )
             .await
             .is_err()
         {
@@ -482,6 +510,7 @@ impl Proxy {
             if let Some(s) = self.fresh_app_session(ctx).await? {
                 return Ok(s);
             }
+            let account_id = self.effective_account_id(ctx).await?;
             let jar = self
                 .replayer
                 .replay(
@@ -489,6 +518,7 @@ impl Proxy {
                     &ctx.app.descriptor,
                     &ctx.app.forwarded,
                     &ctx.session.user,
+                    &account_id,
                     &ctx.cid,
                 )
                 .await
@@ -499,6 +529,7 @@ impl Proxy {
             let session = AppSession {
                 portal_session_id: ctx.session.id.clone(),
                 app_id: ctx.app.id().to_owned(),
+                account_id,
                 cookies: jar.into_cookies(),
                 created_at: now,
                 last_used_at: now,
@@ -859,7 +890,7 @@ impl Proxy {
         let usable = matches!(
             self.replayer
                 .accounts
-                .get_account(ctx.app.id(), &ctx.session.user.user_key)
+                .effective_account(ctx.app.id(), &ctx.session.user.user_key)
                 .await,
             Ok(Some(a)) if matches!(a.status, AccountStatus::Active | AccountStatus::Failed)
         );
@@ -948,7 +979,16 @@ impl Proxy {
                 .handoff
                 .as_ref()
                 .is_some_and(|h| !handoff::cookies_present(&parts.headers, h));
-        if !handoff::done(&parts.headers) || cookies_gone {
+        // Marqueur d'un autre compte que le compte effectif (compte changé depuis « Mes
+        // applications », ADR 0034) : sur une navigation, nouvelle remise avec le bon compte.
+        let account_changed = match handoff::marker_account(&parts.headers) {
+            Some(marked) if renew => match self.effective_account_id(ctx).await {
+                Ok(account_id) => marked != account_id,
+                Err(resp) => return resp,
+            },
+            _ => false,
+        };
+        if !handoff::done(&parts.headers) || cookies_gone || account_changed {
             match self.suspended(ctx).await {
                 Ok(true) => return self.serve_passthrough(ctx, parts, body).await,
                 Ok(false) => {}
@@ -956,6 +996,9 @@ impl Proxy {
             }
             if cookies_gone {
                 tracing::info!(app = ctx.app.id(), correlation_id = %ctx.cid, "cookie remis effacé par l'appli : nouvelle remise");
+            }
+            if account_changed {
+                tracing::info!(app = ctx.app.id(), correlation_id = %ctx.cid, "autre compte choisi : nouvelle remise");
             }
             return self.handoff(ctx, path_and_query(parts)).await;
         }

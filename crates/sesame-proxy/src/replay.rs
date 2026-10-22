@@ -17,8 +17,8 @@ use sesame_core::descriptor::{
 };
 use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{
-    AccountRegistry, AccountStatus, AuditSink, DiagnosticStore, NotificationEvent, Notifier, PortError,
-    ReplayDiagnostic, SecretStore,
+    AccountKey, AccountRegistry, AccountStatus, AuditSink, DiagnosticStore, NotificationEvent, Notifier,
+    PortError, ReplayDiagnostic, SecretStore,
 };
 use sesame_core::secret::{Credential, ExposeSecret};
 use url::Url;
@@ -133,17 +133,18 @@ impl Replayer {
         })
     }
 
-    async fn mark_failed(&self, d: &AppDescriptor, user: &UserIdentity, cid: &str, reason: &'static str) {
-        let app = &d.metadata.id;
+    async fn mark_failed(&self, key: &AccountKey, user: &UserIdentity, cid: &str, reason: &'static str) {
+        let app = &key.app_id;
         match self
             .accounts
-            .set_status(app, &user.user_key, AccountStatus::Failed, Some(reason))
+            .set_status(key, AccountStatus::Failed, Some(reason))
             .await
         {
             Ok(()) => {
                 let event = AuditEvent::new(AuditAction::AccountStatusChanged, AuditOutcome::Success)
                     .actor(user)
                     .app(app)
+                    .account(&key.account_id)
                     .correlation(cid)
                     .reason(format!("failed:{reason}"));
                 let _ = self.audit(event).await;
@@ -160,27 +161,31 @@ impl Replayer {
         }
     }
 
-    /// Vérifie le compte, lit le coffre, rejoue le login. Renvoie le jar de session.
+    /// Vérifie le compte `account_id` de l'utilisateur (ADR 0034), lit le coffre, rejoue le
+    /// login. Renvoie le jar de session.
     pub async fn replay(
         &self,
         http: &reqwest::Client,
         d: &AppDescriptor,
         fwd: &Forwarded,
         user: &UserIdentity,
+        account_id: &str,
         cid: &str,
     ) -> Result<ReplaySession, ReplayError> {
         let app = d.metadata.id.as_str();
+        let key = AccountKey::new(app, &user.user_key, account_id);
         let event = |action, outcome| {
             AuditEvent::new(action, outcome)
                 .actor(user)
                 .app(app)
+                .account(account_id)
                 .correlation(cid)
         };
 
         // 1. Registre des comptes : aucun accès au coffre sans compte actif.
         let account = self
             .accounts
-            .get_account(app, &user.user_key)
+            .get_account(&key)
             .await
             .map_err(|_| ReplayError::SecretUnavailable)?;
         let denied = match account.map(|a| a.status) {
@@ -197,7 +202,7 @@ impl Replayer {
         }
 
         // 2. Coffre : lecture auditée, succès ou échec.
-        let credential = match self.secrets.get_credential(app, &user.user_key).await {
+        let credential = match self.secrets.get_credential(&key).await {
             Ok(c) => {
                 self.audit(event(AuditAction::SecretRead, AuditOutcome::Success))
                     .await?;
@@ -214,7 +219,7 @@ impl Replayer {
                 return Err(match err {
                     Some(err) => err,
                     None => {
-                        self.mark_failed(d, user, cid, reason).await;
+                        self.mark_failed(&key, user, cid, reason).await;
                         ReplayError::Rejected(reason)
                     }
                 });
@@ -229,11 +234,7 @@ impl Replayer {
                 Ok(Outcome::Success(jar, login_body)) => {
                     self.audit(event(AuditAction::LoginReplay, AuditOutcome::Success))
                         .await?;
-                    if let Err(e) = self
-                        .accounts
-                        .record_login(app, &user.user_key, SystemTime::now())
-                        .await
-                    {
+                    if let Err(e) = self.accounts.record_login(&key, SystemTime::now()).await {
                         tracing::warn!(error = %e, app, "date de dernière connexion non enregistrée");
                     }
                     tracing::info!(app, correlation_id = cid, attempt, "rejeu réussi");
@@ -266,8 +267,8 @@ impl Replayer {
             .await?;
         match err {
             ReplayError::Rejected(r) => {
-                self.mark_failed(d, user, cid, r).await;
-                self.save_diagnostic(d, user, cid, r, capture).await;
+                self.mark_failed(&key, user, cid, r).await;
+                self.save_diagnostic(&key, cid, r, capture).await;
             }
             // Appli hors service : aucun changement d'état, mais l'administrateur doit le savoir.
             ReplayError::Upstream => {
@@ -327,20 +328,14 @@ impl Replayer {
         result
     }
 
-    async fn save_diagnostic(
-        &self,
-        d: &AppDescriptor,
-        user: &UserIdentity,
-        cid: &str,
-        reason: &str,
-        capture: Option<Capture>,
-    ) {
+    async fn save_diagnostic(&self, key: &AccountKey, cid: &str, reason: &str, capture: Option<Capture>) {
         let (Some(store), Some(c)) = (&self.diagnostics, capture) else {
             return;
         };
         let diagnostic = ReplayDiagnostic {
-            app_id: d.metadata.id.clone(),
-            user_key: user.user_key.clone(),
+            app_id: key.app_id.clone(),
+            user_key: key.user_key.clone(),
+            account_id: key.account_id.clone(),
             correlation_id: cid.to_owned(),
             reason: reason.to_owned(),
             step: c.step.to_owned(),
@@ -354,7 +349,7 @@ impl Replayer {
             at: SystemTime::now(),
         };
         if let Err(e) = store.put_diagnostic(diagnostic).await {
-            tracing::warn!(error = %e, app = %d.metadata.id, "diagnostic de rejeu non enregistré");
+            tracing::warn!(error = %e, app = %key.app_id, "diagnostic de rejeu non enregistré");
         }
     }
 

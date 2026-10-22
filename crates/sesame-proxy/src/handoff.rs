@@ -15,8 +15,23 @@ use sesame_core::secret::ExposeSecret;
 use crate::jar::Jar;
 
 /// Marqueur posé au navigateur par la remise : tant qu'il est présent, les requêtes sont
-/// relayées sans nouveau rejeu. Propre à Sesame, il n'est jamais relayé à l'appli.
+/// relayées sans nouveau rejeu. Propre à Sesame, il n'est jamais relayé à l'appli. Sa valeur
+/// est l'identifiant du compte remis (ADR 0034) : si l'utilisateur en choisit un autre, la
+/// remise est refaite à la navigation suivante.
 pub const MARKER: &str = "__sesame_handoff";
+
+/// Compte porté par le marqueur, s'il est présent. Un marqueur d'avant les comptes multiples
+/// (valeur `1`) désigne le compte `default`.
+pub fn marker_account(headers: &HeaderMap) -> Option<&str> {
+    let values = headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok());
+    sesame_core::cookies::find(values, MARKER).map(|v| match v {
+        "1" => sesame_core::ports::DEFAULT_ACCOUNT,
+        other => other,
+    })
+}
 
 /// Le navigateur présente-t-il le marqueur (remise déjà faite) ?
 pub fn done(headers: &HeaderMap) -> bool {
@@ -41,8 +56,9 @@ pub fn cookies_present(headers: &HeaderMap, handoff: &Handoff) -> bool {
 }
 
 /// `Set-Cookie` de la remise : cookies capturés déclarés dans `set_cookies` (visibles du
-/// navigateur : c'est l'exception de l'ADR 0020), puis le marqueur. Durée : `ttl_secs`.
-pub fn set_cookie_headers(handoff: &Handoff, jar: &Jar, ttl_secs: u64) -> Vec<String> {
+/// navigateur : c'est l'exception de l'ADR 0020), puis le marqueur portant le compte remis
+/// (identifiant `[a-z0-9-]`, sans risque dans un cookie). Durée : `ttl_secs`.
+pub fn set_cookie_headers(handoff: &Handoff, jar: &Jar, ttl_secs: u64, account_id: &str) -> Vec<String> {
     let mut out: Vec<String> = handoff
         .set_cookies
         .iter()
@@ -56,7 +72,7 @@ pub fn set_cookie_headers(handoff: &Handoff, jar: &Jar, ttl_secs: u64) -> Vec<St
         })
         .collect();
     out.push(format!(
-        "{MARKER}=1; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={ttl_secs}"
+        "{MARKER}={account_id}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={ttl_secs}"
     ));
     out
 }
@@ -168,14 +184,14 @@ mod tests {
             sesame_core::secret::AppCookie::new("SID", "v-1"),
             sesame_core::secret::AppCookie::new("OTHER", "x"),
         ]);
-        let headers = set_cookie_headers(&h, &jar, 60);
+        let headers = set_cookie_headers(&h, &jar, 60, "admin");
         assert_eq!(
             headers.len(),
             2,
             "cookie absent ignoré, OTHER non déclaré : {headers:?}"
         );
         assert_eq!(headers[0], "SID=v-1; Path=/; Secure; SameSite=Lax; Max-Age=60");
-        assert!(headers[1].starts_with("__sesame_handoff=1;") && headers[1].contains("HttpOnly"));
+        assert!(headers[1].starts_with("__sesame_handoff=admin;") && headers[1].contains("HttpOnly"));
     }
 
     #[test]

@@ -8,8 +8,8 @@ use std::time::{Duration, SystemTime};
 use crate::identity::UserIdentity;
 use crate::memory::cookie_value;
 use crate::ports::{
-    AccessRequests, AccountRegistry, AccountStatus, AppSession, DescriptorStore, DiagnosticStore, PortError,
-    PortalSession, ReplayDiagnostic, SessionStore, UserDirectory,
+    AccessRequests, AccountKey, AccountRegistry, AccountStatus, AppSession, DescriptorStore, DiagnosticStore,
+    PortError, PortalSession, ReplayDiagnostic, SessionStore, UserDirectory,
 };
 use crate::secret::AppCookie;
 
@@ -35,6 +35,7 @@ fn app_session(portal: &str, app: &str, value: &str, ttl: Duration) -> AppSessio
     AppSession {
         portal_session_id: portal.into(),
         app_id: app.into(),
+        account_id: "default".into(),
         cookies: vec![AppCookie::new("SESSID", value), AppCookie::new("lang", "fr")],
         created_at: now,
         last_used_at: now,
@@ -98,7 +99,17 @@ pub async fn session_store(store: &dyn SessionStore, prefix: &str) {
         .unwrap();
     let a = store.get_app_session(&id, "app1").await.unwrap().unwrap();
     assert_eq!(cookie_value(&a, "SESSID").as_deref(), Some("v2"));
+    assert_eq!(a.account_id, "default");
     assert!(store.get_app_session(&id, "app2").await.unwrap().is_none());
+    // Le compte de la session est conservé (comptes multiples, ADR 0034).
+    let mut admin = app_session(&id, "app1", "v-admin", hour);
+    admin.account_id = "admin".into();
+    store.put_app_session(admin).await.unwrap();
+    let a = store.get_app_session(&id, "app1").await.unwrap().unwrap();
+    assert_eq!(
+        (a.account_id.as_str(), cookie_value(&a, "SESSID").as_deref()),
+        ("admin", Some("v-admin"))
+    );
 
     store
         .touch_app_session(&id, "app1", SystemTime::now())
@@ -114,6 +125,23 @@ pub async fn session_store(store: &dyn SessionStore, prefix: &str) {
 
     store.delete_app_session(&id, "app1").await.unwrap();
     assert!(store.get_app_session(&id, "app1").await.unwrap().is_none());
+
+    // Changement de compte (ADR 0034) : sessions de l'utilisateur sur l'appli détruites dans
+    // toutes ses sessions portail, autres applis épargnées.
+    let (capp, capp2) = (format!("{prefix}-cpt"), format!("{prefix}-cpt2"));
+    for (portal, app) in [(&id, &capp), (&other, &capp), (&id, &capp2)] {
+        store
+            .put_app_session(app_session(portal, app, "v", hour))
+            .await
+            .unwrap();
+    }
+    store.delete_user_app_sessions("alice", &capp).await.unwrap();
+    assert!(store.get_app_session(&id, &capp).await.unwrap().is_none());
+    assert!(store.get_app_session(&other, &capp).await.unwrap().is_none());
+    assert!(store.get_app_session(&id, &capp2).await.unwrap().is_some());
+    store.delete_user_app_sessions("bob", &capp2).await.unwrap();
+    assert!(store.get_app_session(&id, &capp2).await.unwrap().is_some());
+    store.delete_app_session(&id, &capp2).await.unwrap();
 
     // Suspension (ADR 0033) : par utilisateur et par appli, détruit les sessions applicatives de
     // toutes ses sessions portail, épargne les autres applis et les autres utilisateurs.
@@ -162,42 +190,106 @@ pub async fn session_store(store: &dyn SessionStore, prefix: &str) {
     store.delete_portal_session(&other).await.unwrap();
 }
 
-/// `seed` crée le compte actif (app, user) : la création relève de l'admin, hors interface.
-pub async fn account_registry(registry: &dyn AccountRegistry, app: &str, user: &str) {
-    let a = registry.get_account(app, user).await.unwrap().expect("compte");
+/// Le seed (hors interface : la création relève de l'admin) crée pour (`app`, `user`) le
+/// compte `default` actif, par défaut, et un compte supplémentaire `extra` actif.
+pub async fn account_registry(registry: &dyn AccountRegistry, app: &str, user: &str, extra: &str) {
+    let key = AccountKey::default_of(app, user);
+    let extra_key = AccountKey::new(app, user, extra);
+    let a = registry.get_account(&key).await.unwrap().expect("compte");
     assert_eq!(a.status, AccountStatus::Active);
-    assert!(registry
-        .list_accounts(user)
+    assert!(a.is_default);
+    let b = registry
+        .get_account(&extra_key)
         .await
         .unwrap()
-        .iter()
-        .any(|a| a.app_id == app));
+        .expect("compte supplémentaire");
+    assert!(!b.is_default);
+    let listed: Vec<String> = registry
+        .app_accounts(app, user)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|a| a.account_id)
+        .collect();
+    assert_eq!(listed, ["default", extra], "compte par défaut en tête");
     assert!(registry.list_accounts("personne").await.unwrap().is_empty());
 
     registry
-        .set_status(app, user, AccountStatus::Failed, Some("login_rejected"))
+        .set_status(&key, AccountStatus::Failed, Some("login_rejected"))
         .await
         .unwrap();
-    let a = registry.get_account(app, user).await.unwrap().unwrap();
+    let a = registry.get_account(&key).await.unwrap().unwrap();
     assert_eq!(a.status, AccountStatus::Failed);
     assert_eq!(a.status_reason.as_deref(), Some("login_rejected"));
+    // L'état d'un compte n'affecte pas les autres comptes du couple.
+    let b = registry.get_account(&extra_key).await.unwrap().unwrap();
+    assert_eq!(b.status, AccountStatus::Active);
 
     registry
-        .set_status(app, user, AccountStatus::Active, None)
+        .set_status(&key, AccountStatus::Active, None)
         .await
         .unwrap();
-    registry.record_login(app, user, SystemTime::now()).await.unwrap();
-    let a = registry.get_account(app, user).await.unwrap().unwrap();
+    registry.record_login(&key, SystemTime::now()).await.unwrap();
+    let a = registry.get_account(&key).await.unwrap().unwrap();
     assert_eq!(a.status, AccountStatus::Active);
     assert!(a.status_reason.is_none() && a.last_login_at.is_some());
+    assert!(registry
+        .get_account(&extra_key)
+        .await
+        .unwrap()
+        .unwrap()
+        .last_login_at
+        .is_none());
 
+    // Choix du compte (ADR 0034) : par utilisateur et par appli.
+    assert_eq!(registry.selected_account(app, user).await.unwrap(), None);
+    assert_eq!(
+        registry
+            .effective_account(app, user)
+            .await
+            .unwrap()
+            .map(|a| a.account_id)
+            .as_deref(),
+        Some("default")
+    );
+    registry.select_account(&extra_key).await.unwrap();
+    assert_eq!(
+        registry.selected_account(app, user).await.unwrap().as_deref(),
+        Some(extra)
+    );
+    assert_eq!(
+        registry.selected_accounts(user).await.unwrap(),
+        [(app.to_owned(), extra.to_owned())]
+    );
+    assert!(registry.selected_accounts("personne").await.unwrap().is_empty());
+    assert_eq!(
+        registry
+            .effective_account(app, user)
+            .await
+            .unwrap()
+            .map(|a| a.account_id)
+            .as_deref(),
+        Some(extra)
+    );
+    assert_eq!(registry.selected_account(app, "personne").await.unwrap(), None);
     assert!(matches!(
         registry
-            .set_status(app, "personne", AccountStatus::Disabled, None)
+            .select_account(&AccountKey::new(app, user, "inconnu"))
             .await,
         Err(PortError::NotFound)
     ));
-    assert!(registry.get_account(app, "personne").await.unwrap().is_none());
+    registry.select_account(&key).await.unwrap();
+    assert_eq!(
+        registry.selected_account(app, user).await.unwrap().as_deref(),
+        Some("default")
+    );
+
+    let nobody = AccountKey::default_of(app, "personne");
+    assert!(matches!(
+        registry.set_status(&nobody, AccountStatus::Disabled, None).await,
+        Err(PortError::NotFound)
+    ));
+    assert!(registry.get_account(&nobody).await.unwrap().is_none());
 }
 
 /// `user` ne doit pas encore figurer dans l'annuaire.
@@ -237,15 +329,30 @@ pub async fn user_directory(directory: &dyn UserDirectory, user: &str) {
     );
 }
 
-/// `fresh` n'a aucun compte ; `existing` a un compte actif (créé par le seed, hors interface).
+/// `fresh` n'a aucun compte ; `existing` a un compte `default` actif ; `extra_only` n'a qu'un
+/// compte actif autre que `default` (créés par le seed, hors interface).
 pub async fn access_requests(
     requests: &dyn AccessRequests,
     registry: &dyn AccountRegistry,
     app: &str,
     fresh: &str,
     existing: &str,
+    extra_only: &str,
 ) {
     use crate::ports::{AccessRequestKind::*, SubmitOutcome::*};
+
+    // Un autre compte que `default` suffit : pas de demande d'accès (ADR 0034).
+    for kind in [Credentials, NoAccount] {
+        assert_eq!(
+            requests.submit(app, extra_only, kind, None).await.unwrap(),
+            AccountExists
+        );
+    }
+    assert!(registry
+        .get_account(&AccountKey::default_of(app, extra_only))
+        .await
+        .unwrap()
+        .is_none());
 
     // Sans compte : « pas de compte » enregistre la demande, sans créer de compte.
     assert_eq!(
@@ -255,7 +362,9 @@ pub async fn access_requests(
             .unwrap(),
         Recorded
     );
-    assert!(registry.get_account(app, fresh).await.unwrap().is_none());
+    let fresh_key = AccountKey::default_of(app, fresh);
+    let existing_key = AccountKey::default_of(app, existing);
+    assert!(registry.get_account(&fresh_key).await.unwrap().is_none());
     let open = requests.open_for_user(fresh).await.unwrap();
     assert_eq!(open.len(), 1);
     assert_eq!(
@@ -271,8 +380,12 @@ pub async fn access_requests(
     let open = requests.open_for_user(fresh).await.unwrap();
     assert_eq!(open.len(), 1, "une seule demande par couple");
     assert_eq!(open[0].kind, Credentials);
-    let a = registry.get_account(app, fresh).await.unwrap().unwrap();
+    let a = registry.get_account(&fresh_key).await.unwrap().unwrap();
     assert_eq!(a.status, AccountStatus::Pending);
+    assert!(
+        a.is_default,
+        "le compte d'une demande d'accès est le compte par défaut"
+    );
     // Nouvelle soumission tant que le compte est en attente : remplacement permis.
     assert_eq!(
         requests.submit(app, fresh, Credentials, None).await.unwrap(),
@@ -282,7 +395,7 @@ pub async fn access_requests(
     // Retrait : ni demande ni compte en attente.
     requests.withdraw(app, fresh).await.unwrap();
     assert!(requests.open_for_user(fresh).await.unwrap().is_empty());
-    assert!(registry.get_account(app, fresh).await.unwrap().is_none());
+    assert!(registry.get_account(&fresh_key).await.unwrap().is_none());
 
     // Un compte existant (actif, échec, désactivé) n'est jamais modifié.
     for status in [
@@ -290,33 +403,37 @@ pub async fn access_requests(
         AccountStatus::Failed,
         AccountStatus::Disabled,
     ] {
-        registry.set_status(app, existing, status, None).await.unwrap();
+        registry.set_status(&existing_key, status, None).await.unwrap();
         for kind in [Credentials, NoAccount] {
             assert_eq!(
                 requests.submit(app, existing, kind, None).await.unwrap(),
                 AccountExists
             );
-            let a = registry.get_account(app, existing).await.unwrap().unwrap();
+            let a = registry.get_account(&existing_key).await.unwrap().unwrap();
             assert_eq!(a.status, status);
         }
     }
     assert!(requests.open_for_user(existing).await.unwrap().is_empty());
     registry
-        .set_status(app, existing, AccountStatus::Active, None)
+        .set_status(&existing_key, AccountStatus::Active, None)
         .await
         .unwrap();
     // `withdraw` ne supprime jamais un compte qui n'est pas en attente.
     requests.withdraw(app, existing).await.unwrap();
-    assert!(registry.get_account(app, existing).await.unwrap().is_some());
+    assert!(registry.get_account(&existing_key).await.unwrap().is_some());
 }
 
-/// Le compte (`app`, `user`) doit exister dans le registre (clé étrangère côté base).
-pub async fn diagnostic_store(store: &dyn DiagnosticStore, app: &str, user: &str) {
-    assert!(store.get_diagnostic(app, user).await.unwrap().is_none());
+/// Les comptes `default` et `extra` de (`app`, `user`) doivent exister dans le registre (clé
+/// étrangère côté base).
+pub async fn diagnostic_store(store: &dyn DiagnosticStore, app: &str, user: &str, extra: &str) {
+    let key = AccountKey::default_of(app, user);
+    let extra_key = AccountKey::new(app, user, extra);
+    assert!(store.get_diagnostic(&key).await.unwrap().is_none());
     let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
     let mut d = ReplayDiagnostic {
         app_id: app.into(),
         user_key: user.into(),
+        account_id: "default".into(),
         correlation_id: "cid-1".into(),
         reason: "login_unexpected_response".into(),
         step: "login_submit".into(),
@@ -330,13 +447,24 @@ pub async fn diagnostic_store(store: &dyn DiagnosticStore, app: &str, user: &str
         at,
     };
     store.put_diagnostic(d.clone()).await.unwrap();
-    assert_eq!(store.get_diagnostic(app, user).await.unwrap(), Some(d.clone()));
+    assert_eq!(store.get_diagnostic(&key).await.unwrap(), Some(d.clone()));
+    assert!(store.get_diagnostic(&extra_key).await.unwrap().is_none());
+    // Un diagnostic par compte.
+    let mut e = d.clone();
+    e.account_id = extra.into();
+    e.correlation_id = "cid-extra".into();
+    store.put_diagnostic(e.clone()).await.unwrap();
+    assert_eq!(store.get_diagnostic(&extra_key).await.unwrap(), Some(e));
     // Seul le dernier diagnostic est conservé.
     d.correlation_id = "cid-2".into();
     d.status = None;
     store.put_diagnostic(d.clone()).await.unwrap();
-    assert_eq!(store.get_diagnostic(app, user).await.unwrap(), Some(d));
-    assert!(store.get_diagnostic(app, "personne").await.unwrap().is_none());
+    assert_eq!(store.get_diagnostic(&key).await.unwrap(), Some(d));
+    assert!(store
+        .get_diagnostic(&AccountKey::default_of(app, "personne"))
+        .await
+        .unwrap()
+        .is_none());
 }
 
 /// `prefix` isole les données d'un test à l'autre sur un backend partagé.
@@ -401,24 +529,43 @@ mod tests {
 
     #[tokio::test]
     async fn memory_diagnostic_store() {
-        super::diagnostic_store(&crate::memory::MemoryDiagnosticStore::default(), "app1", "alice").await;
+        super::diagnostic_store(
+            &crate::memory::MemoryDiagnosticStore::default(),
+            "app1",
+            "alice",
+            "admin",
+        )
+        .await;
     }
 
     #[tokio::test]
     async fn memory_account_registry() {
+        use crate::ports::{AccountKey, AccountStatus, AppAccount};
         let r = MemoryAccountRegistry::with_active(&[("app1", "alice")]);
-        super::account_registry(&r, "app1", "alice").await;
+        r.upsert(AppAccount::new(
+            &AccountKey::new("app1", "alice", "admin"),
+            AccountStatus::Active,
+            false,
+        ));
+        super::account_registry(&r, "app1", "alice", "admin").await;
     }
 
     #[tokio::test]
     async fn memory_access_requests() {
+        use crate::ports::{AccountKey, AccountStatus, AppAccount};
         let r = Arc::new(MemoryAccountRegistry::with_active(&[("app1", "alice")]));
+        r.upsert(AppAccount::new(
+            &AccountKey::new("app1", "carol", "admin"),
+            AccountStatus::Active,
+            true,
+        ));
         super::access_requests(
             &MemoryAccessRequests::new(r.clone()),
             &*r,
             "app1",
             "nouveau",
             "alice",
+            "carol",
         )
         .await;
     }

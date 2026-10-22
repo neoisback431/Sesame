@@ -289,7 +289,7 @@ async fn credentials_are_relayed_to_the_proxy_and_never_echoed() {
     // Le portail n'écrit ni compte ni secret : c'est le proxy qui le fait.
     assert!(b
         .accounts
-        .get_account("fake-app", "alice")
+        .get_account(&sesame_core::ports::AccountKey::default_of("fake-app", "alice"))
         .await
         .unwrap()
         .is_none());
@@ -378,7 +378,7 @@ async fn no_account_request_is_recorded_and_audited() {
     );
     assert!(
         b.accounts
-            .get_account("fake-app", "alice")
+            .get_account(&sesame_core::ports::AccountKey::default_of("fake-app", "alice"))
             .await
             .unwrap()
             .is_none(),
@@ -424,13 +424,11 @@ async fn existing_accounts_short_circuit_every_request_route() {
         AccountStatus::Disabled,
     ] {
         let b = bench(GROUPS, true).await;
-        b.accounts.upsert(sesame_core::ports::AppAccount {
-            app_id: "fake-app".into(),
-            user_key: "alice".into(),
+        b.accounts.upsert(sesame_core::ports::AppAccount::new(
+            &sesame_core::ports::AccountKey::default_of("fake-app", "alice"),
             status,
-            status_reason: None,
-            last_login_at: None,
-        });
+            true,
+        ));
         for (method, path) in [
             ("GET", "/apps/fake-app/request"),
             ("POST", "/apps/fake-app/request/credentials"),
@@ -450,15 +448,126 @@ async fn existing_accounts_short_circuit_every_request_route() {
     }
     // Un compte déjà en attente : retour à l'accueil, sans nouvelle demande.
     let b = bench(GROUPS, true).await;
-    b.accounts.upsert(sesame_core::ports::AppAccount {
-        app_id: "fake-app".into(),
-        user_key: "alice".into(),
-        status: AccountStatus::Pending,
-        status_reason: None,
-        last_login_at: None,
-    });
+    b.accounts.upsert(sesame_core::ports::AppAccount::new(
+        &sesame_core::ports::AccountKey::default_of("fake-app", "alice"),
+        AccountStatus::Pending,
+        true,
+    ));
     let r = b.call("GET", "/apps/fake-app/request", None, true).await;
     assert_eq!(r.location.as_deref(), Some("/"));
     let home = b.call("GET", "/", None, true).await;
     assert!(home.body.contains("Demande en cours"));
+}
+
+/// Choix du compte depuis la tuile (ADR 0034) : seul un compte actif ou en échec de
+/// l'utilisateur peut être choisi ; les sessions ouvertes avec l'ancien compte sont détruites
+/// et une suspension est levée ; l'opération est auditée.
+#[tokio::test]
+async fn selecting_an_account_switches_and_resets_sessions() {
+    use sesame_core::ports::{AccountKey, AppAccount, AppSession};
+
+    let b = bench(GROUPS, true).await;
+    let default = AccountKey::default_of("fake-app", "alice");
+    let admin = AccountKey::new("fake-app", "alice", "admin");
+    b.accounts
+        .upsert(AppAccount::new(&default, AccountStatus::Active, true));
+    let mut a = AppAccount::new(&admin, AccountStatus::Active, false);
+    a.label = Some("Admin".into());
+    b.accounts.upsert(a);
+    b.accounts.upsert(AppAccount::new(
+        &AccountKey::new("fake-app", "alice", "off"),
+        AccountStatus::Disabled,
+        false,
+    ));
+    let now = SystemTime::now();
+    b.portal
+        .sessions
+        .put_app_session(AppSession {
+            portal_session_id: hash_token(TOKEN),
+            app_id: "fake-app".into(),
+            account_id: "default".into(),
+            cookies: Vec::new(),
+            created_at: now,
+            last_used_at: now,
+            expires_at: now + Duration::from_secs(600),
+        })
+        .await
+        .unwrap();
+    b.portal.sessions.suspend_app("alice", "fake-app").await.unwrap();
+
+    // Le sélecteur figure sur la tuile.
+    let home = b.call("GET", "/", None, true).await;
+    assert!(home.body.contains("action=\"/apps/fake-app/account\""));
+
+    let r = b
+        .call("POST", "/apps/fake-app/account", Some("account=admin"), true)
+        .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    assert_eq!(r.location.as_deref(), Some("/?request=account"));
+    assert_eq!(
+        b.accounts
+            .selected_account("fake-app", "alice")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("admin")
+    );
+    assert!(b
+        .portal
+        .sessions
+        .get_app_session(&hash_token(TOKEN), "fake-app")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(!b
+        .portal
+        .sessions
+        .is_app_suspended("alice", "fake-app")
+        .await
+        .unwrap());
+    let ev = b.audit.events();
+    let last = ev.last().unwrap();
+    assert_eq!(
+        (last.action, last.outcome, last.account_id.as_deref()),
+        (AuditAction::AccountSelected, AuditOutcome::Success, Some("admin"))
+    );
+    let home = b.call("GET", "/?request=account", None, true).await;
+    assert!(home
+        .body
+        .contains("<option value=\"admin\" selected>Admin</option>"));
+    assert!(home.body.contains("Compte changé"));
+
+    // Compte désactivé, inconnu ou mal formé : refusé, choix inchangé, refus audité.
+    for bad in ["off", "inconnu", "..%2Fx", ""] {
+        let r = b
+            .call(
+                "POST",
+                "/apps/fake-app/account",
+                Some(&format!("account={bad}")),
+                true,
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
+        assert_eq!(
+            b.accounts
+                .selected_account("fake-app", "alice")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("admin")
+        );
+    }
+    assert_eq!(b.audit.events().last().unwrap().outcome, AuditOutcome::Failure);
+
+    // Non connecté : vers la connexion, rien ne change.
+    let r = b
+        .call("POST", "/apps/fake-app/account", Some("account=default"), false)
+        .await;
+    assert_eq!(r.status, StatusCode::FOUND);
+    // Appli non habilitée : introuvable.
+    let b2 = bench(&["autre"], true).await;
+    let r = b2
+        .call("POST", "/apps/fake-app/account", Some("account=default"), true)
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
 }

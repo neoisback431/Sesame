@@ -23,7 +23,8 @@ use serde::Deserialize;
 use sesame_core::audit::{AuditAction, AuditEvent, AuditOutcome};
 use sesame_core::identity::{validate_user_key, UserIdentity};
 use sesame_core::ports::{
-    AccessRequestKind, AccessRequests, AccountStatus, NotificationEvent, SecretWriter, SubmitOutcome,
+    AccessRequestKind, AccessRequests, AccountKey, AccountStatus, NotificationEvent, SecretWriter,
+    SubmitOutcome,
 };
 use sesame_core::secret::{Credential, ExposeSecret, SecretString};
 
@@ -135,15 +136,21 @@ async fn access_request(
         refuse!(StatusCode::BAD_REQUEST, "invalid", "invalid_fields");
     }
 
-    // Un compte déjà actif, en échec ou désactivé n'est jamais écrasé par ce chemin.
+    // Un compte déjà actif, en échec ou désactivé n'est jamais écrasé par ce chemin ; la
+    // demande porte sur le compte `default`, et un autre compte du couple suffit à la refuser
+    // (ADR 0034).
     match i
         .proxy
         .replayer
         .accounts
-        .get_account(&sub.app_id, &sub.user.user_key)
+        .app_accounts(&sub.app_id, &sub.user.user_key)
         .await
     {
-        Ok(Some(a)) if a.status != AccountStatus::Pending => {
+        Ok(accounts)
+            if accounts
+                .iter()
+                .any(|a| a.status != AccountStatus::Pending || !a.key().is_default_id()) =>
+        {
             refuse!(StatusCode::CONFLICT, "account_exists", "account_exists");
         }
         Ok(_) => {}
@@ -196,11 +203,8 @@ async fn access_request(
             "registry_unavailable"
         ),
     }
-    if writer
-        .put_credential(&sub.app_id, &sub.user.user_key, &credential)
-        .await
-        .is_err()
-    {
+    let account = AccountKey::default_of(&sub.app_id, &sub.user.user_key);
+    if writer.put_credential(&account, &credential).await.is_err() {
         let _ = i.requests.withdraw(&sub.app_id, &sub.user.user_key).await;
         refuse!(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -212,6 +216,7 @@ async fn access_request(
     let written = AuditEvent::new(AuditAction::CredentialWritten, AuditOutcome::Success)
         .actor(&sub.user)
         .app(&sub.app_id)
+        .account(&account.account_id)
         .correlation(&cid)
         .reason("access_request");
     let traced = i.proxy.audit.record(written).await.is_ok()

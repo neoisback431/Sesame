@@ -9,7 +9,9 @@ use axum::http::StatusCode;
 use common::access::*;
 use common::*;
 use sesame_core::audit::{AuditAction, AuditOutcome};
-use sesame_core::ports::{AccessRequestKind, AccessRequests, AccountRegistry, AccountStatus, SecretStore};
+use sesame_core::ports::{
+    AccessRequestKind, AccessRequests, AccountKey, AccountRegistry, AccountStatus, SecretStore,
+};
 use sesame_core::secret::ExposeSecret;
 
 fn good() -> serde_json::Value {
@@ -26,9 +28,18 @@ async fn valid_credentials_are_verified_stored_and_left_pending() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(!body.contains(APP_PASSWORD) && !body.contains("amartin"));
 
-    let account = b.accounts.get_account("fake-app", "bob").await.unwrap().unwrap();
+    let account = b
+        .accounts
+        .get_account(&AccountKey::default_of("fake-app", "bob"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(account.status, AccountStatus::Pending);
-    let cred = b.secrets.get_credential("fake-app", "bob").await.unwrap();
+    let cred = b
+        .secrets
+        .get_credential(&AccountKey::default_of("fake-app", "bob"))
+        .await
+        .unwrap();
     assert_eq!(cred.get("password").unwrap().expose_secret(), APP_PASSWORD);
     let open = a.requests.open_for_user("bob").await.unwrap();
     assert_eq!(open.len(), 1);
@@ -54,8 +65,17 @@ async fn wrong_credentials_store_nothing_and_leak_nothing() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     // L'appli recopie la saisie dans sa page d'erreur : rien ne doit revenir.
     assert!(!body.contains("Mauvais-MDP-777") && !body.contains("Identifiants invalides"));
-    assert!(b.accounts.get_account("fake-app", "bob").await.unwrap().is_none());
-    assert!(b.secrets.get_credential("fake-app", "bob").await.is_err());
+    assert!(b
+        .accounts
+        .get_account(&AccountKey::default_of("fake-app", "bob"))
+        .await
+        .unwrap()
+        .is_none());
+    assert!(b
+        .secrets
+        .get_credential(&AccountKey::default_of("fake-app", "bob"))
+        .await
+        .is_err());
     assert!(a.requests.open_for_user("bob").await.unwrap().is_empty());
     assert_eq!(b.mock.logins.load(Ordering::SeqCst), 1, "pas de nouvel essai");
     let events = b.audit.events();
@@ -76,7 +96,12 @@ async fn token_is_required_and_checked_before_anything() {
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{token:?}");
     }
     assert_eq!(b.mock.logins.load(Ordering::SeqCst), 0);
-    assert!(b.accounts.get_account("fake-app", "bob").await.unwrap().is_none());
+    assert!(b
+        .accounts
+        .get_account(&AccountKey::default_of("fake-app", "bob"))
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]
@@ -89,13 +114,17 @@ async fn existing_accounts_are_never_overwritten() {
         let b = bench(GROUPS, APP_PASSWORD, true).await;
         let a = access_bench(&b, true);
         b.accounts
-            .set_status("fake-app", "alice", status, None)
+            .set_status(&AccountKey::default_of("fake-app", "alice"), status, None)
             .await
             .unwrap();
         let (code, _) = post_access(&a.router, Some(INTERNAL_TOKEN), &alice(GROUPS), good()).await;
         assert_eq!(code, StatusCode::CONFLICT, "{status:?}");
         assert_eq!(b.mock.logins.load(Ordering::SeqCst), 0, "aucun rejeu");
-        let cred = b.secrets.get_credential("fake-app", "alice").await.unwrap();
+        let cred = b
+            .secrets
+            .get_credential(&AccountKey::default_of("fake-app", "alice"))
+            .await
+            .unwrap();
         assert_eq!(
             cred.get("username").unwrap().expose_secret(),
             "amartin",
@@ -103,7 +132,7 @@ async fn existing_accounts_are_never_overwritten() {
         );
         assert_eq!(
             b.accounts
-                .get_account("fake-app", "alice")
+                .get_account(&AccountKey::default_of("fake-app", "alice"))
                 .await
                 .unwrap()
                 .unwrap()
@@ -190,7 +219,12 @@ async fn invalid_requests_are_refused() {
         0,
         "aucun rejeu pour une demande invalide"
     );
-    assert!(b.accounts.get_account("fake-app", "bob").await.unwrap().is_none());
+    assert!(b
+        .accounts
+        .get_account(&AccountKey::default_of("fake-app", "bob"))
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]

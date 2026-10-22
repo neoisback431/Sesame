@@ -13,7 +13,7 @@ use axum::http::{header, Request, StatusCode};
 use common::*;
 use sesame_core::audit::AuditAction;
 use sesame_core::crypto::hash_token;
-use sesame_core::ports::{AccountRegistry, AccountStatus, DiagnosticStore, SessionStore};
+use sesame_core::ports::{AccountKey, AccountRegistry, AccountStatus, DiagnosticStore, SessionStore};
 
 // ---------------------------------------------------------------------------
 
@@ -86,7 +86,7 @@ async fn replays_login_and_injects_session() {
     assert_eq!(actions, [AuditAction::SecretRead, AuditAction::LoginReplay]);
     let a = b
         .accounts
-        .get_account("fake-app", "alice")
+        .get_account(&AccountKey::default_of("fake-app", "alice"))
         .await
         .unwrap()
         .unwrap();
@@ -215,7 +215,7 @@ async fn rejected_login_marks_account_failed_and_blocks_retries() {
     );
     let a = b
         .accounts
-        .get_account("fake-app", "alice")
+        .get_account(&AccountKey::default_of("fake-app", "alice"))
         .await
         .unwrap()
         .unwrap();
@@ -241,7 +241,7 @@ async fn failed_replay_leaves_a_masked_diagnostic_when_enabled() {
     );
     let d = b
         .diagnostics
-        .get_diagnostic("fake-app", "alice")
+        .get_diagnostic(&AccountKey::default_of("fake-app", "alice"))
         .await
         .unwrap()
         .expect("diagnostic enregistré");
@@ -277,7 +277,7 @@ async fn failed_login_page_diagnostic_masks_cookie_values() {
     b.get("/").await;
     let diag = b
         .diagnostics
-        .get_diagnostic("fake-app", "alice")
+        .get_diagnostic(&AccountKey::default_of("fake-app", "alice"))
         .await
         .unwrap()
         .unwrap();
@@ -392,7 +392,10 @@ async fn handoff_mode_hands_the_cookie_to_the_browser() {
     assert!(location.ends_with("/dashboard"), "{location}");
     let appsess = set_cookie_value(&r, "APPSESS").expect("cookie applicatif remis");
     assert!(appsess.starts_with("sess-"));
-    assert_eq!(set_cookie_value(&r, "__sesame_handoff").as_deref(), Some("1"));
+    assert_eq!(
+        set_cookie_value(&r, "__sesame_handoff").as_deref(),
+        Some("default")
+    );
     assert!(b.actions().contains(&AuditAction::SessionHandoff));
 
     // Requête suivante (marqueur + cookie applicatif portés par le navigateur) : relais
@@ -475,7 +478,7 @@ async fn no_diagnostic_is_kept_by_default() {
     b.get("/").await;
     assert!(b
         .diagnostics
-        .get_diagnostic("fake-app", "alice")
+        .get_diagnostic(&AccountKey::default_of("fake-app", "alice"))
         .await
         .unwrap()
         .is_none());
@@ -603,7 +606,7 @@ async fn failures_are_signalled_to_administrators_once_per_window() {
     );
     let a = b
         .accounts
-        .get_account("fake-app", "alice")
+        .get_account(&AccountKey::default_of("fake-app", "alice"))
         .await
         .unwrap()
         .unwrap();

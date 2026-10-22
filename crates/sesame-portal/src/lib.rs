@@ -42,8 +42,8 @@ use sesame_core::descriptor::AppDescriptor;
 use sesame_core::html::error_page;
 use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{
-    AccessRequests, AccountRegistry, AuditSink, Notifier, PortalSession, SessionStore, UserDirectory,
-    UserProfile,
+    account_id_ok, AccessRequests, AccountKey, AccountRegistry, AccountStatus, AuditSink, Notifier,
+    PortalSession, SessionStore, UserDirectory, UserProfile,
 };
 use sesame_core::secret::ExposeSecret;
 use url::Url;
@@ -89,6 +89,7 @@ pub fn router(portal: Arc<Portal>) -> Router {
         .route("/auth/logged-out", get(logged_out))
         .route("/apps/{app_id}/disconnect", post(disconnect_app))
         .route("/apps/{app_id}/open", get(open_app))
+        .route("/apps/{app_id}/account", post(select_account))
         .route("/apps/{app_id}/request", get(access::form))
         .route(
             "/apps/{app_id}/request/credentials",
@@ -286,8 +287,15 @@ async fn home(State(p): State<AppState>, headers: HeaderMap, Query(q): Query<Hom
             Vec::new()
         }
     };
+    let selected = match p.accounts.selected_accounts(&session.user.user_key).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, correlation_id = %cid, "comptes choisis illisibles");
+            Vec::new()
+        }
+    };
     let descriptors = p.descriptors();
-    let mut tiles = catalog::tiles(&descriptors, &session.user, &accounts, &requests);
+    let mut tiles = catalog::tiles(&descriptors, &session.user, &accounts, &requests, &selected);
     match p.sessions.suspended_apps(&session.user.user_key).await {
         Ok(suspended) => catalog::mark_suspended(&mut tiles, &suspended),
         Err(e) => tracing::warn!(error = %e, correlation_id = %cid, "applis suspendues illisibles"),
@@ -417,6 +425,77 @@ async fn open_app(State(p): State<AppState>, Path(app_id): Path<String>, headers
         }
     }
     redirect(&app_url(&p, &app, &app.spec.public.start_path), &[])
+}
+
+#[derive(Deserialize)]
+struct AccountForm {
+    account: String,
+}
+
+/// Choix du compte à utiliser pour une appli, depuis le sélecteur de la tuile (ADR 0034).
+/// Le choix vaut pour toutes les sessions portail de l'utilisateur et d'une connexion à l'autre.
+/// Les sessions applicatives ouvertes avec l'ancien compte sont détruites (mode proxy) ; en mode
+/// handoff, le proxy refait la remise à la navigation suivante (marqueur d'un autre compte). Une
+/// suspension de la connexion automatique (ADR 0033) est levée : choisir un compte, c'est vouloir
+/// s'y connecter. Seul un compte actif ou en échec de l'utilisateur peut être choisi.
+async fn select_account(
+    State(p): State<AppState>,
+    Path(app_id): Path<String>,
+    headers: HeaderMap,
+    Form(form): Form<AccountForm>,
+) -> Response {
+    let cid = correlation_id(&headers);
+    let Some(session) = p.current_session(&headers).await else {
+        return p.start_login(p.public_url.to_string());
+    };
+    if let Err(resp) = accessible_app(&p, &session.user, &app_id, &cid) {
+        return resp;
+    }
+    let user_key = &session.user.user_key;
+    let key = AccountKey::new(&app_id, user_key, &form.account);
+    let selectable = account_id_ok(&form.account)
+        && matches!(
+            p.accounts.get_account(&key).await,
+            Ok(Some(a)) if matches!(a.status, AccountStatus::Active | AccountStatus::Failed)
+        );
+    if !selectable {
+        let event = AuditEvent::new(AuditAction::AccountSelected, AuditOutcome::Failure)
+            .actor(&session.user)
+            .app(&app_id)
+            .correlation(&cid)
+            .reason("account_not_selectable");
+        let _ = p.audit.record(event).await;
+        return p.error(
+            StatusCode::BAD_REQUEST,
+            "Compte indisponible",
+            "Ce compte n'est pas disponible pour vous sur cette application.",
+            &cid,
+        );
+    }
+    let event = AuditEvent::new(AuditAction::AccountSelected, AuditOutcome::Success)
+        .actor(&session.user)
+        .app(&app_id)
+        .account(&key.account_id)
+        .correlation(&cid);
+    // L'audit fait partie de l'opération : pas de changement de compte sans trace.
+    let done = async {
+        p.audit.record(event).await?;
+        p.accounts.select_account(&key).await?;
+        p.sessions.delete_user_app_sessions(user_key, &app_id).await?;
+        p.sessions.resume_app(user_key, &app_id).await.map(|_| ())
+    };
+    if let Err(e) = done.await {
+        tracing::error!(correlation_id = %cid, app_id = %app_id, error = %e, "changement de compte impossible");
+        return p.error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Service indisponible",
+            "Le changement de compte n'a pas pu être fait. Réessayez dans quelques instants.",
+            &cid,
+        );
+    }
+    let mut resp = redirect("/?request=account", &[]);
+    *resp.status_mut() = StatusCode::SEE_OTHER;
+    resp
 }
 
 #[derive(Deserialize)]

@@ -17,6 +17,8 @@ pub enum AuditAction {
     AppLogout,
     /// Connexion automatique rétablie par un clic sur la tuile après une déconnexion (ADR 0033).
     AppResumed,
+    /// Compte applicatif choisi par l'utilisateur depuis « Mes applications » (ADR 0034).
+    AccountSelected,
     AccountStatusChanged,
     /// Demande d'accès déposée depuis « Mes applications » (ADR 0029).
     AccessRequested,
@@ -47,6 +49,8 @@ pub struct AuditEvent {
     /// `issuer` + `subject` de l'utilisateur, si connu.
     pub actor: Option<String>,
     pub app_id: Option<String>,
+    /// Compte applicatif concerné (ADR 0034), parmi ceux de l'utilisateur sur l'appli.
+    pub account_id: Option<String>,
     /// Compte visé quand il diffère de l'acteur (actions d'administration).
     pub target_user: Option<String>,
     /// Identifiant de corrélation (trace / requête).
@@ -62,6 +66,7 @@ impl AuditEvent {
             outcome,
             actor: None,
             app_id: None,
+            account_id: None,
             target_user: None,
             correlation_id: None,
             reason: None,
@@ -75,6 +80,11 @@ impl AuditEvent {
 
     pub fn app(mut self, app_id: &str) -> Self {
         self.app_id = Some(app_id.to_owned());
+        self
+    }
+
+    pub fn account(mut self, account_id: &str) -> Self {
+        self.account_id = Some(account_id.to_owned());
         self
     }
 
