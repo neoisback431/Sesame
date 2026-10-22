@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- 🐛 **« Déconnecter » ne fonctionnait pas, et impossible de changer de compte dans une appli** (ADR 0033) : le bouton n'effaçait que la session applicative stockée de la session portail courante (rien en mode `handoff`, où le navigateur porte la session) et le rejeu suivant la rétablissait aussitôt, y compris dans une fenêtre de navigation privée. « Déconnecter » **suspend** désormais la connexion automatique à cette appli pour l'utilisateur, dans toutes ses fenêtres : sessions applicatives détruites, cookies et stockage local de l'appli effacés dans le navigateur (chemin réservé `/.sesame/disconnect`, hôte de l'appli), aucun rejeu ni lecture du coffre ; l'appli affiche son propre formulaire, où l'on peut se connecter avec un autre compte. Un clic sur la tuile (qui passe par `/apps/<id>/open`) rétablit la connexion automatique. Un compte désactivé reste refusé. ⚠️ Migration `0009` (table `app_suspensions`), appliquée automatiquement au démarrage du portail ; pendant la suspension, les cookies de l'appli atteignent le navigateur (connexion manuelle).
+
 ## [0.1.7] - 2026-10-20
 
 - 🌐 **Adresse publique annoncée à l'appli** (ADR 0032) : le proxy pose `X-Forwarded-Host`, `X-Forwarded-Proto` et `X-Forwarded-Port` sur chaque requête relayée et sur le rejeu du login, avec les valeurs du descripteur ; ceux fournis par le client ou un frontal (et `Forwarded`) sont remplacés, `X-Forwarded-For` est conservé. Utile derrière l'ALB AWS, qui ne pose pas `X-Forwarded-Host`, et pour les applis qui génèrent leurs URLs d'après ces en-têtes (n8n avec `N8N_PROXY_HOPS=1`). Correctif du proxy.

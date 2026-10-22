@@ -88,6 +88,17 @@ pub trait SessionStore: Send + Sync {
     ) -> PortResult<()>;
     async fn delete_app_session(&self, portal_session_id: &str, app_id: &str) -> PortResult<()>;
 
+    /// Suspend la connexion automatique de l'utilisateur à l'appli (ADR 0033) et détruit ses
+    /// sessions applicatives de **toutes** ses sessions portail (autre fenêtre, navigation
+    /// privée). Tant que la suspension dure, le proxy ne rejoue pas le login : l'appli est
+    /// atteinte telle quelle, l'utilisateur s'y connecte à la main (autre compte possible).
+    async fn suspend_app(&self, user_key: &str, app_id: &str) -> PortResult<()>;
+    /// Lève la suspension ; `true` si elle existait.
+    async fn resume_app(&self, user_key: &str, app_id: &str) -> PortResult<bool>;
+    async fn is_app_suspended(&self, user_key: &str, app_id: &str) -> PortResult<bool>;
+    /// Applis dont la connexion automatique est suspendue pour cet utilisateur.
+    async fn suspended_apps(&self, user_key: &str) -> PortResult<Vec<String>>;
+
     /// Purge les sessions expirées ; renvoie le nombre de sessions supprimées.
     async fn purge_expired(&self, now: SystemTime) -> PortResult<u64>;
 }

@@ -78,7 +78,7 @@ def test_alice_reaches_the_app_through_her_portal(browser: Browser):
     page = login(browser, "alice")
     expect(page.locator("h1")).to_have_text("Mes applications")
     tile = page.get_by_role("link", name=re.compile("Appli factice"))
-    expect(tile).to_have_attribute("href", APP)
+    expect(tile).to_have_attribute("href", "/apps/fake-app/open")
 
     # La tuile ouvre un nouvel onglet (target=_blank) : le portail reste affiché à côté.
     app = open_tile(page, "Appli factice")
@@ -97,21 +97,40 @@ def test_alice_reaches_the_app_through_her_portal(browser: Browser):
     page.context.close()
 
 
-def test_disconnect_button_removes_only_that_apps_session(browser: Browser):
+def test_disconnect_suspends_the_automatic_login_until_the_tile_is_clicked(browser: Browser):
     page = login(browser, "alice", start=APP)
     expect(page.locator("h1")).to_have_text("Bonjour amartin")
     count = (
         "SELECT count(*) FROM app_sessions s JOIN portal_sessions p ON p.id_hash = s.portal_session "
         "WHERE p.user_key = 'alice' AND s.app_id = 'fake-app'"
     )
+    suspended = "SELECT count(*) FROM app_suspensions WHERE user_key = 'alice' AND app_id = 'fake-app'"
     assert int(sql(count)) == 1
     page.goto(PORTAL)
     page.get_by_role("button", name="Déconnecter").click()
     expect(page.locator("h1")).to_have_text("Mes applications")
     assert int(sql(count)) == 0
-    # La session portail, elle, tient toujours : un nouvel onglet rejoue sans SSO.
+    assert int(sql(suspended)) == 1
+    expect(page.get_by_text("cliquez pour vous reconnecter")).to_be_visible()
+    expect(page.get_by_role("button", name="Déconnecter")).to_have_count(0)
+
+    # Suspendu : un accès direct (autre fenêtre, navigation privée…) montre le formulaire de
+    # l'appli, sans rejeu ; on peut s'y connecter à la main avec un autre compte.
+    private = browser.new_context(ignore_https_errors=True).new_page()
+    private.goto(APP)
+    private.fill("#username", "alice")
+    private.fill("#password", "alice")
+    private.click("#kc-login")
+    private.wait_for_load_state()
+    expect(private.locator("h1")).to_have_text("Connexion")
+    assert int(sql(count)) == 0, "aucun rejeu pendant la suspension"
+    private.context.close()
+
+    # Un clic sur la tuile rétablit la connexion automatique.
     app = open_tile(page, "Appli factice")
     expect(app.locator("h1")).to_have_text("Bonjour amartin")
+    assert int(sql(suspended)) == 0
+    assert int(sql(count)) == 1
     page.context.close()
 
 
@@ -254,7 +273,7 @@ def test_app_created_in_admin_is_served_without_restart(browser: Browser):
             break
         alice.wait_for_timeout(1000)
         alice.reload()
-    expect(tile).to_have_attribute("href", APP_BIS)
+    expect(tile).to_have_attribute("href", "/apps/fake-app-bis/open")
     app_bis = open_tile(alice, "Appli factice bis")
     expect(app_bis.locator("h1")).to_have_text("Bonjour amartin")
     assert "FAKEAPPSESSID" not in browser_cookie_names(alice)

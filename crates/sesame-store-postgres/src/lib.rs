@@ -279,6 +279,58 @@ impl SessionStore for PgStore {
         Ok(())
     }
 
+    async fn suspend_app(&self, user_key: &str, app_id: &str) -> PortResult<()> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        sqlx::query(
+            "INSERT INTO app_suspensions (app_id, user_key) VALUES ($1, $2)
+             ON CONFLICT (app_id, user_key) DO UPDATE SET suspended_at = now()",
+        )
+        .bind(app_id)
+        .bind(user_key)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        sqlx::query(
+            "DELETE FROM app_sessions WHERE app_id = $1
+             AND portal_session IN (SELECT id_hash FROM portal_sessions WHERE user_key = $2)",
+        )
+        .bind(app_id)
+        .bind(user_key)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)
+    }
+
+    async fn resume_app(&self, user_key: &str, app_id: &str) -> PortResult<bool> {
+        let done = sqlx::query("DELETE FROM app_suspensions WHERE app_id = $1 AND user_key = $2")
+            .bind(app_id)
+            .bind(user_key)
+            .execute(&self.pool)
+            .await
+            .map_err(db_err)?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    async fn is_app_suspended(&self, user_key: &str, app_id: &str) -> PortResult<bool> {
+        sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM app_suspensions WHERE app_id = $1 AND user_key = $2)",
+        )
+        .bind(app_id)
+        .bind(user_key)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_err)
+    }
+
+    async fn suspended_apps(&self, user_key: &str) -> PortResult<Vec<String>> {
+        sqlx::query_scalar("SELECT app_id FROM app_suspensions WHERE user_key = $1 ORDER BY app_id")
+            .bind(user_key)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_err)
+    }
+
     async fn purge_expired(&self, now: SystemTime) -> PortResult<u64> {
         let apps = sqlx::query("DELETE FROM app_sessions WHERE expires_at <= $1")
             .bind(ts(now))

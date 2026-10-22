@@ -115,6 +115,38 @@ pub async fn session_store(store: &dyn SessionStore, prefix: &str) {
     store.delete_app_session(&id, "app1").await.unwrap();
     assert!(store.get_app_session(&id, "app1").await.unwrap().is_none());
 
+    // Suspension (ADR 0033) : par utilisateur et par appli, détruit les sessions applicatives de
+    // toutes ses sessions portail, épargne les autres applis et les autres utilisateurs.
+    let user = "alice";
+    // Applis propres à ce test : la suspension vise tout l'utilisateur, sur un backend partagé.
+    let (sapp, sapp2) = (format!("{prefix}-susp"), format!("{prefix}-susp2"));
+    assert!(!store.is_app_suspended(user, &sapp).await.unwrap());
+    store
+        .put_app_session(app_session(&id, &sapp, "v1", hour))
+        .await
+        .unwrap();
+    store
+        .put_app_session(app_session(&other, &sapp, "other", hour))
+        .await
+        .unwrap();
+    store
+        .put_app_session(app_session(&id, &sapp2, "keep", hour))
+        .await
+        .unwrap();
+    store.suspend_app(user, &sapp).await.unwrap();
+    assert!(store.is_app_suspended(user, &sapp).await.unwrap());
+    assert!(!store.is_app_suspended(user, &sapp2).await.unwrap());
+    assert!(!store.is_app_suspended("bob", &sapp).await.unwrap());
+    assert!(store.get_app_session(&id, &sapp).await.unwrap().is_none());
+    assert!(store.get_app_session(&other, &sapp).await.unwrap().is_none());
+    assert!(store.get_app_session(&id, &sapp2).await.unwrap().is_some());
+    assert!(store.suspended_apps(user).await.unwrap().contains(&sapp));
+    store.suspend_app(user, &sapp).await.unwrap(); // idempotent
+    assert!(store.resume_app(user, &sapp).await.unwrap());
+    assert!(!store.resume_app(user, &sapp).await.unwrap(), "déjà levée");
+    assert!(!store.is_app_suspended(user, &sapp).await.unwrap());
+    store.delete_app_session(&id, &sapp2).await.unwrap();
+
     // Déconnexion du portail : sessions applicatives détruites, autres sessions intactes.
     store
         .put_app_session(app_session(&id, "app1", "v3", hour))

@@ -15,6 +15,8 @@ pub enum AuditAction {
     SessionHandoff,
     AppSessionExpired,
     AppLogout,
+    /// Connexion automatique rétablie par un clic sur la tuile après une déconnexion (ADR 0033).
+    AppResumed,
     AccountStatusChanged,
     /// Demande d'accès déposée depuis « Mes applications » (ADR 0029).
     AccessRequested,
