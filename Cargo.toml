@@ -55,3 +55,6 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 dbg_macro = "deny"
 print_stdout = "deny"
+# Les handlers axum renvoient `Result<_, Response>` (réponse d'erreur prête à servir) : idiome
+# assumé, signalé par les versions récentes de clippy.
+result_large_err = "allow"
