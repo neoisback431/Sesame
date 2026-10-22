@@ -134,6 +134,49 @@ def test_disconnect_suspends_the_automatic_login_until_the_tile_is_clicked(brows
     page.context.close()
 
 
+def test_user_switches_between_several_accounts_from_the_tile(browser: Browser):
+    """Comptes multiples (ADR 0034) : l'admin ajoute à alice un compte « Admin » (compte
+    cdupont de l'appli factice) ; alice le choisit sur sa tuile, puis revient au compte par défaut."""
+    admin = login(browser, "admin", start=f"{ADMIN}login")
+    admin.get_by_role("link", name="Appli factice").click()
+    admin.fill("#user_key", "alice")
+    admin.fill("#label", "Admin")
+    admin.fill("#cred_username", "cdupont")
+    admin.fill("#cred_password", CAROL_APP_PASSWORD)
+    admin.get_by_role("button", name="Enregistrer").click()
+    expect(admin.get_by_role("status")).to_contain_text("Compte « Admin » de « alice » enregistré")
+    assert CAROL_APP_PASSWORD not in admin.content()
+
+    page = login(browser, "alice")
+    picker = page.locator("form.accounts select")
+    expect(picker).to_have_value("default")
+    app = open_tile(page, "Appli factice")
+    expect(app.locator("h1")).to_have_text("Bonjour amartin")
+
+    picker.select_option(label="Admin")
+    page.get_by_role("button", name="Utiliser").click()
+    expect(page.get_by_role("status")).to_contain_text("Compte changé")
+    assert sql("SELECT account_id FROM app_account_selections WHERE user_key = 'alice'") == "admin"
+    # Session ouverte avec l'ancien compte détruite : la navigation suivante rejoue avec le nouveau.
+    app.goto(APP)
+    expect(app.locator("h1")).to_have_text("Bonjour cdupont")
+    assert CAROL_APP_PASSWORD not in app.content()
+
+    page.locator("form.accounts select").select_option("default")
+    page.get_by_role("button", name="Utiliser").click()
+    app.goto(APP)
+    expect(app.locator("h1")).to_have_text("Bonjour amartin")
+
+    admin.reload()
+    admin.once("dialog", lambda d: d.accept())
+    admin.locator("tr", has_text=re.compile(r"\bAdmin\b")).get_by_role("button", name="Supprimer").click()
+    expect(admin.get_by_role("status")).to_contain_text("supprimé")
+    page.reload()
+    expect(page.locator("form.accounts")).to_have_count(0)
+    page.context.close()
+    admin.context.close()
+
+
 def test_expired_app_session_is_replayed_transparently(browser: Browser):
     page = login(browser, "alice", start=APP)
     expect(page.locator("h1")).to_have_text("Bonjour amartin")

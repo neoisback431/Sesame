@@ -83,7 +83,7 @@ Single Logout SAML hors périmètre initial : la déconnexion reste locale au po
 | `SESAME_SECRETS_ENCRYPTION_KEY` 🔒 | requis si `postgres` | Clé (32 octets, base64) chiffrant les secrets dans `app_secrets`. **Identique** à celle de l'admin (`SESAME_SECRETS_ENCRYPTION_KEY`), **distincte** de `SESAME_SESSION_ENCRYPTION_KEY` |
 | `SESAME_OPENBAO_ADDR` | requis si `openbao`/`vault` | URL du coffre |
 | `SESAME_OPENBAO_MOUNT` | `secret` | Point de montage KV v2 |
-| `SESAME_OPENBAO_PATH_PREFIX` | `sesame/apps` | Préfixe : `<mount>/<prefix>/<app_id>/users/<user_key>` |
+| `SESAME_OPENBAO_PATH_PREFIX` | `sesame/apps` | Préfixe : `<mount>/<prefix>/<app_id>/users/<user_key>` (compte `default`), `…/users/<user_key>/accounts/<account_id>` pour les autres comptes (ADR 0034) |
 | `SESAME_OPENBAO_ROLE_ID` | requis si `openbao`/`vault` | AppRole du proxy |
 | `SESAME_OPENBAO_SECRET_ID` 🔒 | requis si `openbao`/`vault` | Secret de l'AppRole |
 | `SESAME_OPENBAO_NAMESPACE` | aucun | Espace de noms, le cas échéant |

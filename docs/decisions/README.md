@@ -37,3 +37,4 @@ Une fiche par décision structurante : contexte, décision, conséquences. Une d
 | [0031](0031-noms-des-utilisateurs.md) | Noms des utilisateurs dans l'administration | 2026-10-01 |
 | [0032](0032-adresse-publique-x-forwarded.md) | Adresse publique annoncée à l'appli (`X-Forwarded-*`) | 2026-10-20 |
 | [0033](0033-deconnexion-suspend-la-connexion-automatique.md) | « Déconnecter » suspend la connexion automatique à l'appli | 2026-10-12 |
+| [0034](0034-plusieurs-comptes-par-application.md) | Plusieurs comptes par utilisateur et par application | 2026-10-22 |
