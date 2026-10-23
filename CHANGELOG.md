@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+## [0.2.1] - 2026-10-23
+
 - 🐛 **Flux longs coupés par le proxy** (SSE, ping régulier, téléchargements) : `spec.upstream.timeout` était une durée totale par requête relayée, si bien qu'un flux vivant plus long que le délai était interrompu en cours de corps. C'est désormais un délai d'**inactivité** (connexion, attente des en-têtes, entre deux morceaux), comme l'`idle_timeout` d'un ALB ; le rejeu du login reste borné en durée totale. Une appli qui ne pingue que toutes les N secondes demande un `timeout` supérieur à N. Correctif du proxy.
 
 ## [0.2.0] - 2026-10-22
