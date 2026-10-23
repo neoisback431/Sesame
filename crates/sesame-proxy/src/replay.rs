@@ -375,6 +375,7 @@ impl Replayer {
             return Ok(Outcome::Failure("invalid_form_url"));
         };
         let request = |method: Method, url: Url, jar: &Jar| {
+            // Durée totale bornée pour le rejeu (le client ne borne que l'inactivité).
             let mut req = http.request(method, url).timeout(spec.upstream.timeout);
             if let Some(h) = &spec.upstream.host_header {
                 req = req.header(HOST, h);

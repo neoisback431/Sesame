@@ -343,6 +343,31 @@ async fn login_without_form_posts_directly_to_the_action() {
 }
 
 /// Banc avec l'appli simulée en mode handoff (cookie APPSESS remis au navigateur).
+/// `spec.upstream.timeout` borne l'inactivité, pas la durée totale : un flux plus long que le
+/// délai mais qui émet régulièrement passe en entier ; une appli muette au-delà est coupée.
+#[tokio::test]
+async fn upstream_timeout_is_an_inactivity_timeout() {
+    let b = bench(&["fake-app-users"], APP_PASSWORD, true).await;
+    let mut d = descriptor(&b.internal);
+    d.spec.upstream.timeout = std::time::Duration::from_secs(1);
+    let (apps, rejected) = sesame_proxy::build_apps(vec![d], None, "https");
+    assert!(rejected.is_empty(), "{rejected:?}");
+    b.engine.set_apps(apps);
+
+    let r = b.get("/stream").await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(
+        r.body.lines().count(),
+        5,
+        "flux complet malgré 1,5 s > délai : {}",
+        r.body
+    );
+
+    let r = b.get("/stall").await;
+    assert_eq!(r.status, StatusCode::BAD_GATEWAY);
+    assert!(!r.body.contains("trop tard"));
+}
+
 async fn handoff_bench() -> Bench {
     use sesame_core::descriptor::{Handoff, SessionMode};
 

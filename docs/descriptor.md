@@ -26,7 +26,7 @@ Exemple complet : [`descriptors/fake-app.yaml`](../descriptors/fake-app.yaml). G
 ## Amont (`spec.upstream`)
 
 - `base_url` : URL interne de l'appli, telle que le proxy la joint.
-- `timeout` : délai maximal d'une requête vers l'appli (défaut `30s`).
+- `timeout` : délai d'**inactivité** vers l'appli (défaut `30s`) : connexion, attente des en-têtes, puis entre deux morceaux du corps. Ce n'est pas une durée totale : un flux long mais vivant (SSE, ping régulier, téléchargement) passe tant que l'appli émet ; une appli muette plus longtemps est coupée (`502`). Pour un flux qui ne pingue que toutes les N secondes, prendre une valeur supérieure à N (ex. `90s` pour un ping à 60 s). Le rejeu du login, lui, reste borné en durée totale par cette même valeur.
 - `host_header` : en-tête `Host` envoyé à l'appli, si différent de l'hôte de `base_url`. À éviter pour
   annoncer l'adresse publique : beaucoup d'applis ou de frontaux répondent `400` à un hôte inconnu.
   Sesame envoie déjà `X-Forwarded-Host` / `-Proto` / `-Port` avec l'adresse publique (ADR 0032).
