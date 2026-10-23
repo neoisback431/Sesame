@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- 🐛 **Flux longs coupés par le proxy** (SSE, ping régulier, téléchargements) : `spec.upstream.timeout` était une durée totale par requête relayée, si bien qu'un flux vivant plus long que le délai était interrompu en cours de corps. C'est désormais un délai d'**inactivité** (connexion, attente des en-têtes, entre deux morceaux), comme l'`idle_timeout` d'un ALB ; le rejeu du login reste borné en durée totale. Une appli qui ne pingue que toutes les N secondes demande un `timeout` supérieur à N. Correctif du proxy.
+
 ## [0.2.0] - 2026-10-22
 
 - 👥 **Plusieurs comptes par utilisateur et par application** (ADR 0034) : un administrateur (par exemple) peut avoir sur une même appli un compte normal et un compte d'administration. Dans l'administration, un **libellé** facultatif au provisionnement crée un compte supplémentaire (vide : compte principal) ; chaque compte a ses actions (désactiver, définir par défaut, supprimer, diagnostic). Dans « Mes applications », la tuile porte un **sélecteur de compte** : le choix vaut pour toutes les fenêtres de l'utilisateur, la session ouverte avec l'ancien compte est fermée et la connexion suivante utilise le nouveau. Un seul compte à la fois par appli. Les demandes d'accès portent toujours sur le compte principal. ⚠️ Migration `0010` (appliquée automatiquement au démarrage du portail et du proxy) : comptes et secrets existants deviennent le compte principal, sans rechiffrement ni changement de chemin OpenBao ; l'audit gagne un champ `account_id`.

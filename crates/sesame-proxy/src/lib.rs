@@ -100,12 +100,18 @@ impl App {
 }
 
 /// Client HTTP d'une appli : pas de redirection suivie, pas de proxy sortant.
+///
+/// `spec.upstream.timeout` borne l'**inactivité** (connexion, puis chaque lecture : attente
+/// des en-têtes et de chaque morceau du corps), jamais la durée totale : un flux long mais
+/// vivant (SSE, ping régulier, téléchargement) n'est pas coupé tant que l'appli émet. Le rejeu
+/// du login garde une durée totale bornée (`replay.rs`).
 pub fn build_client(d: &AppDescriptor, extra_ca: Option<&[u8]>) -> Result<reqwest::Client, String> {
     let tls = &d.spec.upstream.tls;
     let mut b = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
-        .timeout(d.spec.upstream.timeout)
+        .connect_timeout(d.spec.upstream.timeout)
+        .read_timeout(d.spec.upstream.timeout)
         .danger_accept_invalid_certs(!tls.verify);
     let mut pems = Vec::new();
     if let Some(ca) = extra_ca {

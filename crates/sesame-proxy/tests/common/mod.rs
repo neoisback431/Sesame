@@ -227,6 +227,28 @@ pub async fn csrf_endpoint(State(m): State<Mock>, headers: HeaderMap) -> Respons
     }
 }
 
+/// Flux long mais vivant : un morceau toutes les 300 ms pendant 1,5 s (type SSE avec ping).
+pub async fn stream() -> Response {
+    let chunks = futures_util::stream::unfold(0u32, |i| async move {
+        if i == 5 {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        Some((Ok::<_, std::convert::Infallible>(format!("ping {i}\n")), i + 1))
+    });
+    (
+        [(header::CONTENT_TYPE, "text/event-stream")],
+        Body::from_stream(chunks),
+    )
+        .into_response()
+}
+
+/// Appli qui ne répond plus : aucun octet pendant 1,5 s.
+pub async fn stall() -> Response {
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    "trop tard".into_response()
+}
+
 pub async fn spawn_mock() -> (Mock, String) {
     let mock = Mock::default();
     let app = Router::new()
@@ -240,6 +262,8 @@ pub async fn spawn_mock() -> (Mock, String) {
         .route("/signout", get(signout))
         .route("/redirect-abs", get(redirect_abs))
         .route("/api/csrf-token", get(csrf_endpoint))
+        .route("/stream", get(stream))
+        .route("/stall", get(stall))
         .with_state(mock.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
