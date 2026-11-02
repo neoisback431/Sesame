@@ -677,6 +677,36 @@ def create_app(
         people = await people_for(u for u, _ in rows)
         return render(request, "users.html", admin=admin, rows=rows, q=q.strip(), people=people)
 
+    @app.get("/users/import")
+    async def users_import_form(request: Request, admin: Admin) -> Response:
+        return render(request, "users_import.html", admin=admin, claim=user_key_claim, result=None, text="")
+
+    @app.post("/users/import")
+    async def users_import(request: Request, admin: Admin) -> Response:
+        cid = correlation_id(request)
+        text = ""
+        try:
+            await check_csrf(request)
+            text = str((await request.form()).get("users", ""))
+            result = await service.import_users(admin, text, cid)
+            return render(
+                request, "users_import.html", admin=admin, claim=user_key_claim, result=result, text=""
+            )
+        except InvalidInput as e:
+            return render(
+                request,
+                "users_import.html",
+                400,
+                admin=admin,
+                claim=user_key_claim,
+                result=None,
+                text=text,
+                problem=str(e),
+            )
+        except Unavailable:
+            log.error("brique externe indisponible", extra={"correlation_id": cid})
+            return error(request, 503, "Service indisponible", "La base de données est injoignable.")
+
     @app.get("/users/{user_key}")
     async def user_detail(request: Request, user_key: str, admin: Admin) -> Response:
         try:

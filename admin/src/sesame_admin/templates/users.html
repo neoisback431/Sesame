@@ -8,6 +8,7 @@
   <label for="q">Rechercher un utilisateur (nom, e-mail ou clé Sesame)</label>
   <input type="text" id="q" name="q" value="{{ q }}" autofocus>
   <button type="submit">Rechercher</button>
+  <a class="button" href="/users/import">Importer des utilisateurs</a>
 </form>
 <table style="margin-top:16px">
   <thead><tr><th>Utilisateur</th><th>Comptes</th><th></th></tr></thead>
@@ -15,13 +16,13 @@
   {% for user_key, counts in rows %}
     <tr>
       <td><a href="/users/{{ user_key }}">{{ who(user_key, people) }}</a></td>
-      <td>{{ counts.get('active', 0) }} actif(s){% if counts.get('failed') %}, <strong>{{ counts['failed'] }} en échec</strong>{% endif %}{% if counts.get('disabled') %}, {{ counts['disabled'] }} désactivé(s){% endif %}{% if counts.get('pending') %}, <strong>{{ counts['pending'] }} en attente</strong>{% endif %}</td>
+      <td>{% if not counts %}<span class="muted">aucun compte</span>{% else %}{{ counts.get('active', 0) }} actif(s){% endif %}{% if counts.get('failed') %}, <strong>{{ counts['failed'] }} en échec</strong>{% endif %}{% if counts.get('disabled') %}, {{ counts['disabled'] }} désactivé(s){% endif %}{% if counts.get('pending') %}, <strong>{{ counts['pending'] }} en attente</strong>{% endif %}</td>
       <td><a class="button" href="/users/{{ user_key }}">Gérer</a></td>
     </tr>
   {% else %}
-    <tr><td colspan="3">{% if q %}Aucun utilisateur ne correspond.{% else %}Aucun compte enregistré.{% endif %}</td></tr>
+    <tr><td colspan="3">{% if q %}Aucun utilisateur ne correspond.{% else %}Aucun utilisateur connu : importez une liste ou attendez une première connexion.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>
-<p class="muted">Seuls les utilisateurs ayant au moins un compte applicatif apparaissent. Pour en créer un, passez par la page de l'application.</p>
+<p class="muted">Apparaissent les personnes ayant un compte applicatif, celles déjà connectées à Sesame et celles importées. Pour créer un compte, passez par la page de l'application.</p>
 {% endblock %}

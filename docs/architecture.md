@@ -286,7 +286,7 @@ Schéma : [`crates/sesame-store-postgres/migrations/`](../crates/sesame-store-po
 | `portal_sessions` | Empreinte SHA-256 du jeton du cookie (jamais le jeton), identité, groupes, échéance |
 | `app_sessions` | Jar de cookies applicatifs **chiffré** (AES-256-GCM, lié par AAD au couple session / appli), dates, échéance ; `ON DELETE CASCADE` depuis la session portail |
 | `app_accounts` | Registre des comptes (voir plus haut), sans secret |
-| `users` | Nom et e-mail déclarés par le fournisseur d'identité, écrits par le portail à chaque connexion et lus par l'administration pour afficher « Nom Prénom » à la place de la clé utilisateur (ADR 0031) ; aucune autorisation n'en dépend |
+| `users` | Nom et e-mail déclarés par le fournisseur d'identité, écrits par le portail à chaque connexion (ou saisis par l'administrateur à l'import, `last_login_at` NULL tant que la personne ne s'est pas connectée) et lus par l'administration pour afficher « Nom Prénom » à la place de la clé utilisateur (ADR 0031, 0032) ; aucune autorisation n'en dépend |
 | `app_descriptors` / `app_descriptor_history` | Descripteurs créés dans l'administration et leur historique (voir « Catalogue des applis ») |
 | `replay_diagnostics` | Dernier rejeu en échec par compte, valeurs sensibles masquées (voir « Diagnostic des rejeux ») ; `ON DELETE CASCADE` depuis le compte |
 
@@ -344,6 +344,7 @@ Chaque lecture de secret et chaque rejeu produit un événement, succès ou éch
 | `account_status_changed` | Proxy, UI d'admin | Changement d'état d'un compte du registre (`active`, `failed`, `disabled`) |
 | `admin_login` | UI d'admin | Connexion d'un administrateur |
 | `credential_written` / `credential_deleted` | UI d'admin | Écriture ou suppression d'identifiants dans le coffre |
+| `users_imported` | UI d'admin | Import d'une liste d'utilisateurs (`reason` : `created=<n>;updated=<n>;rejected=<n>`, ou la cause en échec) |
 | `descriptor_created` / `descriptor_updated` / `descriptor_deleted` | UI d'admin | Création, modification ou suppression d'un descripteur en base (`reason` : `revision:<n>` en succès, cause en échec) |
 | `descriptor_recorded` | UI d'admin | Analyse d'une page de login par le recorder (hôte cible seul, « compte de test » le cas échéant) |
 | `secret_read` | Proxy | Lecture du coffre (succès ou échec) |
@@ -398,7 +399,8 @@ Application Python (FastAPI, pages rendues côté serveur) sur son propre nom d'
 | Enregistrer un compte | Identifiants écrits dans le coffre, **puis** compte `active` dans le registre. Réenregistrer remplace les identifiants et réactive un compte `failed`. La clé utilisateur se choisit dans une liste des utilisateurs connus (déjà connectés au portail ou titulaires d'un compte) pour éviter une clé qui ne correspond à personne |
 | Désactiver / réactiver | Change l'état dans le registre (`failed` reste réservé au proxy). La désactivation **révoque les sessions applicatives ouvertes** de l'utilisateur sur l'appli : l'accès est coupé immédiatement |
 | Supprimer | Supprime les identifiants du coffre (toutes versions) puis l'entrée du registre, et révoque les sessions ouvertes |
-| Utilisateurs | Recherche d'un utilisateur et liste de tous ses comptes, toutes applis confondues, avec les mêmes actions |
+| Utilisateurs | Recherche d'un utilisateur (nom, e-mail, clé) et liste de tous ses comptes, toutes applis confondues, avec les mêmes actions. Liste aussi les personnes sans compte (connectées ou **importées**, ADR 0032) |
+| Importer des utilisateurs | Colle une liste `clé[,nom[,e-mail]]` (export CSV de l'annuaire) pour connaître des personnes **avant leur première connexion** et leur enregistrer un compte sans action de leur part. Crée uniquement des profils, jamais de compte ni de secret ; audit `users_imported` (ADR 0032) |
 | Tout désactiver | Départ ou suspension : désactive tous les comptes de l'utilisateur, y compris ceux d'applis dont le descripteur a été retiré, et révoque leurs sessions |
 | Nouvelle application | « Analyser une page de login » (recorder, compte de test et mode handoff facultatifs) ou formulaire guidé (dont le mode de session) qui produit un premier jet, puis éditeur YAML : « Vérifier » (schéma et contrôles du proxy, sans enregistrer) et « Créer ». L'appli est en base ; portail et proxy la chargent sans redémarrage |
 | Modifier le descripteur | Éditeur YAML, applis en base uniquement. Refusé si la révision a changé depuis l'ouverture (deux administrateurs ne s'écrasent pas). L'`id` ne change pas |

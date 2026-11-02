@@ -17,7 +17,7 @@ from sesame_admin.memory import (
     MemoryDescriptorStore,
     MemoryNotificationStore,
 )
-from sesame_admin.ports import Conflict, NotFound, NotificationSettings, UserProfile
+from sesame_admin.ports import Conflict, NotFound, NotificationSettings, UserImport, UserProfile
 from sesame_admin.store_postgres import (
     PostgresAccessRequestStore,
     PostgresAccountStore,
@@ -111,6 +111,32 @@ async def test_user_profiles_and_name_search_contract(store):
         assert [u for u, _ in await store.search_users(query, 10)] == [named], query
     assert [u for u, _ in await store.search_users(bare, 10)] == [bare]
     assert await store.search_users(f"introuvable-{tag}", 10) == []
+
+
+async def test_import_user_profiles_contract(store):
+    tag = uuid.uuid4().hex[:8]
+    a, b = f"imp-a-{tag}", f"imp-b-{tag}"
+    assert await store.import_user_profiles([]) == (0, 0)
+    first = [UserImport(a, f"Iris Quidam{tag}", f"iris.{tag}@example.org"), UserImport(b, None, None)]
+    assert await store.import_user_profiles(first) == (2, 0)
+    assert await store.user_profiles([a, b]) == {
+        a: UserProfile(f"Iris Quidam{tag}", f"iris.{tag}@example.org"),
+        b: UserProfile(None, None),
+    }
+    # Réimport : mises à jour, un champ absent ne remplace jamais une valeur connue.
+    again = [UserImport(a, None, f"nouvelle.{tag}@example.org"), UserImport(b, f"Bob{tag}", None)]
+    assert await store.import_user_profiles(again) == (0, 2)
+    assert await store.user_profiles([a, b]) == {
+        a: UserProfile(f"Iris Quidam{tag}", f"nouvelle.{tag}@example.org"),
+        b: UserProfile(f"Bob{tag}", None),
+    }
+    # Connus, suggérés et trouvables par nom, même sans aucun compte applicatif.
+    assert {a, b} <= set(await store.known_users(10000))
+    assert await store.search_users(f"quidam{tag}", 10) == [(a, {})]
+    assert [u for u, _ in await store.search_users(f"nouvelle.{tag}@", 10)] == [a]
+    # Dès qu'un compte existe, il est compté.
+    await store.upsert_active(f"app-{tag}", a)
+    assert await store.search_users(a, 10) == [(a, {"active": 1})]
 
 
 async def seed_app_session(store, app_id: str, user_key: str) -> None:

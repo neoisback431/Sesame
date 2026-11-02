@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import copy
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +21,7 @@ from .ports import (
     NotificationSettings,
     Status,
     StoredDescriptor,
+    UserImport,
     UserProfile,
 )
 
@@ -84,20 +85,34 @@ class MemoryAccountStore:
 
     async def search_users(self, query: str, limit: int) -> list[tuple[str, dict[str, int]]]:
         counts: dict[str, Counter[str]] = {}
-        for a in self.accounts.values():
-            p = self.profiles.get(a.user_key)
-            haystack = " ".join(
-                [a.user_key, *(x for x in (p.display_name, p.email) if x)] if p else [a.user_key]
-            )
+        for key in {a.user_key for a in self.accounts.values()} | set(self.profiles):
+            p = self.profiles.get(key)
+            haystack = " ".join([key, *(x for x in (p.display_name, p.email) if x)] if p else [key])
             if query.lower() in haystack.lower():
-                counts.setdefault(a.user_key, Counter())[a.status] += 1
+                counts[key] = Counter()
+        for a in self.accounts.values():
+            if a.user_key in counts:
+                counts[a.user_key][a.status] += 1
         return [(u, dict(counts[u])) for u in sorted(counts)[:limit]]
+
+    async def import_user_profiles(self, entries: Sequence[UserImport]) -> tuple[int, int]:
+        created = updated = 0
+        for e in entries:
+            old = self.profiles.get(e.user_key)
+            if old is None:
+                created += 1
+            else:
+                updated += 1
+            self.profiles[e.user_key] = UserProfile(
+                e.display_name or (old.display_name if old else None), e.email or (old.email if old else None)
+            )
+        return created, updated
 
     async def user_profiles(self, user_keys: Iterable[str]) -> dict[str, UserProfile]:
         return {k: self.profiles[k] for k in user_keys if k in self.profiles}
 
     async def known_users(self, limit: int) -> list[str]:
-        keys = {u for _, u in self.accounts} | self.portal_users
+        keys = {u for _, u in self.accounts} | self.portal_users | set(self.profiles)
         return sorted(keys)[:limit]
 
     async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:

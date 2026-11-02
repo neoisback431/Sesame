@@ -1,0 +1,36 @@
+{# SPDX-License-Identifier: Apache-2.0 #}
+{% extends "base.html" %}
+{% block title %}Importer des utilisateurs{% endblock %}
+{% block content %}
+<p><a href="/users">← Utilisateurs</a></p>
+<h1>Importer des utilisateurs</h1>
+<p class="muted">Pour pouvoir enregistrer le compte applicatif d'une personne <strong>avant sa première
+  connexion</strong> à Sesame. Rien n'est créé côté applications : seule la liste des personnes connues
+  (clé, nom, e-mail) est complétée.</p>
+{% if problem %}<ul class="errors"><li>{{ problem }}</li></ul>{% endif %}
+{% if result %}
+<div class="card">
+  <strong>{{ result.created }} utilisateur(s) ajouté(s), {{ result.updated }} mis à jour{% if result.rejected %}, {{ result.rejected }} ligne(s) refusée(s){% endif %}.</strong>
+  {% if result.errors %}
+  <ul class="errors">{% for e in result.errors %}<li>{{ e }}</li>{% endfor %}
+    {% if result.rejected > result.errors|length %}<li>… et {{ result.rejected - result.errors|length }} autre(s).</li>{% endif %}</ul>
+  {% endif %}
+  <p><a class="button" href="/users">Voir les utilisateurs</a></p>
+</div>
+{% endif %}
+<form method="post" action="/users/import" autocomplete="off">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label for="users">Liste (une personne par ligne)</label>
+  <textarea id="users" name="users" rows="14" spellcheck="false"
+    placeholder="clé,nom,e-mail&#10;3f2a9c1e-0000-0000-0000-000000000000,Alice Martin,alice@exemple.org">{{ text }}</textarea>
+  <p class="muted">Format : <code>clé</code>, puis éventuellement <code>nom</code> et <code>e-mail</code>,
+    séparés par une virgule, un point-virgule ou une tabulation (export CSV de l'annuaire). Les lignes vides,
+    celles qui commencent par <code>#</code> et un en-tête (<code>clé</code>, <code>id</code>, <code>oid</code>…)
+    sont ignorées. 5000 lignes au plus.</p>
+  <p class="muted"><strong>La clé doit être exactement la valeur du claim <code>{{ claim }}</code></strong>
+    (avec Entra ID : l'<em>Object Id</em> de l'utilisateur, pas son e-mail), sinon le compte ne sera rattaché à
+    personne. Le nom et l'e-mail ne servent qu'à l'affichage ; ils sont remplacés par ceux de l'annuaire à la
+    première connexion de la personne.</p>
+  <button type="submit">Importer</button>
+</form>
+{% endblock %}

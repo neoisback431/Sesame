@@ -7,7 +7,7 @@ PostgreSQL, mémoire) sont choisies par configuration.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
@@ -43,6 +43,15 @@ class UserProfile:
     """Nom et e-mail déclarés par le fournisseur d'identité (écrits par le portail, ADR 0031).
     Servent à l'affichage et à la recherche seulement : la clé utilisateur reste l'identité."""
 
+    display_name: str | None
+    email: str | None
+
+
+@dataclass(frozen=True)
+class UserImport:
+    """Une ligne d'import d'utilisateurs (ADR 0032) : clé Sesame, nom et e-mail facultatifs."""
+
+    user_key: str
     display_name: str | None
     email: str | None
 
@@ -212,6 +221,11 @@ class AccountStore(Protocol):
         """Tous les comptes d'un utilisateur, toutes applis confondues."""
         ...
 
+    async def import_user_profiles(self, entries: Sequence[UserImport]) -> tuple[int, int]:
+        """Crée ou met à jour des profils sans connexion préalable (ADR 0032). Un champ absent ne
+        remplace jamais une valeur connue. Renvoie (créés, mis à jour). Clés distinctes."""
+        ...
+
     async def revoke_app_sessions(self, app_id: str, user_key: str) -> int:
         """Supprime les sessions applicatives ouvertes de l'utilisateur sur l'appli.
 
@@ -231,7 +245,7 @@ class AccountStore(Protocol):
 
     async def known_users(self, limit: int) -> list[str]:
         """Clés utilisateur connues, pour suggérer une valeur exacte au provisionnement :
-        titulaires d'un compte et personnes déjà connectées au portail. Triées."""
+        titulaires d'un compte, personnes déjà connectées au portail et utilisateurs importés. Triées."""
         ...
 
     async def get_diagnostic(self, app_id: str, user_key: str) -> Diagnostic | None:

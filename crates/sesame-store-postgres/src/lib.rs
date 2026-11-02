@@ -409,7 +409,7 @@ impl UserDirectory for PgStore {
     async fn upsert_user(&self, profile: &UserProfile) -> PortResult<()> {
         // COALESCE : un champ absent ne remplace jamais une valeur déjà connue.
         sqlx::query(
-            "INSERT INTO users (user_key, display_name, email) VALUES ($1, $2, $3)
+            "INSERT INTO users (user_key, display_name, email, last_login_at) VALUES ($1, $2, $3, now())
              ON CONFLICT (user_key) DO UPDATE SET
                 display_name = COALESCE(EXCLUDED.display_name, users.display_name),
                 email = COALESCE(EXCLUDED.email, users.email),

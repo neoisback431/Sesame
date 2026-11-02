@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- ✨ **Importer des utilisateurs avant leur première connexion** (ADR 0032) : la page Administration → Utilisateurs → « Importer des utilisateurs » reçoit une liste `clé[,nom[,e-mail]]` (export CSV de l'annuaire, séparateur virgule, point-virgule ou tabulation). Les personnes sont alors proposées et trouvables par nom pour leur enregistrer un compte, sans qu'elles aient à se connecter à Sesame. Aucun compte ni secret n'est créé par l'import ; la clé doit être exactement la valeur du claim de clé utilisateur (Entra ID : l'*Object Id*). La page « Utilisateurs » liste maintenant aussi les personnes sans compte. Audit `users_imported`. Migration `0009` (le portail écrit désormais explicitement `last_login_at`).
+
 ## [0.1.6] - 2026-10-07
 
 - 🐛 **Déconnexion faite dans l'application, mode `handoff`** (ex. n8n) : l'appli efface son cookie dans le navigateur, mais le marqueur de remise de Sesame subsistait ; Sesame relayait sans rien refaire et l'utilisateur restait sur la page de login de l'appli. Sur une navigation, l'absence d'un cookie remis (`session.handoff.set_cookies`) déclenche désormais une nouvelle remise, sans règle `spec.expiry` à écrire. Correctif du proxy.

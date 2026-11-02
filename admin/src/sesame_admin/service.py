@@ -9,6 +9,7 @@ identifiants ne sont jamais journalisées, auditées ni renvoyées.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from .audit import AuditEvent, AuditSink
@@ -41,10 +42,22 @@ from .ports import (
     StoredDescriptor,
     Unavailable,
 )
+from .user_import import ImportTooLarge
+from .user_import import parse as parse_import
 
 log = logging.getLogger(__name__)
 
 MAX_VALUE_LEN = 4096
+
+
+@dataclass(frozen=True)
+class ImportOutcome:
+    """Bilan d'un import d'utilisateurs : compteurs et premières lignes refusées."""
+
+    created: int
+    updated: int
+    rejected: int
+    errors: list[str]
 
 
 class InvalidInput(ValueError):
@@ -446,6 +459,32 @@ class AdminService:
                 raise InvalidInput("Le compte n'est plus en attente : gérez-le depuis la page de l'appli.")
             await self.delete(actor, app_id, user_key, cid)  # supprime secret + compte, clôt (refusée)
         await self._close_request(actor, app_id, user_key, cid, approved=False)
+
+    async def import_users(self, actor: AdminUser, text: str, cid: str) -> ImportOutcome:
+        """Importe une liste d'utilisateurs (ADR 0032) pour pouvoir les embarquer avant qu'ils ne
+        se soient connectés. Crée ou complète des profils : aucun compte applicatif, aucun secret."""
+
+        def event(outcome: str, reason: str) -> AuditEvent:
+            return AuditEvent.of("users_imported", outcome, actor, correlation_id=cid, reason=reason)
+
+        try:
+            parsed = parse_import(text)
+        except ImportTooLarge as e:
+            await self.audit.record(event("failure", "too_large"))
+            raise InvalidInput(str(e)) from e
+        if not parsed.entries:
+            await self.audit.record(event("failure", f"no_valid_entry;rejected={parsed.rejected}"))
+            detail = " ".join(parsed.errors[:3])
+            raise InvalidInput("Aucun utilisateur valide dans la liste." + (f" {detail}" if detail else ""))
+        try:
+            created, updated = await self.accounts.import_user_profiles(parsed.entries)
+        except Unavailable:
+            await self.audit.record(event("failure", "store_unavailable"))
+            raise
+        await self.audit.record(
+            event("success", f"created={created};updated={updated};rejected={parsed.rejected}")
+        )
+        return ImportOutcome(created, updated, parsed.rejected, parsed.errors)
 
     async def disable_all(self, actor: AdminUser, user_key: str, cid: str) -> int:
         """Désactive tous les comptes actifs ou en échec d'un utilisateur (départ, suspension).

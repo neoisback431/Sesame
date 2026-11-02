@@ -7,7 +7,7 @@ Le schéma appartient aux migrations Rust (``crates/sesame-store-postgres/migrat
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 import asyncpg
@@ -26,6 +26,7 @@ from .ports import (
     Status,
     StoredDescriptor,
     Unavailable,
+    UserImport,
     UserProfile,
 )
 
@@ -136,6 +137,7 @@ class PostgresAccountStore:
         rows = await (await self.pool()).fetch(
             """SELECT user_key FROM app_accounts
                UNION SELECT user_key FROM portal_sessions
+               UNION SELECT user_key FROM users
                ORDER BY user_key LIMIT $1""",
             limit,
         )
@@ -158,22 +160,47 @@ class PostgresAccountStore:
 
     async def search_users(self, query: str, limit: int) -> list[tuple[str, dict[str, int]]]:
         pattern = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        # Titulaires d'un compte ET utilisateurs de l'annuaire (connectés ou importés, ADR 0032),
+        # y compris ceux qui n'ont encore aucun compte.
         rows = await (await self.pool()).fetch(
-            """SELECT user_key, status, count(*) AS n FROM app_accounts
-               WHERE user_key IN (
-                 SELECT DISTINCT a.user_key FROM app_accounts a
-                 LEFT JOIN users u ON u.user_key = a.user_key
-                 WHERE a.user_key ILIKE $1 ESCAPE '\\' OR u.display_name ILIKE $1 ESCAPE '\\'
+            """WITH found AS (
+                 SELECT k.user_key FROM (SELECT user_key FROM app_accounts
+                                         UNION SELECT user_key FROM users) k
+                 LEFT JOIN users u ON u.user_key = k.user_key
+                 WHERE k.user_key ILIKE $1 ESCAPE '\\' OR u.display_name ILIKE $1 ESCAPE '\\'
                     OR u.email ILIKE $1 ESCAPE '\\'
-                 ORDER BY a.user_key LIMIT $2)
-               GROUP BY user_key, status ORDER BY user_key""",
+                 ORDER BY k.user_key LIMIT $2)
+               SELECT f.user_key, a.status, count(a.app_id) AS n FROM found f
+               LEFT JOIN app_accounts a ON a.user_key = f.user_key
+               GROUP BY f.user_key, a.status ORDER BY f.user_key""",
             pattern,
             limit,
         )
         out: dict[str, dict[str, int]] = {}
         for r in rows:
-            out.setdefault(r["user_key"], {})[r["status"]] = r["n"]
+            counts = out.setdefault(r["user_key"], {})
+            if r["status"] is not None:
+                counts[r["status"]] = r["n"]
         return list(out.items())
+
+    async def import_user_profiles(self, entries: Sequence[UserImport]) -> tuple[int, int]:
+        if not entries:
+            return 0, 0
+        # xmax = 0 : ligne insérée (et non mise à jour) ; COALESCE : un champ absent ne remplace
+        # jamais une valeur connue. last_login_at reste NULL : la personne ne s'est jamais connectée.
+        rows = await (await self.pool()).fetch(
+            """INSERT INTO users (user_key, display_name, email, last_login_at)
+               SELECT k, n, e, NULL FROM unnest($1::text[], $2::text[], $3::text[]) AS t(k, n, e)
+               ON CONFLICT (user_key) DO UPDATE SET
+                 display_name = COALESCE(EXCLUDED.display_name, users.display_name),
+                 email = COALESCE(EXCLUDED.email, users.email)
+               RETURNING (xmax = 0) AS inserted""",
+            [e.user_key for e in entries],
+            [e.display_name for e in entries],
+            [e.email for e in entries],
+        )
+        created = sum(1 for r in rows if r["inserted"])
+        return created, len(rows) - created
 
     async def user_profiles(self, user_keys: Iterable[str]) -> dict[str, UserProfile]:
         keys = list(user_keys)
