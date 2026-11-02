@@ -36,6 +36,15 @@
   {% endfor %}
   </tbody>
 </table>
+<div class="card">
+  <h2>Ajouter un compte</h2>
+  <p class="muted">Choisissez l'application : le formulaire de saisie des identifiants s'ouvre avec cet utilisateur déjà renseigné.</p>
+  {% for id, app in apps.items() %}
+    <a class="button" href="/apps/{{ id }}?user_key={{ user_key }}">{{ app.name }}</a>
+  {% else %}
+    <p class="muted">Aucune application déclarée.</p>
+  {% endfor %}
+</div>
 {% if accounts %}
 <div class="card">
   <h2>Désactiver tous les comptes</h2>

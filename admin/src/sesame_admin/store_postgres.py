@@ -199,10 +199,23 @@ class PostgresAccountStore:
         rows = await (await self.pool()).fetch(
             """SELECT user_key FROM app_accounts
                UNION SELECT user_key FROM portal_sessions
+               UNION SELECT user_key FROM users
                ORDER BY user_key LIMIT $1""",
             limit,
         )
         return [r["user_key"] for r in rows]
+
+    async def register_user(self, user_key: str, display_name: str | None, email: str | None) -> None:
+        # `last_login_at` n'est lu par personne ; le portail le réécrit à la vraie connexion.
+        await (await self.pool()).execute(
+            """INSERT INTO users (user_key, display_name, email) VALUES ($1, $2, $3)
+               ON CONFLICT (user_key) DO UPDATE SET
+                 display_name = COALESCE(EXCLUDED.display_name, users.display_name),
+                 email = COALESCE(EXCLUDED.email, users.email)""",
+            user_key,
+            display_name,
+            email,
+        )
 
     async def get_diagnostic(
         self, app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT
@@ -226,20 +239,24 @@ class PostgresAccountStore:
     async def search_users(self, query: str, limit: int) -> list[tuple[str, dict[str, int]]]:
         pattern = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         rows = await (await self.pool()).fetch(
-            """SELECT user_key, status, count(*) AS n FROM app_accounts
-               WHERE user_key IN (
-                 SELECT DISTINCT a.user_key FROM app_accounts a
-                 LEFT JOIN users u ON u.user_key = a.user_key
-                 WHERE a.user_key ILIKE $1 ESCAPE '\\' OR u.display_name ILIKE $1 ESCAPE '\\'
+            """WITH matched AS (
+                 SELECT k.user_key FROM (SELECT user_key FROM app_accounts
+                                         UNION SELECT user_key FROM users) k
+                 LEFT JOIN users u ON u.user_key = k.user_key
+                 WHERE k.user_key ILIKE $1 ESCAPE '\\' OR u.display_name ILIKE $1 ESCAPE '\\'
                     OR u.email ILIKE $1 ESCAPE '\\'
-                 ORDER BY a.user_key LIMIT $2)
-               GROUP BY user_key, status ORDER BY user_key""",
+                 ORDER BY k.user_key LIMIT $2)
+               SELECT m.user_key, a.status, count(a.app_id) AS n FROM matched m
+               LEFT JOIN app_accounts a ON a.user_key = m.user_key
+               GROUP BY m.user_key, a.status ORDER BY m.user_key""",
             pattern,
             limit,
         )
         out: dict[str, dict[str, int]] = {}
         for r in rows:
-            out.setdefault(r["user_key"], {})[r["status"]] = r["n"]
+            counts = out.setdefault(r["user_key"], {})
+            if r["status"] is not None:
+                counts[r["status"]] = r["n"]
         return list(out.items())
 
     async def user_profiles(self, user_keys: Iterable[str]) -> dict[str, UserProfile]:

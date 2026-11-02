@@ -721,6 +721,34 @@ def create_app(
         people = await people_for(u for u, _ in rows)
         return render(request, "users.html", admin=admin, rows=rows, q=q.strip(), people=people)
 
+    @app.post("/users")
+    async def enroll_user(
+        request: Request,
+        admin: Admin,
+        user_key: Annotated[str, Form()],
+        display_name: Annotated[str, Form()] = "",
+        email: Annotated[str, Form()] = "",
+    ) -> Response:
+        cid = correlation_id(request)
+        try:
+            await check_csrf(request)
+            key = await service.enroll_user(admin, user_key, display_name, email, cid)
+        except InvalidInput as e:
+            request.session["flash"] = {"kind": "error", "text": str(e)}
+            return RedirectResponse("/users", status_code=303)
+        except Unavailable:
+            log.error("brique externe indisponible", extra={"correlation_id": cid})
+            request.session["flash"] = {
+                "kind": "error",
+                "text": f"Opération impossible : service indisponible (référence {cid}).",
+            }
+            return RedirectResponse("/users", status_code=303)
+        request.session["flash"] = {
+            "kind": "ok",
+            "text": f"Utilisateur « {key} » enrôlé : ajoutez maintenant ses comptes applicatifs.",
+        }
+        return RedirectResponse(f"/users/{key}", status_code=303)
+
     @app.get("/users/{user_key}")
     async def user_detail(request: Request, user_key: str, admin: Admin) -> Response:
         try:

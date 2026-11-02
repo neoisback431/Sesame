@@ -280,16 +280,23 @@ class AccountStore(Protocol):
 
     async def search_users(self, query: str, limit: int) -> list[tuple[str, dict[str, int]]]:
         """Utilisateurs dont la clé, le nom ou l'e-mail contient ``query`` (casse ignorée),
-        avec leurs comptes par état."""
+        avec leurs comptes par état (vide pour un utilisateur connu sans compte)."""
         ...
 
     async def user_profiles(self, user_keys: Iterable[str]) -> dict[str, UserProfile]:
         """Profils connus parmi ``user_keys`` (les autres sont absents du résultat)."""
         ...
 
+    async def register_user(self, user_key: str, display_name: str | None, email: str | None) -> None:
+        """Pré-enrôle un utilisateur avant sa première connexion : crée son profil (table
+        ``users``) ou complète le nom / l'e-mail fournis sans effacer ceux déjà connus. Le portail
+        remplace ces valeurs par celles du fournisseur d'identité à la première connexion."""
+        ...
+
     async def known_users(self, limit: int) -> list[str]:
         """Clés utilisateur connues, pour suggérer une valeur exacte au provisionnement :
-        titulaires d'un compte et personnes déjà connectées au portail. Triées."""
+        titulaires d'un compte, personnes déjà connectées au portail et utilisateurs pré-enrôlés.
+        Triées."""
         ...
 
     async def get_diagnostic(

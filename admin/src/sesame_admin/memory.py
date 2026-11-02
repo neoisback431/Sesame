@@ -139,13 +139,23 @@ class MemoryAccountStore:
             )
             if query.lower() in haystack.lower():
                 counts.setdefault(a.user_key, Counter())[a.status] += 1
+        for user, p in self.profiles.items():  # connus sans compte (pré-enrôlés, ADR 0035)
+            haystack = " ".join(x for x in (user, p.display_name, p.email) if x)
+            if query.lower() in haystack.lower():
+                counts.setdefault(user, Counter())
         return [(u, dict(counts[u])) for u in sorted(counts)[:limit]]
 
     async def user_profiles(self, user_keys: Iterable[str]) -> dict[str, UserProfile]:
         return {k: self.profiles[k] for k in user_keys if k in self.profiles}
 
+    async def register_user(self, user_key: str, display_name: str | None, email: str | None) -> None:
+        old = self.profiles.get(user_key)
+        self.profiles[user_key] = UserProfile(
+            display_name or (old.display_name if old else None), email or (old.email if old else None)
+        )
+
     async def known_users(self, limit: int) -> list[str]:
-        keys = {k[1] for k in self.accounts} | self.portal_users
+        keys = {k[1] for k in self.accounts} | self.portal_users | set(self.profiles)
         return sorted(keys)[:limit]
 
     async def revoke_app_sessions(self, app_id: str, user_key: str, account_id: str | None = None) -> int:

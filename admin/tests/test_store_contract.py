@@ -113,6 +113,19 @@ async def test_user_profiles_and_name_search_contract(store):
     assert await store.search_users(f"introuvable-{tag}", 10) == []
 
 
+async def test_register_user_contract(store):
+    """Pré-enrôlement (ADR 0035) : connu sans compte ni connexion, sans effacer un profil existant."""
+    tag = uuid.uuid4().hex[:8]
+    user = f"preenrol-{tag}"
+    await store.register_user(user, f"Hugo Nouveau{tag}", None)
+    await store.register_user(user, None, f"hugo.{tag}@example.org")
+    assert await store.user_profiles([user]) == {
+        user: UserProfile(f"Hugo Nouveau{tag}", f"hugo.{tag}@example.org")
+    }
+    assert await store.search_users(f"nouveau{tag}", 10) == [(user, {})]
+    assert user in await store.known_users(10000)
+
+
 async def seed_app_session(store, app_id: str, user_key: str, account_id: str = "default") -> None:
     """Session applicative ouverte, créée comme le feraient le portail et le proxy."""
     if isinstance(store, MemoryAccountStore):

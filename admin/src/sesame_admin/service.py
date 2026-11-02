@@ -297,6 +297,36 @@ class AdminService:
 
     # --- Comptes -------------------------------------------------------------------
 
+    async def enroll_user(
+        self, actor: AdminUser, user_key: str, display_name: str, email: str, cid: str
+    ) -> str:
+        """Pré-enrôle un utilisateur par sa clé d'identité (ADR 0035), sans connexion préalable.
+
+        Aucun droit n'est accordé : l'utilisateur devient simplement connu (visible dans la liste,
+        proposé au provisionnement, nom affiché). Ses comptes se créent ensuite appli par appli.
+        Le nom et l'e-mail facultatifs sont écrasés par ceux du fournisseur d'identité à sa première
+        connexion. Renvoie la clé normalisée."""
+        user_key = user_key.strip()
+        display_name = display_name.strip()
+        email = email.strip()
+        if not valid_user_key(user_key):
+            raise InvalidInput(
+                "Identifiant utilisateur invalide (caractères autorisés : A-Z a-z 0-9 @ . _ - +)."
+            )
+        if len(display_name) > 200 or "\x00" in display_name:
+            raise InvalidInput("Nom invalide (200 caractères au plus).")
+        if email and (len(email) > 320 or "@" not in email or "\x00" in email):
+            raise InvalidInput("Adresse e-mail invalide.")
+        event = AuditEvent.of("user_enrolled", "success", actor, target_user=user_key, correlation_id=cid)
+        try:
+            await self.accounts.register_user(user_key, display_name or None, email or None)
+        except Exception:
+            event.outcome, event.reason = "failure", "registry_unavailable"
+            await self.audit.record(event)
+            raise
+        await self.audit.record(event)
+        return user_key
+
     async def provision(
         self,
         actor: AdminUser,

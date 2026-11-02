@@ -19,9 +19,26 @@
       <td><a class="button" href="/users/{{ user_key }}">Gérer</a></td>
     </tr>
   {% else %}
-    <tr><td colspan="3">{% if q %}Aucun utilisateur ne correspond.{% else %}Aucun compte enregistré.{% endif %}</td></tr>
+    <tr><td colspan="3">{% if q %}Aucun utilisateur ne correspond.{% else %}Aucun utilisateur enregistré.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>
-<p class="muted">Seuls les utilisateurs ayant au moins un compte applicatif apparaissent. Pour en créer un, passez par la page de l'application.</p>
+<div class="card" style="margin-top:16px">
+  <h2>Enrôler un utilisateur</h2>
+  <p class="muted">Pour préparer l'accès de quelqu'un <strong>avant sa première connexion</strong> : saisissez sa clé d'identité
+    SSO, <strong>exactement</strong> la valeur du claim configuré pour le portail (ex. <code>oid</code>, <code>sub</code> ou
+    <code>preferred_username</code>). Vous ajoutez ensuite ses comptes applicatifs ; à sa première connexion il retrouve ses
+    applications. Le nom et l'e-mail sont facultatifs (affichage) et remplacés par ceux du fournisseur d'identité à la connexion.</p>
+  <form method="post" action="/users">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="user_key">Clé d'identité SSO</label>
+    <input type="text" id="user_key" name="user_key" required maxlength="256" autocomplete="off">
+    <label for="display_name">Nom <span class="muted">(facultatif)</span></label>
+    <input type="text" id="display_name" name="display_name" maxlength="200" autocomplete="off">
+    <label for="email">E-mail <span class="muted">(facultatif)</span></label>
+    <input type="email" id="email" name="email" maxlength="320" autocomplete="off">
+    <button type="submit">Enrôler</button>
+  </form>
+</div>
+<p class="muted">La liste réunit les utilisateurs ayant un compte applicatif, ceux déjà connectés au portail et ceux enrôlés ici.</p>
 {% endblock %}
