@@ -9,6 +9,10 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+## [0.3.0] - 2026-11-02
+
+- 👤 **Enrôlement préalable des utilisateurs** (ADR 0035) : depuis la page Utilisateurs de l'administration, on enrôle quelqu'un par sa clé d'identité SSO (nom et e-mail facultatifs) **sans qu'il se soit connecté une première fois**, puis on lui ajoute ses comptes applicatifs (boutons « Ajouter un compte » de sa page) ; il retrouve ses applications dès sa première connexion. L'enrôlement n'accorde aucun droit et n'ajoute pas de migration (table `users` existante) ; la liste et la recherche montrent désormais aussi les utilisateurs connus sans compte. Nouvel événement d'audit `user_enrolled`. Changement de l'administration seule.
+
 ## [0.2.1] - 2026-10-23
 
 - 🐛 **Flux longs coupés par le proxy** (SSE, ping régulier, téléchargements) : `spec.upstream.timeout` était une durée totale par requête relayée, si bien qu'un flux vivant plus long que le délai était interrompu en cours de corps. C'est désormais un délai d'**inactivité** (connexion, attente des en-têtes, entre deux morceaux), comme l'`idle_timeout` d'un ALB ; le rejeu du login reste borné en durée totale. Une appli qui ne pingue que toutes les N secondes demande un `timeout` supérieur à N. Correctif du proxy.
