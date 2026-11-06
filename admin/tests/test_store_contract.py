@@ -619,3 +619,26 @@ async def test_enrol_by_email_contract(store):
     await put_profile(store, other, "Gus", f"gus-{tag}@example.org")
     with pytest.raises(EnrolmentRefused):
         await store.enrol_by_email(f"GUS-{tag}@example.org", None, "admin")
+
+
+async def test_delete_user_contract(store):
+    """Suppression d'un utilisateur : comptes, profil, enrôlement, sessions effacés ; les autres restent."""
+    tag = uuid.uuid4().hex[:8]
+    app, user, other = f"app-{tag}", f"hana-{tag}@example.org", f"ivan-{tag}"
+    await store.enrol_by_email(user, "Hana", "admin")
+    await store.upsert_active(app, user)
+    await store.upsert_active(app, user, "admin", "Admin")
+    await store.upsert_active(app, other)
+    await seed_app_session(store, app, user)
+
+    await store.delete_user(user)
+    assert await store.list_user_accounts(user) == []
+    assert await store.user_profiles([user]) == {} and await store.enrolments([user]) == {}
+    assert user not in await store.known_users(10000)
+    assert dict(await store.search_users(tag, 10)) == {other: {"active": 1}}
+    assert await store.revoke_app_sessions(app, user) == 0
+    assert [a.user_key for a in await store.list_accounts(app)] == [other]
+    await store.delete_user(user)  # idempotent
+    await store.enrol_by_email(user, None, "admin")  # l'e-mail est de nouveau libre
+    await store.delete_user(user)
+    await store.delete_account(app, other)

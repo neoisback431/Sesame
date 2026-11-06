@@ -229,6 +229,22 @@ class PostgresAccountStore:
         )
         return {r["user_key"]: Enrolment(r["match_value"], r["created_at"], r["claimed_at"]) for r in rows}
 
+    async def delete_user(self, user_key: str) -> None:
+        pool = await self.pool()
+        async with pool.acquire() as conn, conn.transaction():
+            # Comptes restants (diagnostics et choix de compte suivent en cascade), puis les tables
+            # rattachées à la seule clé. Les sessions applicatives suivent les sessions portail.
+            for table in (
+                "app_accounts",
+                "app_suspensions",
+                "access_requests",
+                "portal_sessions",
+                "user_aliases",
+                "enrolments",
+                "users",
+            ):
+                await conn.execute(f"DELETE FROM {table} WHERE user_key = $1", user_key)  # noqa: S608
+
     async def known_users(self, limit: int) -> list[str]:
         # Titulaires d'un compte + personnes déjà connectées au portail (même base).
         rows = await (await self.pool()).fetch(

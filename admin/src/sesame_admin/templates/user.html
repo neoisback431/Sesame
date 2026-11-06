@@ -62,4 +62,13 @@
   </form>
 </div>
 {% endif %}
+<div class="card">
+  <h2>Supprimer l'utilisateur</h2>
+  <p class="muted">Efface <strong>définitivement</strong> les identifiants de tous ses comptes (coffre et registre), son enrôlement et le rattachement de son identité SSO, et ferme ses sessions. S'il se reconnecte, il redevient un utilisateur inconnu, sans compte.</p>
+  <form method="post" action="/users/{{ user_key }}/delete"
+        onsubmit="return confirm('Supprimer définitivement cet utilisateur et tous ses comptes ?')">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit">Supprimer l'utilisateur</button>
+  </form>
+</div>
 {% endblock %}

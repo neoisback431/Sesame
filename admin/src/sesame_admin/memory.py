@@ -177,6 +177,18 @@ class MemoryAccountStore:
     async def enrolments(self, user_keys: Iterable[str]) -> dict[str, Enrolment]:
         return {k: self.enrolment_entries[k] for k in user_keys if k in self.enrolment_entries}
 
+    async def delete_user(self, user_key: str) -> None:
+        for k in [k for k, a in self.accounts.items() if a.user_key == user_key]:
+            del self.accounts[k]
+            self.diagnostics.pop(k, None)
+        for k in [k for k in self.app_sessions if k[1] == user_key]:
+            del self.app_sessions[k]
+        for k in [k for k in self.selections if k[1] == user_key]:
+            del self.selections[k]
+        self.profiles.pop(user_key, None)
+        self.enrolment_entries.pop(user_key, None)
+        self.portal_users.discard(user_key)
+
     async def known_users(self, limit: int) -> list[str]:
         keys = {k[1] for k in self.accounts} | self.portal_users | set(self.profiles)
         return sorted(keys)[:limit]

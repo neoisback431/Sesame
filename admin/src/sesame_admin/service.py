@@ -369,6 +369,57 @@ class AdminService:
         await self.audit.record(event)
         return key
 
+    async def delete_user(self, actor: AdminUser, user_key: str, cid: str) -> int:
+        """Supprime un utilisateur : identifiants de tous ses comptes (coffre), registre, profil,
+        enrôlement et alias SSO, sessions ouvertes. Couvre aussi les comptes d'applis dont le
+        descripteur a disparu. S'il se reconnecte, il redevient un utilisateur inconnu, sans compte.
+
+        Chaque identifiant supprimé est audité ; un coffre indisponible interrompt l'opération
+        (relançable : ce qui est déjà supprimé ne l'est pas deux fois). Renvoie le nombre de comptes."""
+        user_key = user_key.strip()
+        if not valid_user_key(user_key):
+            raise InvalidInput("Identifiant utilisateur invalide.")
+        accounts = await self.accounts.list_user_accounts(user_key)
+        for account in accounts:
+
+            def event(action: str, outcome: str, reason: str | None = None, a: Any = account) -> AuditEvent:
+                return AuditEvent.of(
+                    action,
+                    outcome,
+                    actor,
+                    app_id=a.app_id,
+                    account_id=a.account_id,
+                    target_user=user_key,
+                    correlation_id=cid,
+                    reason=reason,
+                )
+
+            try:
+                await self.secrets.delete_credential(account.app_id, user_key, account.account_id)
+            except Unavailable:
+                await self.audit.record(event("credential_deleted", "failure", "secret_store_unavailable"))
+                raise
+            await self.audit.record(event("credential_deleted", "success"))
+            await self.audit.record(event("account_status_changed", "success", "deleted:user_deleted"))
+        done = AuditEvent.of(
+            "user_deleted",
+            "success",
+            actor,
+            target_user=user_key,
+            correlation_id=cid,
+            reason=f"accounts:{len(accounts)}",
+        )
+        try:
+            await self.accounts.delete_user(user_key)
+        except Exception:
+            done.outcome, done.reason = "failure", "registry_unavailable"
+            await self.audit.record(done)
+            raise
+        await self.audit.record(done)
+        await self._notify_sensitive(actor, "user_deleted", None, user_key)
+        log.info("utilisateur supprimé", extra={"target_user": user_key, "correlation_id": cid})
+        return len(accounts)
+
     async def provision(
         self,
         actor: AdminUser,

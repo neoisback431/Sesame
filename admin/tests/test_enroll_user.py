@@ -159,3 +159,79 @@ def test_enrolment_page_does_not_escape_user_input_unsafely(web):
     post_email(client, "x@example.org", display_name="<script>alert(1)</script>")
     page = client.get("/users/x@example.org").text
     assert "<script>alert(1)" not in page and "&lt;script&gt;" in page
+
+
+# --- Suppression d'un utilisateur ------------------------------------------------------------
+
+
+def seed_user_with_accounts(service, key="dana@example.org"):
+    from datetime import UTC, datetime
+
+    from sesame_admin.ports import Account
+
+    now = datetime.now(UTC)
+    for app, acc, default in (
+        ("fake-app", "default", True),
+        ("fake-app", "admin", False),
+        ("gone-app", "default", True),
+    ):
+        k = (app, key) if acc == "default" else (app, key, acc)
+        service.accounts.accounts[k] = Account(app, key, "active", None, None, now, acc, None, default)
+        service.secrets.entries[k] = {"username": "u", "password": "p"}
+    service.accounts.profiles[key] = UserProfile("Dana", key)
+    service.accounts.app_sessions[("fake-app", key)] = 2
+    return key
+
+
+def test_delete_user_erases_accounts_secrets_profile_and_enrolment(web):
+    client, service, audit = web
+    post_email(client, "dana@example.org")
+    key = seed_user_with_accounts(service)
+    token = csrf(client, f"/users/{key}")
+    r = client.post(f"/users/{key}/delete", data={"csrf": token})
+    assert r.status_code == 303 and r.headers["location"] == "/users"
+    assert service.accounts.accounts == {} and service.secrets.entries == {}
+    assert service.accounts.profiles == {} and service.accounts.enrolment_entries == {}
+    assert service.accounts.app_sessions == {}
+    actions = [(e.action, e.app_id, e.target_user) for e in audit.events]
+    # Y compris le compte d'une appli dont le descripteur a disparu ; un événement par identifiant.
+    assert actions.count(("credential_deleted", "gone-app", key)) == 1
+    assert sum(a[0] == "credential_deleted" for a in actions) == 3
+    assert audit.events[-1].action == "user_deleted" and audit.events[-1].reason == "accounts:3"
+    assert f'href="/users/{key}"' not in client.get("/users").text
+
+
+def test_delete_user_is_idempotent_and_requires_csrf(web):
+    client, service, audit = web
+    key = seed_user_with_accounts(service)
+    r = client.post(f"/users/{key}/delete", data={"csrf": "forged"})
+    assert r.headers["location"] == f"/users/{key}" and len(service.accounts.accounts) == 3
+    token = csrf(client, f"/users/{key}")
+    assert client.post(f"/users/{key}/delete", data={"csrf": token}).headers["location"] == "/users"
+    assert client.post(f"/users/{key}/delete", data={"csrf": token}).headers["location"] == "/users"
+    assert audit.events[-1].reason == "accounts:0"
+
+
+def test_delete_user_stops_when_the_vault_is_down_and_keeps_the_registry(web, monkeypatch):
+    from sesame_admin.ports import Unavailable
+
+    client, service, audit = web
+    key = seed_user_with_accounts(service)
+
+    async def down(*args, **kwargs):
+        raise Unavailable("coffre injoignable")
+
+    monkeypatch.setattr(service.secrets, "delete_credential", down)
+    token = csrf(client, f"/users/{key}")
+    r = client.post(f"/users/{key}/delete", data={"csrf": token})
+    assert r.headers["location"] == f"/users/{key}"
+    assert len(service.accounts.accounts) == 3 and key in service.accounts.profiles
+    assert (audit.events[-1].action, audit.events[-1].outcome) == ("credential_deleted", "failure")
+    assert all(e.action != "user_deleted" for e in audit.events)
+
+
+def test_user_page_offers_the_deletion(web):
+    client, service, _ = web
+    key = seed_user_with_accounts(service)
+    page = client.get(f"/users/{key}").text
+    assert f'action="/users/{key}/delete"' in page

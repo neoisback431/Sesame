@@ -793,6 +793,29 @@ def create_app(
             enrolments=await enrolments_for([user_key]),
         )
 
+    @app.post("/users/{user_key}/delete")
+    async def delete_user(request: Request, user_key: str, admin: Admin) -> Response:
+        cid = correlation_id(request)
+        try:
+            await check_csrf(request)
+            n = await service.delete_user(admin, user_key, cid)
+            request.session["flash"] = {
+                "kind": "ok",
+                "text": (
+                    f"Utilisateur « {user_key} » supprimé ({n} compte(s) effacé(s) du coffre et du registre)."
+                ),
+            }
+            return RedirectResponse("/users", status_code=303)
+        except InvalidInput as e:
+            request.session["flash"] = {"kind": "error", "text": str(e)}
+        except Unavailable:
+            log.error("brique externe indisponible", extra={"correlation_id": cid})
+            request.session["flash"] = {
+                "kind": "error",
+                "text": f"Opération impossible : service indisponible (référence {cid}).",
+            }
+        return RedirectResponse(f"/users/{user_key}", status_code=303)
+
     @app.post("/users/{user_key}/disable-all")
     async def disable_all(request: Request, user_key: str, admin: Admin) -> Response:
         cid = correlation_id(request)

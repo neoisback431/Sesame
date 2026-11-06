@@ -318,6 +318,13 @@ class AccountStore(Protocol):
         """Enrôlements par e-mail parmi ``user_keys`` (les autres sont absents du résultat)."""
         ...
 
+    async def delete_user(self, user_key: str) -> None:
+        """Efface toute trace de l'utilisateur dans la base : comptes restants, profil, enrôlement
+        et alias SSO (une identité rattachée redevient inconnue), choix de compte, suspensions,
+        demandes d'accès, sessions portail et applicatives (déconnexion immédiate). N'atteint
+        jamais le coffre : les identifiants se suppriment compte par compte. Idempotent."""
+        ...
+
     async def known_users(self, limit: int) -> list[str]:
         """Clés utilisateur connues, pour suggérer une valeur exacte au provisionnement :
         titulaires d'un compte, personnes déjà connectées au portail et utilisateurs pré-enrôlés.

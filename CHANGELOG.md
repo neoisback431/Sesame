@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- 🗑️ **Suppression d'un utilisateur** (administration, page de l'utilisateur) : efface les identifiants de tous ses comptes (coffre et registre, y compris ceux d'applis dont le descripteur a disparu), son profil, son enrôlement, le rattachement de son identité SSO et ses sessions ouvertes. S'il se reconnecte, il redevient un utilisateur inconnu, sans compte. Chaque identifiant supprimé est audité (`credential_deleted`), puis `user_deleted` ; coffre indisponible = opération interrompue et relançable. Changement de l'administration seule.
+
 ## [0.4.0] - 2026-11-06
 
 - 👤 **Enrôlement par e-mail, rattaché à la première connexion** (ADR 0036) : dans l'administration (Utilisateurs), on peut enrôler quelqu'un par son **e-mail** seul, sans connaître sa clé SSO. Ses comptes sont rangés sous l'e-mail ; à sa première connexion réelle, le portail reconnaît la personne (claim `SESAME_OIDC_ENROLMENT_CLAIM`, `email` par défaut ; ⚠️ avec Entra ID préférez `preferred_username`, le claim `email` n'étant pas vérifié), lui rattache son identité SSO une seule fois et l'audite (`user_linked`). Les clés ne sont pas ré-écrites (alias). ⚠️ Migration `0011` (tables `enrolments` et `user_aliases`), appliquée automatiquement au démarrage du portail et du proxy ; touche le portail et l'administration.

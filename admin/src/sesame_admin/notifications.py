@@ -42,6 +42,7 @@ REASONS: dict[str, str] = {
     "secret_missing": "identifiants absents du coffre",
     "upstream_unreachable": "application injoignable (DNS, TLS, connexion refusée…)",
     "account_deleted": "compte supprimé",
+    "user_deleted": "utilisateur supprimé",
     "account_disabled": "compte désactivé",
     "disable_all": "tous les comptes d'un utilisateur désactivés",
     "descriptor_deleted": "application supprimée",
