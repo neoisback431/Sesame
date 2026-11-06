@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+## [0.4.1] - 2026-11-06
+
 - 🗑️ **Suppression d'un utilisateur** (administration, page de l'utilisateur) : efface les identifiants de tous ses comptes (coffre et registre, y compris ceux d'applis dont le descripteur a disparu), son profil, son enrôlement, le rattachement de son identité SSO et ses sessions ouvertes. S'il se reconnecte, il redevient un utilisateur inconnu, sans compte. Chaque identifiant supprimé est audité (`credential_deleted`), puis `user_deleted` ; coffre indisponible = opération interrompue et relançable. Changement de l'administration seule.
 
 ## [0.4.0] - 2026-11-06
