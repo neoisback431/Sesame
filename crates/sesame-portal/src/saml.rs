@@ -210,6 +210,7 @@ fn identity_from_assertion(
     validate_user_key(&user_key).map_err(SamlError::Claims)?;
     let groups = groups_attribute.map(all_values).unwrap_or_default();
     let email = email_attribute.and_then(first_value);
+    let enrolment_id = email.clone().filter(|v| !v.trim().is_empty());
     let display_name = email.clone().or_else(|| name_id.clone());
 
     Ok(UserIdentity {
@@ -218,6 +219,7 @@ fn identity_from_assertion(
         user_key,
         display_name,
         email,
+        enrolment_id,
         groups,
     })
 }

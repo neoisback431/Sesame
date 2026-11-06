@@ -73,6 +73,7 @@ fn alice(groups: &[&str]) -> UserIdentity {
         user_key: "alice".into(),
         display_name: Some("Alice".into()),
         email: None,
+        enrolment_id: None,
         groups: groups.iter().map(|g| g.to_string()).collect(),
     }
 }
@@ -182,6 +183,43 @@ impl Bench {
 }
 
 const GROUPS: &[&str] = &["fake-app-users"];
+
+#[tokio::test]
+async fn first_login_links_the_identity_to_a_hand_enrolled_user_once() {
+    use sesame_core::audit::AuditAction;
+    use sesame_core::ports::UserDirectory;
+
+    let b = bench(GROUPS, true).await;
+    assert!(b
+        .users
+        .enrol("dana.roy@example.org", "Dana.Roy@example.org")
+        .await
+        .unwrap());
+    let mut dana = alice(GROUPS);
+    dana.subject = "oid-dana".into();
+    dana.user_key = "oid-dana".into();
+    dana.display_name = Some("Dana Roy".into());
+    dana.email = Some("dana.roy@example.org".into());
+    dana.enrolment_id = Some("dana.roy@example.org".into());
+
+    for _ in 0..2 {
+        let resp = b.portal.finish_login(dana.clone(), "/", "cid-link").await;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+    }
+    // Les comptes restent rangés sous la clé de l'enrôlement, jamais sous l'oid.
+    assert!(b.users.get_user("dana.roy@example.org").await.unwrap().is_some());
+    assert!(b.users.get_user("oid-dana").await.unwrap().is_none());
+    // Un seul rattachement audité, la seconde connexion passe par l'alias.
+    let linked: Vec<_> = b
+        .audit
+        .events()
+        .into_iter()
+        .filter(|e| e.action == AuditAction::UserLinked)
+        .collect();
+    assert_eq!(linked.len(), 1);
+    assert_eq!(linked[0].target_user.as_deref(), Some("dana.roy@example.org"));
+    assert_eq!(linked[0].outcome, AuditOutcome::Success);
+}
 
 #[tokio::test]
 async fn login_records_name_and_email_for_the_admin_directory() {

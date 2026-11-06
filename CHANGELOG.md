@@ -9,6 +9,8 @@ Notes détaillées de chaque version : [`docs/releases/`](docs/releases/).
 
 ## [Non publié]
 
+- 👤 **Enrôlement par e-mail, rattaché à la première connexion** (ADR 0036) : dans l'administration (Utilisateurs), on peut enrôler quelqu'un par son **e-mail** seul, sans connaître sa clé SSO. Ses comptes sont rangés sous l'e-mail ; à sa première connexion réelle, le portail reconnaît la personne (claim `SESAME_OIDC_ENROLMENT_CLAIM`, `email` par défaut ; ⚠️ avec Entra ID préférez `preferred_username`, le claim `email` n'étant pas vérifié), lui rattache son identité SSO une seule fois et l'audite (`user_linked`). Les clés ne sont pas ré-écrites (alias). ⚠️ Migration `0011` (tables `enrolments` et `user_aliases`), appliquée automatiquement au démarrage du portail et du proxy ; touche le portail et l'administration.
+
 ## [0.3.0] - 2026-11-02
 
 - 👤 **Enrôlement préalable des utilisateurs** (ADR 0035) : depuis la page Utilisateurs de l'administration, on enrôle quelqu'un par sa clé d'identité SSO (nom et e-mail facultatifs) **sans qu'il se soit connecté une première fois**, puis on lui ajoute ses comptes applicatifs (boutons « Ajouter un compte » de sa page) ; il retrouve ses applications dès sa première connexion. L'enrôlement n'accorde aucun droit et n'ajoute pas de migration (table `users` existante) ; la liste et la recherche montrent désormais aussi les utilisateurs connus sans compte. Nouvel événement d'audit `user_enrolled`. Changement de l'administration seule.

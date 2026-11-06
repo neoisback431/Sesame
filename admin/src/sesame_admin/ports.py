@@ -79,6 +79,20 @@ class UserProfile:
 
 
 @dataclass(frozen=True)
+class Enrolment:
+    """Enrôlement préalable par e-mail (ADR 0036) : en attente de la première connexion de la
+    personne (``claimed_at`` absent) ou déjà rattaché à son identité."""
+
+    match_value: str
+    created_at: datetime
+    claimed_at: datetime | None
+
+
+class EnrolmentRefused(ValueError):
+    """Enrôlement impossible ; le message, destiné à l'administrateur, ne contient aucun secret."""
+
+
+@dataclass(frozen=True)
 class StoredDescriptor:
     """Descripteur en base : document JSON conforme au schéma, sans aucun secret."""
 
@@ -291,6 +305,17 @@ class AccountStore(Protocol):
         """Pré-enrôle un utilisateur avant sa première connexion : crée son profil (table
         ``users``) ou complète le nom / l'e-mail fournis sans effacer ceux déjà connus. Le portail
         remplace ces valeurs par celles du fournisseur d'identité à la première connexion."""
+        ...
+
+    async def enrol_by_email(self, email: str, display_name: str | None, created_by: str | None) -> str:
+        """Enrôle à la main un utilisateur identifié par son e-mail (ADR 0036) : la clé sous
+        laquelle ses comptes seront rangés est l'e-mail en minuscules (renvoyée). Au premier
+        passage de la personne par le portail, son identité SSO est rattachée à cette clé.
+        ``EnrolmentRefused`` si l'e-mail est déjà enrôlé ou déjà connu (sous n'importe quelle clé)."""
+        ...
+
+    async def enrolments(self, user_keys: Iterable[str]) -> dict[str, Enrolment]:
+        """Enrôlements par e-mail parmi ``user_keys`` (les autres sont absents du résultat)."""
         ...
 
     async def known_users(self, limit: int) -> list[str]:

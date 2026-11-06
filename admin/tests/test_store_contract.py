@@ -595,3 +595,27 @@ async def test_notification_outbox_lifecycle(notification_store):
     await store.mark(second.id, "failed", "smtp_connect")
     assert {n.id: n for n in await store.recent(50)}[second.id].status == "failed"
     assert await store.purge(30) == 0  # rien d'assez ancien
+
+
+async def test_enrol_by_email_contract(store):
+    """Enrôlement par e-mail (ADR 0036) : clé = e-mail en minuscules ; doublons et e-mails connus refusés."""
+    from sesame_admin.ports import EnrolmentRefused
+
+    tag = uuid.uuid4().hex[:8]
+    email = f"Fay.Roy-{tag}@Example.org"
+    key = await store.enrol_by_email(email, f"Fay Roy{tag}", "admin")
+    assert key == email.lower()
+    assert await store.user_profiles([key]) == {key: UserProfile(f"Fay Roy{tag}", key)}
+    enrolment = (await store.enrolments([key, "personne"]))[key]
+    assert enrolment.match_value == key and enrolment.claimed_at is None
+    assert await store.enrolments([]) == {}
+    assert [u for u, _ in await store.search_users(f"fay roy{tag}", 10)] == [key]
+
+    with pytest.raises(EnrolmentRefused):
+        await store.enrol_by_email(email.upper(), None, "admin")
+
+    # E-mail déjà connu sous une autre clé (utilisateur déjà connecté avec son oid).
+    other = f"oid-{tag}"
+    await put_profile(store, other, "Gus", f"gus-{tag}@example.org")
+    with pytest.raises(EnrolmentRefused):
+        await store.enrol_by_email(f"GUS-{tag}@example.org", None, "admin")

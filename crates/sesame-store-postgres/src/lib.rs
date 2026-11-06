@@ -15,8 +15,8 @@ use sesame_core::identity::UserIdentity;
 use sesame_core::ports::{
     AccessRequest, AccessRequestKind, AccessRequests, AccountKey, AccountRegistry, AccountStatus, AppAccount,
     AppSession, DescriptorStore, DiagnosticStore, NotificationEvent, Notifier, PortError, PortResult,
-    PortalSession, ReplayDiagnostic, SessionStore, StoredDescriptor, SubmitOutcome, UserDirectory,
-    UserProfile,
+    PortalSession, ReplayDiagnostic, ResolvedUser, SessionStore, StoredDescriptor, SubmitOutcome,
+    UserDirectory, UserProfile,
 };
 use sesame_core::secret::{AppCookie, ExposeSecret, SecretString};
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -204,6 +204,7 @@ impl SessionStore for PgStore {
                     user_key: r.try_get("user_key")?,
                     display_name: r.try_get("display_name")?,
                     email: None,
+                    enrolment_id: None,
                     groups: r.try_get("groups")?,
                 },
                 created_at: r.try_get::<DateTime<Utc>, _>("created_at")?.into(),
@@ -573,6 +574,70 @@ impl UserDirectory for PgStore {
             display_name: r.get("display_name"),
             email: r.get("email"),
         }))
+    }
+
+    async fn resolve_user_key(&self, user: &UserIdentity) -> PortResult<ResolvedUser> {
+        async fn alias(
+            conn: &mut sqlx::PgConnection,
+            user: &UserIdentity,
+        ) -> Result<Option<String>, sqlx::Error> {
+            sqlx::query_scalar("SELECT user_key FROM user_aliases WHERE issuer = $1 AND subject = $2")
+                .bind(&user.issuer)
+                .bind(&user.subject)
+                .fetch_optional(conn)
+                .await
+        }
+        let linked = |user_key: String, newly_linked| ResolvedUser {
+            user_key,
+            newly_linked,
+        };
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        if let Some(key) = alias(&mut *tx, user).await.map_err(db_err)? {
+            return Ok(linked(key, false));
+        }
+        if let Some(wanted) = user.enrolment_id.as_deref() {
+            // Réclamation atomique : la ligne n'est prise que si elle est encore en attente.
+            let claimed: Option<String> = sqlx::query_scalar(
+                "UPDATE enrolments SET claimed_issuer = $1, claimed_subject = $2, claimed_at = now()
+                 WHERE claimed_at IS NULL AND lower(match_value) = lower($3)
+                 RETURNING user_key",
+            )
+            .bind(&user.issuer)
+            .bind(&user.subject)
+            .bind(wanted)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+            if let Some(key) = claimed {
+                sqlx::query("INSERT INTO user_aliases (issuer, subject, user_key) VALUES ($1, $2, $3)")
+                    .bind(&user.issuer)
+                    .bind(&user.subject)
+                    .bind(&key)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_err)?;
+                tx.commit().await.map_err(db_err)?;
+                return Ok(linked(key, true));
+            }
+            // Deux premières connexions simultanées de la même identité : la seconde attend
+            // la première (verrou de ligne), ne trouve plus rien à réclamer et lit son alias.
+            if let Some(key) = alias(&mut *tx, user).await.map_err(db_err)? {
+                return Ok(linked(key, false));
+            }
+        }
+        Ok(linked(user.user_key.clone(), false))
+    }
+
+    async fn enrol(&self, user_key: &str, match_value: &str) -> PortResult<bool> {
+        let done = sqlx::query(
+            "INSERT INTO enrolments (user_key, match_value) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(user_key)
+        .bind(match_value)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(done.rows_affected() == 1)
     }
 }
 

@@ -28,7 +28,15 @@ from .auth import Authenticator, AuthError, SamlAuthenticator
 from .descriptors import draft
 from .identity import AdminUser, ClaimsError, identity_from_claims, valid_user_key
 from .notifications import EVENTS, NotificationWorker, parse_recipients
-from .ports import DEFAULT_ACCOUNT, NotFound, NotificationSettings, Unavailable, UserProfile, valid_account_id
+from .ports import (
+    DEFAULT_ACCOUNT,
+    Enrolment,
+    NotFound,
+    NotificationSettings,
+    Unavailable,
+    UserProfile,
+    valid_account_id,
+)
 from .recorder import Recorder, RecorderError
 from .service import AdminService, InvalidDescriptor, InvalidInput
 
@@ -116,6 +124,13 @@ def create_app(
         montre la clé utilisateur, elle ne doit jamais échouer pour un nom."""
         try:
             return await service.accounts.user_profiles(set(keys))
+        except Unavailable:
+            return {}
+
+    async def enrolments_for(keys: Iterable[str]) -> dict[str, Enrolment]:
+        """Utilisateurs enrôlés par e-mail parmi ``keys`` (ADR 0036), best-effort comme les noms."""
+        try:
+            return await service.accounts.enrolments(set(keys))
         except Unavailable:
             return {}
 
@@ -719,20 +734,29 @@ def create_app(
         except Unavailable:
             return error(request, 503, "Service indisponible", "Le registre des comptes est injoignable.")
         people = await people_for(u for u, _ in rows)
-        return render(request, "users.html", admin=admin, rows=rows, q=q.strip(), people=people)
+        return render(
+            request,
+            "users.html",
+            admin=admin,
+            rows=rows,
+            q=q.strip(),
+            people=people,
+            enrolments=await enrolments_for(u for u, _ in rows),
+        )
 
     @app.post("/users")
     async def enroll_user(
         request: Request,
         admin: Admin,
-        user_key: Annotated[str, Form()],
+        user_key: Annotated[str, Form()] = "",
         display_name: Annotated[str, Form()] = "",
         email: Annotated[str, Form()] = "",
+        mode: Annotated[str, Form()] = "key",
     ) -> Response:
         cid = correlation_id(request)
         try:
             await check_csrf(request)
-            key = await service.enroll_user(admin, user_key, display_name, email, cid)
+            key = await service.enroll_user(admin, user_key, display_name, email, cid, mode)
         except InvalidInput as e:
             request.session["flash"] = {"kind": "error", "text": str(e)}
             return RedirectResponse("/users", status_code=303)
@@ -743,9 +767,10 @@ def create_app(
                 "text": f"Opération impossible : service indisponible (référence {cid}).",
             }
             return RedirectResponse("/users", status_code=303)
+        by_email = " Il sera rattaché à son identité SSO à sa première connexion." if mode == "email" else ""
         request.session["flash"] = {
             "kind": "ok",
-            "text": f"Utilisateur « {key} » enrôlé : ajoutez maintenant ses comptes applicatifs.",
+            "text": f"Utilisateur « {key} » enrôlé : ajoutez maintenant ses comptes applicatifs.{by_email}",
         }
         return RedirectResponse(f"/users/{key}", status_code=303)
 
@@ -758,7 +783,14 @@ def create_app(
             return error(request, 503, "Service indisponible", "La base de données est injoignable.")
         people = await people_for([user_key])
         return render(
-            request, "user.html", admin=admin, user_key=user_key, accounts=accounts, apps=apps, people=people
+            request,
+            "user.html",
+            admin=admin,
+            user_key=user_key,
+            accounts=accounts,
+            apps=apps,
+            people=people,
+            enrolments=await enrolments_for([user_key]),
         )
 
     @app.post("/users/{user_key}/disable-all")

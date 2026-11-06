@@ -5,6 +5,12 @@
 {% block content %}
 <p><a href="/users">← Utilisateurs</a></p>
 <h1>Comptes de {{ who(user_key, people) }}</h1>
+{% set enrolment = enrolments.get(user_key) %}
+{% if enrolment %}
+<p class="muted">Enrôlé par e-mail :
+  {% if enrolment.claimed_at %}rattaché à son identité SSO le {{ enrolment.claimed_at.strftime("%Y-%m-%d %H:%M") }}.
+  {% else %}<span class="tag">en attente de première connexion</span> — son identité SSO sera rattachée à cet utilisateur dès qu'il se connectera au portail.{% endif %}</p>
+{% endif %}
 <table>
   <thead><tr><th>Application</th><th>Compte</th><th>État</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
   <tbody>

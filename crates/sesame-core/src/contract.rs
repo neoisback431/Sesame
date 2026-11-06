@@ -23,6 +23,7 @@ fn portal_session(id: &str, ttl: Duration) -> PortalSession {
             user_key: "alice".into(),
             display_name: Some("Alice".into()),
             email: None,
+            enrolment_id: None,
             groups: vec!["g1".into(), "g2".into()],
         },
         created_at: now,
@@ -327,6 +328,57 @@ pub async fn user_directory(directory: &dyn UserDirectory, user: &str) {
         directory.get_user(user).await.unwrap(),
         Some(profile(Some("Alice Dupont"), Some("alice.martin@example.org")))
     );
+}
+
+/// Enrôlement préalable rattaché à la première connexion (ADR 0036). `tag` rend les valeurs
+/// uniques (base partagée entre les exécutions).
+pub async fn user_enrolments(directory: &dyn UserDirectory, tag: &str) {
+    let iss = "https://idp.example";
+    let identity = |subject: &str, oid_key: &str, enrolment: Option<&str>| UserIdentity {
+        issuer: iss.into(),
+        subject: subject.into(),
+        user_key: oid_key.into(),
+        display_name: None,
+        email: None,
+        enrolment_id: enrolment.map(str::to_owned),
+        groups: vec![],
+    };
+    let key = format!("dana.roy-{tag}@example.org");
+    let value = format!("Dana.Roy-{tag}@Example.org");
+
+    // Inconnu : la clé du fournisseur d'identité est renvoyée telle quelle, sans rattachement.
+    let stranger = identity(&format!("oid-x-{tag}"), &format!("oid-x-{tag}"), Some(&value));
+    let r = directory.resolve_user_key(&stranger).await.unwrap();
+    assert_eq!((r.user_key.as_str(), r.newly_linked), (stranger.user_key.as_str(), false));
+
+    // Enrôlement : refusé deux fois pour la même clé ou la même valeur (casse ignorée).
+    assert!(directory.enrol(&key, &value).await.unwrap());
+    assert!(!directory.enrol(&key, "autre@example.org").await.unwrap());
+    assert!(!directory
+        .enrol(&format!("autre-{tag}"), &value.to_uppercase())
+        .await
+        .unwrap());
+
+    // Sans valeur de correspondance, on ne rattache rien.
+    let blank = identity(&format!("oid-b-{tag}"), &format!("oid-b-{tag}"), None);
+    assert!(!directory.resolve_user_key(&blank).await.unwrap().newly_linked);
+
+    // Première connexion : rattachement, une seule fois (casse ignorée).
+    let dana = identity(&format!("oid-d-{tag}"), &format!("oid-d-{tag}"), Some(&value.to_lowercase()));
+    let first = directory.resolve_user_key(&dana).await.unwrap();
+    assert_eq!(first.user_key, key);
+    assert!(first.newly_linked);
+
+    // Connexions suivantes : l'alias suffit, même sans valeur de correspondance.
+    let again = identity(&dana.subject, &dana.user_key, None);
+    let second = directory.resolve_user_key(&again).await.unwrap();
+    assert_eq!((second.user_key.as_str(), second.newly_linked), (key.as_str(), false));
+
+    // L'enrôlement est consommé : une autre identité portant la même valeur ne le réclame pas
+    // (usurpation après coup) et reste sur sa propre clé.
+    let thief = identity(&format!("oid-t-{tag}"), &format!("oid-t-{tag}"), Some(&value));
+    let r = directory.resolve_user_key(&thief).await.unwrap();
+    assert_eq!((r.user_key.as_str(), r.newly_linked), (thief.user_key.as_str(), false));
 }
 
 /// `fresh` n'a aucun compte ; `existing` a un compte `default` actif ; `extra_only` n'a qu'un

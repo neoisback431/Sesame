@@ -270,6 +270,7 @@ mod tests {
             user_key: "alice".into(),
             display_name: Some("Alice <admin>".into()),
             email: None,
+            enrolment_id: None,
             groups: groups.iter().map(|g| g.to_string()).collect(),
         }
     }

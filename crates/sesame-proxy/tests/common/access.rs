@@ -38,6 +38,7 @@ pub fn bob(groups: &[&str]) -> UserIdentity {
         subject: "sub-bob".into(),
         display_name: Some("Bob".into()),
         email: None,
+        enrolment_id: None,
         ..alice(groups)
     }
 }

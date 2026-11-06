@@ -283,6 +283,31 @@ pub trait UserDirectory: Send + Sync {
     /// valeur déjà connue.
     async fn upsert_user(&self, profile: &UserProfile) -> PortResult<()>;
     async fn get_user(&self, user_key: &str) -> PortResult<Option<UserProfile>>;
+
+    /// Clé utilisateur effective d'une identité qui vient de s'authentifier (ADR 0036).
+    ///
+    /// 1. Un alias `(issuer, subject)` existe déjà : on renvoie la clé rattachée.
+    /// 2. Sinon, si un enrôlement préalable non réclamé porte la valeur `enrolment_id` (casse
+    ///    ignorée), il est réclamé **une seule fois** (de façon atomique) et l'identité lui est
+    ///    rattachée par un alias : `newly_linked` vaut `true`.
+    /// 3. Sinon, la clé issue du fournisseur d'identité est renvoyée telle quelle.
+    ///
+    /// Une erreur ne doit jamais se solder par un repli silencieux sur la clé du fournisseur :
+    /// l'appelant refuse la connexion.
+    async fn resolve_user_key(&self, user: &UserIdentity) -> PortResult<ResolvedUser>;
+
+    /// Enregistre un enrôlement préalable : `user_key` sera rattaché à la première identité dont
+    /// `enrolment_id` vaut `match_value`. Écrit par l'administration (Python) ; exposé ici pour
+    /// les tests de contrat. `false` si la clé ou la valeur est déjà enrôlée et non réclamée.
+    async fn enrol(&self, user_key: &str, match_value: &str) -> PortResult<bool>;
+}
+
+/// Résultat de [`UserDirectory::resolve_user_key`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedUser {
+    pub user_key: String,
+    /// Vrai si l'identité vient d'être rattachée à un enrôlement (à auditer).
+    pub newly_linked: bool,
 }
 
 /// Nature d'une demande d'accès (ADR 0029).

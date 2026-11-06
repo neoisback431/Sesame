@@ -48,6 +48,8 @@ pub struct Oidc {
     scopes: Vec<String>,
     user_key_claim: String,
     groups_claim: String,
+    /// Claim de correspondance des enrôlements préalables (ADR 0036).
+    enrolment_claim: String,
 }
 
 /// Partie de `PendingLogin` propre à OIDC.
@@ -91,6 +93,7 @@ impl Oidc {
             scopes: cfg.scopes.clone(),
             user_key_claim: cfg.user_key_claim.clone(),
             groups_claim: cfg.groups_claim.clone(),
+            enrolment_claim: cfg.enrolment_claim.clone(),
         })
     }
 
@@ -160,8 +163,21 @@ impl Oidc {
             .and_then(|p| URL_SAFE_NO_PAD.decode(p).ok())
             .and_then(|b| serde_json::from_slice::<Map<String, Value>>(&b).ok())
             .ok_or_else(|| OidcError::Token("charge utile illisible".into()))?;
-        identity_from_claims(&payload, &self.issuer, &self.user_key_claim, &self.groups_claim)
+        let mut identity =
+            identity_from_claims(&payload, &self.issuer, &self.user_key_claim, &self.groups_claim)?;
+        identity.enrolment_id = enrolment_value(&payload, &self.enrolment_claim);
+        Ok(identity)
     }
+}
+
+/// Valeur du claim de correspondance des enrôlements (ADR 0036) : texte non vide, sinon aucune.
+pub fn enrolment_value(claims: &Map<String, Value>, claim: &str) -> Option<String> {
+    claims
+        .get(claim)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
 }
 
 /// Lit `end_session_endpoint` dans le document de discovery (absent du modèle standard
@@ -233,6 +249,7 @@ pub fn identity_from_claims(
             .or_else(|| text("preferred_username"))
             .or_else(|| text("email")),
         email: text("email"),
+        enrolment_id: None,
         groups,
     })
 }
@@ -295,5 +312,14 @@ mod tests {
         assert!(identity_from_claims(&c, "i", "oid", "groups").is_err());
         let c = claims(json!({"sub": "s", "groups": {"x": 1}}));
         assert!(identity_from_claims(&c, "i", "sub", "groups").is_err());
+    }
+
+    #[test]
+    fn enrolment_value_reads_the_configured_claim() {
+        let c = claims(serde_json::json!({"email": " Dana@Example.org ", "upn": "", "n": 3}));
+        assert_eq!(enrolment_value(&c, "email").as_deref(), Some("Dana@Example.org"));
+        assert_eq!(enrolment_value(&c, "upn"), None);
+        assert_eq!(enrolment_value(&c, "n"), None);
+        assert_eq!(enrolment_value(&c, "absent"), None);
     }
 }

@@ -112,6 +112,12 @@ variable "oidc_groups_claim" {
   default     = "groups"
 }
 
+variable "oidc_enrolment_claim" {
+  description = "Claim qui rattache une personne enrôlée par e-mail à sa première connexion (ADR 0036). Entra ID : le claim email n'est pas vérifié, préférer preferred_username."
+  type        = string
+  default     = "email"
+}
+
 variable "alb_internal" {
   description = "ALB interne (joignable seulement depuis le réseau de l'organisation) ou public."
   type        = bool

@@ -194,7 +194,23 @@ impl Portal {
 
     /// Session portail créée après vérification réussie de l'identité, quel que soit le
     /// protocole. Partagé par le retour OIDC (`callback`) et le retour SAML (`saml_acs`).
-    async fn finish_login(&self, user: UserIdentity, return_to: &str, cid: &str) -> Response {
+    async fn finish_login(&self, mut user: UserIdentity, return_to: &str, cid: &str) -> Response {
+        // Utilisateur enrôlé à la main (ADR 0036) : l'identité est rattachée à la clé sous laquelle
+        // ses comptes sont rangés. Échec fermé : jamais de repli silencieux sur la clé du
+        // fournisseur, qui couperait l'utilisateur de ses comptes.
+        let linked = match self.users.resolve_user_key(&user).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!(correlation_id = %cid, error = %e, "résolution de la clé utilisateur impossible");
+                return self.error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Service indisponible",
+                    "Réessayez dans quelques instants.",
+                    cid,
+                );
+            }
+        };
+        user.user_key = linked.user_key;
         let token = new_token();
         let now = SystemTime::now();
         let session = PortalSession {
@@ -206,8 +222,17 @@ impl Portal {
         let event = AuditEvent::new(AuditAction::PortalLogin, AuditOutcome::Success)
             .actor(&user)
             .correlation(cid);
+        let link_event = linked.newly_linked.then(|| {
+            AuditEvent::new(AuditAction::UserLinked, AuditOutcome::Success)
+                .actor(&user)
+                .target(&user.user_key)
+                .correlation(cid)
+        });
         // L'audit fait partie de l'opération : pas de session sans trace.
         let stored = async {
+            if let Some(link_event) = link_event {
+                self.audit.record(link_event).await?;
+            }
             self.audit.record(event).await?;
             self.sessions.create_portal_session(session).await
         };

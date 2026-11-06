@@ -9,11 +9,12 @@ use std::time::SystemTime;
 use async_trait::async_trait;
 
 use crate::audit::AuditEvent;
+use crate::identity::UserIdentity;
 use crate::ports::{
     AccessRequest, AccessRequestKind, AccessRequests, AccountKey, AccountRegistry, AccountStatus, AppAccount,
     AppSession, AuditSink, DescriptorStore, DiagnosticStore, NotificationEvent, Notifier, PortError,
-    PortResult, PortalSession, ReplayDiagnostic, SecretStore, SecretWriter, SessionStore, StoredDescriptor,
-    SubmitOutcome, UserDirectory, UserProfile,
+    PortResult, PortalSession, ReplayDiagnostic, ResolvedUser, SecretStore, SecretWriter, SessionStore,
+    StoredDescriptor, SubmitOutcome, UserDirectory, UserProfile,
 };
 use crate::secret::{Credential, ExposeSecret, SecretString};
 
@@ -293,6 +294,10 @@ impl SecretWriter for MemorySecretStore {
 #[derive(Default)]
 pub struct MemoryUserDirectory {
     users: Mutex<HashMap<String, UserProfile>>,
+    /// Enrôlements préalables : clé -> (valeur de correspondance minuscule, réclamé ?).
+    enrolments: Mutex<HashMap<String, (String, bool)>>,
+    /// Alias `(issuer, subject)` -> clé rattachée.
+    aliases: Mutex<HashMap<(String, String), String>>,
 }
 
 impl MemoryUserDirectory {
@@ -323,6 +328,48 @@ impl UserDirectory for MemoryUserDirectory {
 
     async fn get_user(&self, user_key: &str) -> PortResult<Option<UserProfile>> {
         Ok(locked(&self.users).get(user_key).cloned())
+    }
+
+    async fn resolve_user_key(&self, user: &UserIdentity) -> PortResult<ResolvedUser> {
+        // Un seul verrou d'alias tenu pendant toute la résolution : réclamation atomique.
+        let mut aliases = locked(&self.aliases);
+        let id = (user.issuer.clone(), user.subject.clone());
+        if let Some(key) = aliases.get(&id) {
+            return Ok(ResolvedUser {
+                user_key: key.clone(),
+                newly_linked: false,
+            });
+        }
+        if let Some(wanted) = user.enrolment_id.as_deref().map(str::to_lowercase) {
+            let mut enrolments = locked(&self.enrolments);
+            let claimed = enrolments
+                .iter_mut()
+                .find(|(_, (value, done))| !*done && *value == wanted);
+            if let Some((key, (_, done))) = claimed {
+                *done = true;
+                aliases.insert(id, key.clone());
+                return Ok(ResolvedUser {
+                    user_key: key.clone(),
+                    newly_linked: true,
+                });
+            }
+        }
+        Ok(ResolvedUser {
+            user_key: user.user_key.clone(),
+            newly_linked: false,
+        })
+    }
+
+    async fn enrol(&self, user_key: &str, match_value: &str) -> PortResult<bool> {
+        let value = match_value.to_lowercase();
+        let mut enrolments = locked(&self.enrolments);
+        if enrolments.contains_key(user_key)
+            || enrolments.values().any(|(v, done)| !*done && *v == value)
+        {
+            return Ok(false);
+        }
+        enrolments.insert(user_key.to_owned(), (value, false));
+        Ok(true)
     }
 }
 
@@ -538,5 +585,10 @@ mod user_directory_tests {
     #[tokio::test]
     async fn memory_user_directory_honors_the_contract() {
         crate::contract::user_directory(&MemoryUserDirectory::new(), "alice").await;
+    }
+
+    #[tokio::test]
+    async fn memory_user_directory_honors_the_enrolment_contract() {
+        crate::contract::user_enrolments(&MemoryUserDirectory::new(), "t1").await;
     }
 }

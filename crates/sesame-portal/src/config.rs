@@ -51,6 +51,9 @@ pub struct OidcConfig {
     /// Claim servant de clé utilisateur (coffre, registre). Défaut : `sub`.
     pub user_key_claim: String,
     pub groups_claim: String,
+    /// Claim reconnaissant un utilisateur enrôlé à la main à sa première connexion
+    /// (ADR 0036). Défaut : `email`.
+    pub enrolment_claim: String,
     /// Déconnexion aussi chez le fournisseur d'identité (RP-initiated logout).
     pub idp_logout: bool,
 }
@@ -85,6 +88,7 @@ fn idp_config_from_env() -> Result<IdpConfig, ConfigError> {
                 .collect(),
             user_key_claim: config::or("SESAME_OIDC_USER_KEY_CLAIM", "sub"),
             groups_claim: config::or("SESAME_OIDC_GROUPS_CLAIM", "groups"),
+            enrolment_claim: config::or("SESAME_OIDC_ENROLMENT_CLAIM", "email"),
             idp_logout: config::flag("SESAME_OIDC_LOGOUT"),
         })),
         "saml" => {

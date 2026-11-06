@@ -20,6 +20,9 @@ pub enum AuditAction {
     /// Compte applicatif choisi par l'utilisateur depuis « Mes applications » (ADR 0034).
     AccountSelected,
     AccountStatusChanged,
+    /// Identité du fournisseur rattachée à un utilisateur enrôlé à la main, à sa première
+    /// connexion (ADR 0036).
+    UserLinked,
     /// Demande d'accès déposée depuis « Mes applications » (ADR 0029).
     AccessRequested,
     /// Émis par l'UI d'administration.
@@ -85,6 +88,12 @@ impl AuditEvent {
 
     pub fn account(mut self, account_id: &str) -> Self {
         self.account_id = Some(account_id.to_owned());
+        self
+    }
+
+    /// Utilisateur visé quand il diffère de l'acteur.
+    pub fn target(mut self, user_key: &str) -> Self {
+        self.target_user = Some(user_key.to_owned());
         self
     }
 

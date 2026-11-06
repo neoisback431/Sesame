@@ -304,6 +304,7 @@ pub fn alice(groups: &[&str]) -> UserIdentity {
         user_key: "alice".into(),
         display_name: Some("Alice".into()),
         email: None,
+        enrolment_id: None,
         groups: groups.iter().map(|g| g.to_string()).collect(),
     }
 }

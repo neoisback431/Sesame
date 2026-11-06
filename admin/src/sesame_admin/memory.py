@@ -17,6 +17,8 @@ from .ports import (
     Conflict,
     DescriptorRevision,
     Diagnostic,
+    Enrolment,
+    EnrolmentRefused,
     NotFound,
     Notification,
     NotificationSettings,
@@ -28,6 +30,10 @@ from .ports import (
 # Clé des dictionnaires en mémoire : (appli, utilisateur) pour le compte `default`, comme avant
 # les comptes multiples (ADR 0034), (appli, utilisateur, compte) pour les autres.
 Key = tuple[str, ...]
+
+_ENROLMENT_REFUSED = (
+    "Cet e-mail est déjà enrôlé ou déjà connu : ajoutez les comptes à l'utilisateur existant."
+)
 
 
 def key(app_id: str, user_key: str, account_id: str = DEFAULT_ACCOUNT) -> Key:
@@ -58,6 +64,8 @@ class MemoryAccountStore:
         self.profiles: dict[str, UserProfile] = {}
         # Diagnostics de rejeu (écrits par le proxy en production) : documents JSON.
         self.diagnostics: dict[Key, dict[str, Any]] = {}
+        # Enrôlements par e-mail (ADR 0036) : clé -> enrôlement ; le portail les réclame en production.
+        self.enrolment_entries: dict[str, Enrolment] = {}
         # Comptes choisis par les utilisateurs (écrits par le portail en production).
         self.selections: dict[tuple[str, str], str] = {}
 
@@ -153,6 +161,21 @@ class MemoryAccountStore:
         self.profiles[user_key] = UserProfile(
             display_name or (old.display_name if old else None), email or (old.email if old else None)
         )
+
+    async def enrol_by_email(self, email: str, display_name: str | None, created_by: str | None) -> str:
+        key = email.strip().lower()
+        pending = {e.match_value.lower() for e in self.enrolment_entries.values() if e.claimed_at is None}
+        known = {k for k, p in self.profiles.items() if p.email and p.email.lower() == key} | (
+            {k for k in self.profiles if k == key}
+        )
+        if key in self.enrolment_entries or key in pending or known:
+            raise EnrolmentRefused(_ENROLMENT_REFUSED)
+        self.enrolment_entries[key] = Enrolment(key, datetime.now(UTC), None)
+        self.profiles[key] = UserProfile(display_name, key)
+        return key
+
+    async def enrolments(self, user_keys: Iterable[str]) -> dict[str, Enrolment]:
+        return {k: self.enrolment_entries[k] for k in user_keys if k in self.enrolment_entries}
 
     async def known_users(self, limit: int) -> list[str]:
         keys = {k[1] for k in self.accounts} | self.portal_users | set(self.profiles)

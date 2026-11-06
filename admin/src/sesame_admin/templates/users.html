@@ -25,18 +25,30 @@
 </table>
 <div class="card" style="margin-top:16px">
   <h2>Enrôler un utilisateur</h2>
-  <p class="muted">Pour préparer l'accès de quelqu'un <strong>avant sa première connexion</strong> : saisissez sa clé d'identité
-    SSO, <strong>exactement</strong> la valeur du claim configuré pour le portail (ex. <code>oid</code>, <code>sub</code> ou
-    <code>preferred_username</code>). Vous ajoutez ensuite ses comptes applicatifs ; à sa première connexion il retrouve ses
-    applications. Le nom et l'e-mail sont facultatifs (affichage) et remplacés par ceux du fournisseur d'identité à la connexion.</p>
+  <p class="muted">Pour préparer l'accès de quelqu'un <strong>avant sa première connexion</strong>. Vous ajoutez ensuite ses
+    comptes applicatifs ; à sa première connexion il retrouve ses applications.</p>
   <form method="post" action="/users">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label for="user_key">Clé d'identité SSO</label>
-    <input type="text" id="user_key" name="user_key" required maxlength="256" autocomplete="off">
+    <label for="mode">Identifier la personne par</label>
+    <select id="mode" name="mode" onchange="document.getElementById('by-key').hidden = this.value !== 'key'; document.getElementById('by-email').hidden = this.value !== 'email';">
+      <option value="email" selected>Son e-mail (rattachée à son identité SSO à sa première connexion)</option>
+      <option value="key">Sa clé d'identité SSO exacte</option>
+    </select>
+    <div id="by-email">
+      <label for="email">E-mail</label>
+      <input type="email" id="email" name="email" maxlength="320" autocomplete="off">
+      <p class="muted">Doit correspondre à l'attribut que le fournisseur d'identité envoie à sa connexion (claim
+        <code>SESAME_OIDC_ENROLMENT_CLAIM</code>, <code>email</code> par défaut). Le rattachement n'a lieu qu'une fois ;
+        ses comptes restent rangés sous cet e-mail.</p>
+    </div>
+    <div id="by-key" hidden>
+      <label for="user_key">Clé d'identité SSO</label>
+      <input type="text" id="user_key" name="user_key" maxlength="256" autocomplete="off">
+      <p class="muted"><strong>Exactement</strong> la valeur du claim configuré pour le portail (ex. <code>oid</code>,
+        <code>sub</code> ou <code>preferred_username</code>).</p>
+    </div>
     <label for="display_name">Nom <span class="muted">(facultatif)</span></label>
     <input type="text" id="display_name" name="display_name" maxlength="200" autocomplete="off">
-    <label for="email">E-mail <span class="muted">(facultatif)</span></label>
-    <input type="email" id="email" name="email" maxlength="320" autocomplete="off">
     <button type="submit">Enrôler</button>
   </form>
 </div>

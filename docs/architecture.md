@@ -423,7 +423,7 @@ Application Python (FastAPI, pages rendues côté serveur) sur son propre nom d'
 - **Accès** : même protocole et même fournisseur d'identité que le portail, avec un client (OIDC) ou un `entityID` (SAML) dédié. Membres du groupe d'administrateurs uniquement (`SESAME_ADMIN_GROUP`) ; les autres reçoivent `access_denied`.
 - **Coffre** : écriture sans lecture, quelle que soit l'implémentation (PostgreSQL par défaut, AppRole d'écriture pour OpenBao / Vault). Un identifiant saisi ne peut jamais être relu, ni dans l'UI ni par l'API du coffre.
 - **Protections web** : jeton CSRF sur chaque action, cookie de session signé (`HttpOnly`, `Secure`, `SameSite=Lax`, 1 h) régénéré à la connexion, redirection après connexion limitée aux chemins locaux.
-- **Audit** : `admin_login`, `credential_written`, `credential_deleted`, `account_status_changed`, `access_denied`, `descriptor_created`, `descriptor_updated`, `descriptor_deleted`, `descriptor_recorded`, `user_enrolled`, avec l'administrateur comme acteur et le compte visé dans `target_user`.
+- **Audit** : `admin_login`, `credential_written`, `credential_deleted`, `account_status_changed`, `access_denied`, `descriptor_created`, `descriptor_updated`, `descriptor_deleted`, `descriptor_recorded`, `user_enrolled`, `user_linked` (portail, rattachement d'une identité SSO à un utilisateur enrôlé par e-mail, ADR 0036), avec l'administrateur comme acteur et le compte visé dans `target_user`.
 
 ### Catalogue des applis : fichiers et base
 

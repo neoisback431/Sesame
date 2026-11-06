@@ -20,6 +20,11 @@ pub struct UserIdentity {
     /// Adresse e-mail déclarée par le fournisseur d'identité, pour distinguer des homonymes
     /// dans l'administration. Jamais une valeur d'autorisation.
     pub email: Option<String>,
+    /// Valeur de l'attribut de correspondance des enrôlements préalables (claim configurable,
+    /// l'e-mail par défaut), ADR 0036. Sert une seule fois, à la première connexion, à rattacher
+    /// l'identité à un utilisateur enrôlé à la main. Jamais une valeur d'autorisation.
+    #[serde(default)]
+    pub enrolment_id: Option<String>,
     /// Groupes issus des claims, utilisés pour les habilitations.
     pub groups: Vec<String>,
 }

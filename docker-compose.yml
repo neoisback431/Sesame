@@ -50,6 +50,7 @@ services:
       # En dev, clé coffre lisible ; en production préférer sub (ou oid pour Entra ID).
       SESAME_OIDC_USER_KEY_CLAIM: ${SESAME_OIDC_USER_KEY_CLAIM:-preferred_username}
       SESAME_OIDC_GROUPS_CLAIM: ${SESAME_OIDC_GROUPS_CLAIM:-groups}
+      SESAME_OIDC_ENROLMENT_CLAIM: ${SESAME_OIDC_ENROLMENT_CLAIM:-email}
       # Déconnexion aussi chez l'IdP (désactivée par défaut, activée en dev pour la tester).
       SESAME_OIDC_LOGOUT: ${SESAME_OIDC_LOGOUT:-true}
       # Lien « Administration » sur « Mes applications », pour le groupe d'administrateurs.

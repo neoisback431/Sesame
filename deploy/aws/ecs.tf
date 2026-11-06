@@ -24,6 +24,7 @@ locals {
       SESAME_OIDC_CLIENT_ID      = var.oidc_portal_client_id
       SESAME_OIDC_USER_KEY_CLAIM = var.oidc_user_key_claim
       SESAME_OIDC_GROUPS_CLAIM   = var.oidc_groups_claim
+      SESAME_OIDC_ENROLMENT_CLAIM = var.oidc_enrolment_claim
       # Service interne du proxy (Service Connect) : demandes d'accès avec identifiants.
       SESAME_PROXY_INTERNAL_URL = "http://proxy-internal:8082"
     }

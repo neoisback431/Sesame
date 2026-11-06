@@ -21,6 +21,8 @@ from .ports import (
     Conflict,
     DescriptorRevision,
     Diagnostic,
+    Enrolment,
+    EnrolmentRefused,
     NotFound,
     Notification,
     NotificationSettings,
@@ -193,6 +195,39 @@ class PostgresAccountStore:
         for r in rows:
             out.setdefault(r["app_id"], {})[r["status"]] = r["n"]
         return out
+
+    async def enrol_by_email(self, email: str, display_name: str | None, created_by: str | None) -> str:
+        key = email.strip().lower()
+        pool = await self.pool()
+        async with pool.acquire() as conn, conn.transaction():
+            taken = await conn.fetchval(
+                "SELECT 1 FROM users WHERE user_key = $1 OR lower(email) = $1 LIMIT 1", key
+            )
+            added = not taken and await conn.fetchval(
+                """INSERT INTO enrolments (user_key, match_value, created_by) VALUES ($1, $1, $2)
+                   ON CONFLICT DO NOTHING RETURNING 1""",
+                key,
+                created_by,
+            )
+            if not added:
+                raise EnrolmentRefused(
+                    "Cet e-mail est déjà enrôlé ou déjà connu : ajoutez les comptes à l'utilisateur existant."
+                )
+            await conn.execute(
+                "INSERT INTO users (user_key, display_name, email) VALUES ($1, $2, $1)", key, display_name
+            )
+        return key
+
+    async def enrolments(self, user_keys: Iterable[str]) -> dict[str, Enrolment]:
+        keys = list(user_keys)
+        if not keys:
+            return {}
+        rows = await (await self.pool()).fetch(
+            "SELECT user_key, match_value, created_at, claimed_at FROM enrolments"
+            " WHERE user_key = ANY($1::text[])",
+            keys,
+        )
+        return {r["user_key"]: Enrolment(r["match_value"], r["created_at"], r["claimed_at"]) for r in rows}
 
     async def known_users(self, limit: int) -> list[str]:
         # Titulaires d'un compte + personnes déjà connectées au portail (même base).

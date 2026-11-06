@@ -9,6 +9,7 @@ identifiants ne sont jamais journalisées, auditées ni renvoyées.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from .audit import AuditEvent, AuditSink
@@ -35,6 +36,7 @@ from .ports import (
     AccountStore,
     Conflict,
     DescriptorStore,
+    EnrolmentRefused,
     NotFound,
     NotificationSettings,
     NotificationStore,
@@ -48,6 +50,9 @@ from .ports import (
 log = logging.getLogger(__name__)
 
 MAX_VALUE_LEN = 4096
+# Forme minimale d'une adresse e-mail (une seule arobase, un point dans le domaine, ni espace ni
+# caractère de contrôle) : l'IdP reste seul juge de sa validité réelle.
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 class InvalidInput(ValueError):
@@ -298,17 +303,32 @@ class AdminService:
     # --- Comptes -------------------------------------------------------------------
 
     async def enroll_user(
-        self, actor: AdminUser, user_key: str, display_name: str, email: str, cid: str
+        self,
+        actor: AdminUser,
+        user_key: str,
+        display_name: str,
+        email: str,
+        cid: str,
+        mode: str = "key",
     ) -> str:
         """Pré-enrôle un utilisateur par sa clé d'identité (ADR 0035), sans connexion préalable.
 
         Aucun droit n'est accordé : l'utilisateur devient simplement connu (visible dans la liste,
         proposé au provisionnement, nom affiché). Ses comptes se créent ensuite appli par appli.
         Le nom et l'e-mail facultatifs sont écrasés par ceux du fournisseur d'identité à sa première
-        connexion. Renvoie la clé normalisée."""
+        connexion. Renvoie la clé normalisée.
+
+        ``mode="email"`` (ADR 0036) : la personne est identifiée par son e-mail seul, sans que
+        l'administrateur connaisse sa clé SSO. Ses comptes sont rangés sous l'e-mail en
+        minuscules ; à sa première connexion, le portail rattache son identité SSO à cette clé
+        (une seule fois, auditée ``user_linked``)."""
         user_key = user_key.strip()
         display_name = display_name.strip()
         email = email.strip()
+        if mode not in ("key", "email"):
+            raise InvalidInput("Mode d'enrôlement inconnu.")
+        if mode == "email":
+            return await self._enroll_by_email(actor, display_name, email, cid)
         if not valid_user_key(user_key):
             raise InvalidInput(
                 "Identifiant utilisateur invalide (caractères autorisés : A-Z a-z 0-9 @ . _ - +)."
@@ -326,6 +346,28 @@ class AdminService:
             raise
         await self.audit.record(event)
         return user_key
+
+    async def _enroll_by_email(self, actor: AdminUser, display_name: str, email: str, cid: str) -> str:
+        key = email.lower()
+        if not _EMAIL.fullmatch(email) or len(email) > 256 or not valid_user_key(key):
+            raise InvalidInput("Adresse e-mail invalide (caractères autorisés : A-Z a-z 0-9 @ . _ - +).")
+        if len(display_name) > 200 or "\x00" in display_name:
+            raise InvalidInput("Nom invalide (200 caractères au plus).")
+        event = AuditEvent.of(
+            "user_enrolled", "success", actor, target_user=key, correlation_id=cid, reason="email"
+        )
+        try:
+            await self.accounts.enrol_by_email(email, display_name or None, actor.user_key)
+        except EnrolmentRefused as e:
+            event.outcome, event.reason = "failure", "email_already_known"
+            await self.audit.record(event)
+            raise InvalidInput(str(e)) from None
+        except Exception:
+            event.outcome, event.reason = "failure", "registry_unavailable"
+            await self.audit.record(event)
+            raise
+        await self.audit.record(event)
+        return key
 
     async def provision(
         self,
